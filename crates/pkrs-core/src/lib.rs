@@ -1,11 +1,22 @@
 //! Shared engine types: ids, `Direction`, `GridPos`, `Ctx` traits, events, errors and the `GameRng` port.
 //!
-//! This crate is currently a skeleton; see `docs/design.md` §4.3 for its role
-//! and dependency boundaries.
+//! See `docs/design.md` §4.2–§4.3 and §4.5 for crate boundaries.
 
+mod ctx;
+mod direction;
 mod error;
+mod events;
+mod grid;
+mod id;
+mod rng;
 
+pub use ctx::{EventSink, RngAccess};
+pub use direction::Direction;
 pub use error::{CoreError, Result};
+pub use events::{EngineEvent, EventPayload, EventQueue};
+pub use grid::GridPos;
+pub use id::{IdInterner, IdKind, MoveKind, SpeciesKind, TypedId, validate_id};
+pub use rng::{GameRng, Pcg64Rng, RngState};
 
 #[cfg(test)]
 mod tests {

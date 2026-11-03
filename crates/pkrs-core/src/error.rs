@@ -12,4 +12,12 @@ pub enum CoreError {
     /// An identifier string did not satisfy the id rules.
     #[error("invalid id `{0}`")]
     InvalidId(String),
+
+    /// A direction string in data did not parse.
+    #[error("invalid direction `{0}`")]
+    InvalidDirection(String),
+
+    /// The id interner ran out of handles.
+    #[error("id interner exhausted (too many unique ids)")]
+    IdInternerExhausted,
 }

@@ -36,14 +36,19 @@ pub fn compute_viewport(
         };
     }
 
-    let (scale, dest_w, dest_h) = match mode {
+    match mode {
         ViewportMode::Integer => {
             let scale_x = window_width / internal_width;
             let scale_y = window_height / internal_height;
-            let scale_u = scale_x.min(scale_y);
-            let dest_w = internal_width.saturating_mul(scale_u);
-            let dest_h = internal_height.saturating_mul(scale_u);
-            (scale_u as f32, dest_w as f32, dest_h as f32)
+            let scale_u = scale_x.min(scale_y).max(1);
+            let dest_w_u = internal_width.saturating_mul(scale_u);
+            let dest_h_u = internal_height.saturating_mul(scale_u);
+            let dest_x = ((window_width.saturating_sub(dest_w_u)) / 2) as f32;
+            let dest_y = ((window_height.saturating_sub(dest_h_u)) / 2) as f32;
+            ViewportLayout {
+                scale: scale_u as f32,
+                dest: Rect::new(dest_x, dest_y, dest_w_u as f32, dest_h_u as f32),
+            }
         }
         ViewportMode::Fit => {
             let scale_x = window_width as f32 / internal_width as f32;
@@ -51,16 +56,13 @@ pub fn compute_viewport(
             let scale = scale_x.min(scale_y);
             let dest_w = internal_width as f32 * scale;
             let dest_h = internal_height as f32 * scale;
-            (scale, dest_w, dest_h)
+            let dest_x = ((window_width as f32 - dest_w) / 2.0).floor();
+            let dest_y = ((window_height as f32 - dest_h) / 2.0).floor();
+            ViewportLayout {
+                scale,
+                dest: Rect::new(dest_x, dest_y, dest_w, dest_h),
+            }
         }
-    };
-
-    let dest_x = (window_width as f32 - dest_w) / 2.0;
-    let dest_y = (window_height as f32 - dest_h) / 2.0;
-
-    ViewportLayout {
-        scale,
-        dest: Rect::new(dest_x, dest_y, dest_w, dest_h),
     }
 }
 
@@ -79,8 +81,18 @@ mod tests {
     fn integer_scale_centers_on_odd_window() {
         let v = compute_viewport(240, 160, 241, 161, ViewportMode::Integer);
         assert_eq!(v.scale, 1.0);
-        assert_eq!(v.dest.x, 0.5);
-        assert_eq!(v.dest.y, 0.5);
+        assert_eq!(v.dest.x, 0.0);
+        assert_eq!(v.dest.y, 0.0);
+        assert_eq!(v.dest.width, 240.0);
+        assert_eq!(v.dest.height, 160.0);
+    }
+
+    #[test]
+    fn integer_scale_when_window_smaller_than_internal() {
+        let v = compute_viewport(240, 160, 200, 150, ViewportMode::Integer);
+        assert_eq!(v.scale, 1.0);
+        assert_eq!(v.dest.x, 0.0);
+        assert_eq!(v.dest.y, 0.0);
         assert_eq!(v.dest.width, 240.0);
         assert_eq!(v.dest.height, 160.0);
     }
@@ -101,6 +113,7 @@ mod tests {
             (480_u32, 320_u32, 2.0),
             (240_u32, 160_u32, 1.0),
             (800_u32, 600_u32, 3.0),
+            (200_u32, 150_u32, 1.0),
         ] {
             let v = compute_viewport(internal.0, internal.1, win_w, win_h, ViewportMode::Integer);
             assert_eq!(v.scale, expect_scale, "window {win_w}x{win_h}");

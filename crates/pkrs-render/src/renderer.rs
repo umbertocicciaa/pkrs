@@ -3,7 +3,6 @@
 use pkrs_platform::DisplaySettings;
 
 use crate::backend::RenderBackend;
-use crate::camera::Camera;
 use crate::color::Color;
 use crate::draw::SpriteDraw;
 use crate::viewport::{ViewportLayout, ViewportMode, compute_viewport};
@@ -34,7 +33,6 @@ pub struct Renderer {
     backend: Box<dyn RenderBackend>,
     display: DisplaySettings,
     config: RendererConfig,
-    camera: Camera,
     pending: Vec<SpriteDraw>,
 }
 
@@ -49,7 +47,6 @@ impl Renderer {
             backend,
             display,
             config,
-            camera: Camera::default(),
             pending: Vec::new(),
         }
     }
@@ -62,16 +59,6 @@ impl Renderer {
     /// Facade configuration (letterbox, scale mode, …).
     pub fn config(&self) -> &RendererConfig {
         &self.config
-    }
-
-    /// The active camera (interpolated); use [`Camera::snapped`] when drawing.
-    pub fn camera(&self) -> &Camera {
-        &self.camera
-    }
-
-    /// Replaces the camera (e.g. after simulation step + interpolation).
-    pub fn set_camera(&mut self, camera: Camera) {
-        self.camera = camera;
     }
 
     /// Computes viewport layout for the current window size.
@@ -90,12 +77,7 @@ impl Renderer {
         self.backend
             .resize_internal(self.display.width, self.display.height);
         let viewport = self.viewport_for_window(window_width, window_height);
-        self.backend.begin_frame(
-            window_width,
-            window_height,
-            &viewport,
-            self.config.letterbox,
-        );
+        self.backend.begin_frame(&viewport, self.config.letterbox);
         self.backend.clear_internal(self.config.clear);
         self.pending.clear();
     }

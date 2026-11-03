@@ -33,7 +33,6 @@ pub struct MacroquadRenderer {
     textures: HashMap<u32, Texture2D>,
     next_id: u32,
     viewport: ViewportLayout,
-    letterbox: Color,
 }
 
 impl Default for MacroquadRenderer {
@@ -54,7 +53,6 @@ impl MacroquadRenderer {
                 scale: 1.0,
                 dest: crate::rect::Rect::new(0.0, 0.0, 0.0, 0.0),
             },
-            letterbox: Color::BLACK,
         }
     }
 
@@ -85,16 +83,8 @@ impl RenderBackend for MacroquadRenderer {
         }
     }
 
-    fn begin_frame(
-        &mut self,
-        window_width: u32,
-        window_height: u32,
-        viewport: &ViewportLayout,
-        letterbox: Color,
-    ) {
+    fn begin_frame(&mut self, viewport: &ViewportLayout, letterbox: Color) {
         self.viewport = *viewport;
-        self.letterbox = letterbox;
-        let _ = (window_width, window_height);
         set_default_camera();
         ::macroquad::prelude::clear_background(to_mq(letterbox));
     }
@@ -106,7 +96,6 @@ impl RenderBackend for MacroquadRenderer {
         let (w, h) = self.internal_size;
         set_camera(&Self::internal_camera(w, h, target));
         ::macroquad::prelude::clear_background(to_mq(color));
-        set_default_camera();
     }
 
     fn create_texture(&mut self, width: u32, height: u32, rgba: &[u8]) -> Result<TextureHandle> {
@@ -127,20 +116,18 @@ impl RenderBackend for MacroquadRenderer {
         let texture = Texture2D::from_rgba8(width_u16, height_u16, rgba);
         texture.set_filter(FilterMode::Nearest);
         let id = self.next_id;
-        self.next_id = self.next_id.saturating_add(1).max(1);
+        self.next_id = self
+            .next_id
+            .checked_add(1)
+            .ok_or_else(|| RenderError::Backend("texture handle id overflow".into()))?;
         self.textures.insert(id, texture);
         Ok(TextureHandle(id))
     }
 
     fn draw_sprite(&mut self, draw: &SpriteDraw) {
-        let Some(target) = self.internal.clone() else {
-            return;
-        };
         let Some(texture) = self.textures.get(&draw.texture.0) else {
             return;
         };
-        let (w, h) = self.internal_size;
-        set_camera(&Self::internal_camera(w, h, target));
         draw_texture_ex(
             texture,
             draw.dst.x,
@@ -158,7 +145,6 @@ impl RenderBackend for MacroquadRenderer {
                 ..Default::default()
             },
         );
-        set_default_camera();
     }
 
     fn end_frame(&mut self) {

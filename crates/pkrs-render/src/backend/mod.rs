@@ -23,14 +23,8 @@ pub trait RenderBackend {
     /// (Re)allocates the internal render target to `width` × `height`.
     fn resize_internal(&mut self, width: u32, height: u32);
 
-    /// Starts a frame: letterbox clear + bind internal target.
-    fn begin_frame(
-        &mut self,
-        window_width: u32,
-        window_height: u32,
-        viewport: &ViewportLayout,
-        letterbox: Color,
-    );
+    /// Starts a frame: letterbox clear using `viewport.dest` for the eventual blit.
+    fn begin_frame(&mut self, viewport: &ViewportLayout, letterbox: Color);
 
     /// Clears the internal target (game background).
     fn clear_internal(&mut self, color: Color);

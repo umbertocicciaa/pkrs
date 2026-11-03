@@ -7,7 +7,7 @@ pub enum Layer {
     Ground,
     /// Secondary ground decoration.
     GroundDecor,
-    /// Sprites sorted by Y within this band.
+    /// World sprites (Y order is the caller's responsibility; see §5.2).
     Entities,
     /// Overhead tiles (tree tops, roofs).
     Overhead,

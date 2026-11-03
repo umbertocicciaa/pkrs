@@ -46,6 +46,7 @@ pub struct NullRenderer {
     log: DrawLog,
     internal: (u32, u32),
     last_viewport: ViewportLayout,
+    next_texture_id: u32,
 }
 
 impl Default for NullRenderer {
@@ -64,6 +65,7 @@ impl NullRenderer {
                 scale: 1.0,
                 dest: crate::rect::Rect::new(0.0, 0.0, 240.0, 160.0),
             },
+            next_texture_id: 1,
         }
     }
 
@@ -78,20 +80,16 @@ impl RenderBackend for NullRenderer {
         self.internal = (width, height);
     }
 
-    fn begin_frame(
-        &mut self,
-        _window_width: u32,
-        _window_height: u32,
-        viewport: &ViewportLayout,
-        _letterbox: Color,
-    ) {
+    fn begin_frame(&mut self, viewport: &ViewportLayout, _letterbox: Color) {
         self.last_viewport = *viewport;
     }
 
     fn clear_internal(&mut self, _color: Color) {}
 
     fn create_texture(&mut self, _width: u32, _height: u32, _rgba: &[u8]) -> Result<TextureHandle> {
-        Ok(TextureHandle(1))
+        let id = self.next_texture_id;
+        self.next_texture_id = self.next_texture_id.saturating_add(1).max(1);
+        Ok(TextureHandle(id))
     }
 
     fn draw_sprite(&mut self, draw: &SpriteDraw) {

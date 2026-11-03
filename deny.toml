@@ -14,7 +14,12 @@ feature-depth = 1
 # Fail on any RUSTSEC vulnerability; unmaintained / unsound / yanked are reported too.
 version = 2
 yanked = "deny"
-ignore = []
+# Accepted advisories in vendor crates chosen by docs/design.md. Each entry needs a
+# reason and is revisited when the vendor ships a fix (or we swap the adapter, §4.5 Rule 5).
+ignore = [
+    { id = "RUSTSEC-2025-0035", reason = "macroquad soundness issues, no fixed release; macroquad is the v1 backend (§0.2) and is confined to the pkrs-platform/pkrs-render adapters" },
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser unmaintained (via macroquad -> fontdue), no alternative release; only parses fonts shipped with the game" },
+]
 
 # --- Licenses ----------------------------------------------------------------
 [licenses]
@@ -35,6 +40,11 @@ allow = [
     "BSL-1.0",
 ]
 unused-allowed-license = "allow"
+# Per-crate exceptions for licenses outside the allowlist.
+exceptions = [
+    # Weak, file-level copyleft; pulled in by `directories` (§14.3) via dirs-sys. Unmodified use.
+    { allow = ["MPL-2.0"], crate = "option-ext" },
+]
 
 [licenses.private]
 # Workspace crates are `publish = false` and carry no license field yet.

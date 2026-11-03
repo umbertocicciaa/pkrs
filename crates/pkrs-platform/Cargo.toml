@@ -7,9 +7,18 @@ rust-version.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+default = ["macroquad", "directories"]
+# `MacroquadPlatform` adapter (window, main loop, keyboard, focus) — §4.5.
+macroquad = ["dep:macroquad"]
+# `DirectoriesPaths` adapter (per-OS user dirs keyed on `game.id`) — §14.3.
+directories = ["dep:directories"]
+
 [dependencies]
 pkrs-core.workspace = true
 thiserror.workspace = true
+macroquad = { workspace = true, optional = true }
+directories = { workspace = true, optional = true }
 
 [lints]
 workspace = true

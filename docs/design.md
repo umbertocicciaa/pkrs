@@ -1075,7 +1075,7 @@ Each milestone is shippable and becomes **one issue**:
 
 | Role | Name | Decision | Date |
 |---|---|---|---|
-| Co-author | @arcangelochine | Review feedback incorporated | — |
+| Co-author | Arcangelo Chinè (@arcangelochine) | **ACK — approved for implementation** | 2026-11-03 |
 | Owner / final reviewer | Umberto Domenico Ciccia (@umbertocicciaa) | **ACK — approved for implementation** | 2026-11-03 |
 
 Final-review changes applied before sign-off:

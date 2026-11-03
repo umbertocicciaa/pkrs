@@ -1,6 +1,6 @@
 # pkrs — Engine Design Document (MVP v1)
 
-> Status: **Draft for review** · Tracks issue [#1](https://github.com/umbertocicciaa/pkrs/issues/1)
+> Status: **Approved** (see [Review & sign-off](#review--sign-off)) · Tracks issue [#1](https://github.com/umbertocicciaa/pkrs/issues/1)
 >
 > This document settles the architecture of `pkrs` before code is written. Each section is meant
 > to be cut directly into implementation issues (see [§16 Roadmap](#16-roadmap--milestones)).
@@ -11,6 +11,7 @@
 |---|---|
 | Base stack | **macroquad** (window, loop, 2D rendering) + **kira** (audio) + **gilrs** (gamepad) |
 | Architecture | **Game state stack + plain structs** (no ECS) |
+| External dependencies | **Ports & Adapters + Facade**: every third-party runtime crate sits behind an engine-owned trait (port), implemented by an adapter, and exposed to game code through a subsystem facade (see [§4.5](#45-external-dependency-isolation-ports-adapters--facades)) |
 | Workspace | **Multiple focused crates** (see [§4.3](#43-crate-layout)) |
 | Data format | **RON** via `serde` |
 | Maps | **Tiled** (`.tmx`) via the `tiled` crate |
@@ -53,10 +54,10 @@ Supplements:
 
 ### 0.3 What we'd lose by switching later
 
-We wrap macroquad behind a **thin platform facade** inside `pkrs-render` and `pkrs-platform` (§4.3). Game code, Lua and battle logic never touch macroquad directly. A later move to wgpu/winit (e.g. for shaders, or multi-window tooling) would then cost:
-- Rewriting `pkrs-render` (sprite batch, render target, text) and the main loop in `pkrs-runtime`.
-- Rewriting the macroquad file I/O used by `pkrs-assets` (we already route it through our own VFS, so this is small).
-- **Not** the state stack, world, battle, scripting, data or save code.
+macroquad, like every other third-party runtime dependency, sits behind engine-owned **ports** (traits) implemented by **adapters** and exposed through subsystem **facades** (§4.5). Game code, Lua and battle logic never touch macroquad types. A later move to wgpu/winit (e.g. for shaders, or multi-window tooling) would then cost:
+- Writing new adapters for the `PlatformBackend` and `RenderBackend` ports (window, loop, sprite batch, render target, materials).
+- Writing a new file I/O adapter used by `pkrs-assets` (already routed through our own VFS, so this is small).
+- **Not** the facades, the state stack, world, battle, scripting, data or save code, nor the main loop in `pkrs-runtime`, which only talks to the `Platform` facade.
 
 Known macroquad limitations we accept for v1: a **global context** (single window, main-thread only). Shader flexibility is limited compared to raw wgpu, but macroquad's material system is enough for v1 custom tile/sprite effects; we wrap it behind our own material API so a backend swap does not rewrite game projects (§5.6).
 
@@ -99,7 +100,7 @@ flowchart LR
 - **Genre:** Gen 1–3 style creature-collecting RPGs (GBA-era feel), single-player.
 - **Platforms (required for v1):** Linux (x86_64), Windows (x86_64), macOS (x86_64 + arm64).
 - **Platforms (post-v1, planned):** Android (e.g. ARM64 handhelds). WASM and other targets are not planned for the first release.
-- **Game size:** the same engine handles everything from a **one-shot story** (one map, a handful of scenes, maybe no battles) to a **full fan game** (multiple regions, full dex, story, post-game).
+- **Game size:** the same engine handles everything from a **one-shot story** (one map, a handful of scenes, maybe no battles) to a **full fan game** (multiple regions, full creature roster, story, post-game).
 - Top-down tile overworld, grid movement, turn-based 1v1 battles (with doubles possible as a plugin later), menus, dialogue, data-driven content, Lua scripting and plugins, saves.
 
 ### 1.2 Non-goals for v1
@@ -109,10 +110,10 @@ flowchart LR
 - **In-engine data authoring** (visual editors for moves, abilities, species, …). Content stays in RON files for v1.
 - Mobile and console targets in v1 (Android is explicitly **post-v1**, not abandoned).
 - **Native-Rust plugins** in v1. Plugins ship as **Lua** only; Rust dynamic plugins are a later, optional path for advanced authors (§9.9).
-- Shipping any Nintendo/Game Freak/The Pokémon Company IP. See §1.3.
+- Shipping any third-party franchise IP (names, characters, sprites, music, data or trademarked mechanic names). See §1.3.
 
 ### 1.3 IP policy
-The engine is generic. The repo contains **no** Pokémon names, sprites, music or data. Engine terminology is neutral ("creature", "species", "move", "trainer"). Templates and demo projects use original or CC-licensed assets, with licenses recorded in each asset folder (`LICENSES.md`).
+The engine is generic. The repo contains **no** third-party franchise names, trademarks, sprites, music or data, and the docs do not name any commercial creature-collecting franchise. Engine terminology is neutral ("creature", "species", "move", "trainer"). Templates and demo projects use original or CC-licensed assets, with licenses recorded in each asset folder (`LICENSES.md`).
 
 ### 1.4 Long-term product direction (avoid technical debt)
 
@@ -236,7 +237,7 @@ Templates are embedded in the CLI binary with `include_dir`, so `pkrs new` works
 
 ### 3.1 Fixed timestep (*Fix Your Timestep*)
 
-macroquad drives the outer loop (`loop { …; next_frame().await }`). Inside it we run a fixed-step accumulator:
+The windowing backend (macroquad in v1) drives the outer loop, but `pkrs-runtime` only sees the `Platform` facade (§4.5). Inside it we run a fixed-step accumulator:
 
 ```rust
 const DT: f64 = 1.0 / 60.0;          // simulation tick (60 Hz, matches GBA-era timing)
@@ -244,10 +245,10 @@ const MAX_FRAME: f64 = 0.25;         // clamp: avoid the "spiral of death" after
 
 let mut acc = 0.0;
 loop {
-    let frame = get_frame_time().min(MAX_FRAME as f32) as f64;
+    let frame = platform.frame_time().min(MAX_FRAME);
     acc += frame;
 
-    input.poll();                    // keyboard + gilrs, once per rendered frame
+    input.poll(&mut platform);       // keyboard + gamepad adapters, once per rendered frame
     while acc >= DT {
         input.begin_tick();          // edge detection is per tick (pressed/released)
         game.update(DT, &mut ctx);   // state stack, scripts, world, battle
@@ -255,7 +256,7 @@ loop {
     }
     let alpha = acc / DT;            // interpolation factor
     game.render(alpha, &mut renderer);
-    next_frame().await;
+    platform.next_frame().await;
 }
 ```
 
@@ -275,7 +276,7 @@ Within a tick:
 3. State stack: `top.update(ctx)`. Lower states only receive `update_background` if they opt in (e.g. overworld water animation under a dialogue box).
 4. Deferred state transitions (push/pop/replace) are applied **after** the update, never mid-update.
 5. Event queue flush: engine events are dispatched to Lua listeners in emission order.
-6. Audio commands are issued to kira.
+6. Audio commands are flushed to the `AudioBackend` port (kira adapter in v1).
 
 The game RNG is a seeded `rand_pcg::Pcg64` stored in the save. Battles get their own sub-seed (§7.2).
 
@@ -285,7 +286,7 @@ The game RNG is a seeded `rand_pcg::Pcg64` stored in the save. Battles get their
 
 ### 4.1 State stack + plain structs (no ECS)
 
-**Justification:** a Pokémon-like game has a few dozen entities per map at most, its logic is overwhelmingly **modal** (overworld, battle, menu, dialogue), and battles are turn-based. ECS strengths (cache-friendly iteration over thousands of entities, parallel systems) don't pay off here, while ECS costs (indirection, borrow juggling, opaque data for Lua) do. Plain structs map 1:1 to Lua userdata and to save data.
+**Justification:** a creature-collecting RPG has a few dozen entities per map at most, its logic is overwhelmingly **modal** (overworld, battle, menu, dialogue), and battles are turn-based. ECS strengths (cache-friendly iteration over thousands of entities, parallel systems) don't pay off here, while ECS costs (indirection, borrow juggling, opaque data for Lua) do. Plain structs map 1:1 to Lua userdata and to save data.
 
 ```rust
 pub trait GameState {
@@ -324,7 +325,7 @@ stateDiagram-v2
 - **Lua-defined states:** plugins can register new UI screens as states (§9.5). They implement the same lifecycle through a Lua table.
 
 ### 4.2 Shared context
-`Ctx` is a struct of borrowed services handed to each state: `assets`, `audio`, `input`, `script`, `data` (immutable content database), `world_state` (flags, variables, party, bag: the save-relevant state), `rng`, `events` (queue). There are **no globals**, apart from the macroquad context, which stays hidden inside `pkrs-render` and `pkrs-platform`.
+`Ctx` is a struct of borrowed services handed to each state: `assets`, `audio`, `input`, `script`, `data` (immutable content database), `world_state` (flags, variables, party, bag: the save-relevant state), `rng`, `events` (queue). Each service is a **facade** (§4.5); none of them exposes a third-party type. There are **no globals**, apart from the macroquad context, which stays hidden inside the macroquad adapters of `pkrs-platform` and `pkrs-render`.
 
 ### 4.3 Crate layout
 
@@ -332,13 +333,13 @@ As decided, a multi-crate workspace. Each crate exists to enforce a **dependency
 
 ```
 crates/
-  pkrs-core       # shared types: ids, Direction, GridPos, Ctx traits, events, errors, RNG wrapper
-  pkrs-platform   # macroquad + gilrs facade: window, loop, raw input, file I/O → no other crate imports macroquad directly
-  pkrs-assets     # VFS (loose folder | .pak), handles, caching, hot-reload watcher
+  pkrs-core       # shared types: ids, Direction, GridPos, Ctx traits, events, errors, GameRng port
+  pkrs-platform   # Platform facade + ports (window, loop, keyboard, gamepad, file I/O, user paths); macroquad/gilrs/directories adapters
+  pkrs-assets     # Assets facade: VFS (loose folder | .pak), handles, caching; zip + notify adapters
   pkrs-data       # RON schemas (species, moves, items…), loading, validation, cross-ref checks
-  pkrs-render     # pixel-perfect render target, sprite batch, atlases, layers, camera, bitmap text
-  pkrs-audio      # kira wrapper: BGM/SFX, crossfades, ducking
-  pkrs-world      # Tiled loading, map model, collision, grid movement, warps, connections, NPCs
+  pkrs-render     # Renderer facade + RenderBackend port: render target, sprite batch, atlases, layers, camera, text, materials; macroquad adapter
+  pkrs-audio      # Audio facade + AudioBackend port: BGM/SFX, crossfades, ducking; kira adapter
+  pkrs-world      # map model, collision, grid movement, warps, connections, NPCs; MapImporter port + Tiled adapter
   pkrs-battle     # PURE battle logic: no macroquad, no mlua, no I/O; deterministic & unit-tested
   pkrs-script     # mlua runtime, sandbox, Lua API bindings, coroutine scheduler, plugin loader
   pkrs-save       # save model, versioning, migrations, atomic writes, per-OS paths
@@ -366,7 +367,7 @@ flowchart TD
 
 Key boundaries:
 - **`pkrs-battle` must not depend on macroquad, mlua or any I/O.** It exposes a `BattleHooks` trait, and `pkrs-script` implements that trait by calling Lua. Pure logic stays unit-testable and deterministic.
-- **Only `pkrs-platform` and `pkrs-render` import macroquad**, which keeps a future backend swap small (§0.3).
+- **Every third-party runtime crate is imported by exactly one owning crate**, and only inside its adapter module (§4.5). Only `pkrs-platform` and `pkrs-render` import macroquad, which keeps a future backend swap small (§0.3).
 - `pkrs-cli` reuses `pkrs-data`, `pkrs-world` and `pkrs-script` for `pkrs check` (it parses Lua without running the game).
 
 ### 4.4 Multiplayer-ready boundaries (future, not v1)
@@ -377,6 +378,66 @@ Multiplayer is not implemented in v1, but core crates are shaped so a later mile
 - **Client modes:** **host** (embedded listen server + local player) or **connect** to a remote server process. Games ship the client runtime only; server is an optional second binary produced by `pkrs build --server` (exact packaging TBD).
 - **Integrity & verification:** battles use a **deterministic event log** (`BattleEvent` stream + inputs + config hash). Two peers (or a spectator) can re-run the same seed and inputs to verify outcomes. Single-player uses a **local RNG policy**; networked battles use a **authoritative server RNG policy** (§7.2) so replays and anti-cheat rules are defined once.
 - **Save model:** overworld flags/variables and per-map event state remain in the save (§6.5); server authoritative state for battles is separate from the long-lived save file.
+
+### 4.5 External dependency isolation (Ports, Adapters & Facades)
+
+**Decided:** third-party crates are wrapped with the **Ports & Adapters** pattern (hexagonal architecture), combined with a **Facade** per subsystem. This is the standard way to keep an engine core independent of vendors: GoF *Adapter* converts a library's interface into the one the engine expects, GoF *Facade* gives game code a small, stable entry point over a whole subsystem, and the *port* (an engine-owned trait) is what makes adapters swappable and testable (*Dependency Inversion*).
+
+```mermaid
+flowchart LR
+  subgraph Game["Game code (states, world, battle, Lua bindings)"]
+    G[uses facades only]
+  end
+  subgraph Facades["Facades (stable engine API)"]
+    FP[Platform] & FR[Renderer] & FA[Audio] & FI[Input] & FS[Assets]
+  end
+  subgraph Ports["Ports (engine-owned traits)"]
+    P1[PlatformBackend] & P2[RenderBackend] & P3[AudioBackend] & P4[GamepadSource] & P5[Vfs / FileWatcher]
+  end
+  subgraph Adapters["Adapters (one module per vendor crate)"]
+    A1[MacroquadPlatform] & A2[MacroquadRenderer] & A3[KiraAudio] & A4[GilrsGamepad] & A5[ZipPak / NotifyWatcher]
+    N[Null* adapters for tests & --headless]
+  end
+  G --> Facades --> Ports
+  A1 -.implements.-> P1
+  A2 -.implements.-> P2
+  A3 -.implements.-> P3
+  A4 -.implements.-> P4
+  A5 -.implements.-> P5
+  N -.implements.-> Ports
+```
+
+**Roles:**
+- **Port** — a trait owned by pkrs, expressed in engine vocabulary only (`TextureId`, `SoundId`, `GridPos`, our error enums). It defines the *minimum* the engine needs from a backend, not a mirror of the vendor API.
+- **Adapter** — implements one port on top of one vendor crate (`MacroquadRenderer: RenderBackend`, `KiraAudio: AudioBackend`, …). It lives in a `backend/<vendor>.rs` module of the owning crate, behind a cargo feature, and is the **only** place that vendor's types appear. It converts vendor errors into the crate's `thiserror` enum.
+- **Facade** — the public, game-facing service (`Renderer`, `Audio`, `Input`, `Assets`, `Platform`) that holds a port implementation and adds engine policy on top: batching, layers and pixel-perfect scaling in `Renderer`; crossfades, ducking and the per-tick command queue in `Audio`; action mapping and buffering in `Input`. These facades are what `Ctx` hands to states (§4.2) and what the Lua API binds to (§9.1).
+- **Null adapters** — `NullRenderer`, `NullAudio`, `NullGamepad`, `MemoryVfs` implement the same ports, giving headless CI and unit tests for free (§15.2, §17 #8).
+
+**Dependency map (v1):**
+
+| Vendor crate | Port | Adapter | Facade seen by game code | Owning crate |
+|---|---|---|---|---|
+| `macroquad` (window, loop, keyboard, file I/O) | `PlatformBackend` | `MacroquadPlatform` | `Platform`, `Input` | `pkrs-platform` |
+| `macroquad` (GL, textures, materials) | `RenderBackend` | `MacroquadRenderer` | `Renderer` | `pkrs-render` |
+| `gilrs` | `GamepadSource` | `GilrsGamepad` | `Input` | `pkrs-platform` |
+| `directories` | `UserPaths` | `DirectoriesPaths` | `Platform::paths()` | `pkrs-platform` |
+| `kira` | `AudioBackend` | `KiraAudio` | `Audio` | `pkrs-audio` |
+| `zip` | `Vfs` | `PakVfs` (and `FolderVfs`) | `Assets` | `pkrs-assets` |
+| `notify` | `FileWatcher` | `NotifyWatcher` | `Assets` hot reload | `pkrs-assets` |
+| `tiled` | `MapImporter` | `TiledImporter` | `pkrs-world::Map` model | `pkrs-world` |
+| `mlua` | `BattleHooks` (from `pkrs-battle`) + `ScriptHost` | `LuaScriptHost`, `LuaBattleHooks` | `ScriptHost` | `pkrs-script` |
+| `rand_pcg` | `GameRng` | `Pcg64Rng` | `ctx.rng` | `pkrs-core` |
+| `ron` | codec functions in `pkrs-data` / `pkrs-save` | `RonCodec` | typed structs, `pkrs_save::Value` | `pkrs-data`, `pkrs-save` |
+| `texture_packer` | `AtlasPacker` | `TexturePackerAdapter` | `pkrs build` pipeline | `pkrs-cli` |
+
+**Not wrapped (allowed directly), and why:** `serde` (derive framework; it *is* the abstraction), `thiserror` (compile-time only), `tracing` (already a logging facade), `anyhow`, `miette`, `include_dir` (binaries only, never in library APIs), `insta` (dev-only). Adding a new crate to this list requires a note in this section.
+
+**Rules:**
+1. **No vendor type in any public signature** of a pkrs library crate. Facades and ports use engine types only.
+2. **One owning crate per vendor crate**, enforced in CI with `cargo deny` `[bans]` using `wrappers = [...]` (e.g. `macroquad` may only be a dependency of `pkrs-platform` and `pkrs-render`).
+3. **Ports are minimal and engine-shaped.** Grow them when a feature needs it; never expose a vendor feature "just in case".
+4. **One backend per build**, selected by cargo feature. Facades store the port as `Box<dyn Port>`: call counts are low (hundreds per frame, sprite draws are batched inside the adapter), so dynamic dispatch is acceptable; revisit with profiling, not upfront.
+5. **Swapping a vendor = writing an adapter.** No change to facades, game code, Lua API or project files.
 
 ---
 
@@ -391,7 +452,7 @@ Multiplayer is not implemented in v1, but core crates are shaped so a later mile
 ### 5.2 Sprites, atlases, batching
 - macroquad already batches draw calls that share a texture. We maximize this by packing sprites into **texture atlases**:
   - Dev (`pkrs run`): images are loaded individually. Simple, and supports hot reload.
-  - Release (`pkrs build`): the packer builds atlases per category (characters, tilesets, UI) with `texture_packer` and stores rects in the `.pak` index.
+  - Release (`pkrs build`): the packer builds atlases per category (characters, tilesets, UI) through the `AtlasPacker` port (`texture_packer` adapter, §4.5) and stores rects in the `.pak` index.
 - **Layers** (draw order): `Ground → GroundDecor → Entities (y-sorted) → Overhead → Weather/FX → UI → Transition`.
 - **Y-sorting:** entities in the `Entities` layer are sorted by their feet Y (tile row, then sub-pixel offset), then by a stable id to avoid flicker.
 
@@ -418,14 +479,14 @@ Authors need effects that plain blitting cannot express: **animated tiles** (e.g
 - **Material descriptor (RON)** on a tileset, layer, or sprite: `shader`, `uniforms` (scalars, colours, time-driven flags), optional `atlas_region` for multi-tile animations.
 - **Uniforms:** engine provides `time_ticks`, `map_origin`, and plugin-registered globals (e.g. day-night phase from a plugin). No arbitrary GPU code from Lua in v1; Lua sets parameters, Rust/materials apply them.
 - **API surface:** `render.set_global_uniform(name, value)` from Rust hooks; plugins use Lua wrappers. Custom shaders must declare a **capability profile** (max uniforms, texture slots) so `pkrs check` can reject unsupported combinations.
-- **Backend note:** implemented with macroquad materials in v1; kept behind `pkrs-render::Material` so a wgpu backend later reuses the same descriptors.
+- **Backend note:** implemented by the `MacroquadRenderer` adapter using macroquad materials in v1; exposed only as `pkrs-render::Material` through the `RenderBackend` port (§4.5), so a wgpu adapter later reuses the same descriptors.
 
 ---
 
 ## 6. World & maps
 
 ### 6.1 Tiled as the map editor (v1)
-- Maps are authored in **Tiled** and loaded with the `tiled` crate (`.tmx` + `.tsx`). No in-engine editor in v1; formats and layer conventions are stable so a future pkrs map editor can read/write the same files (§1.4).
+- Maps are authored in **Tiled** and loaded by the `TiledImporter` adapter (built on the `tiled` crate) into the engine's own map model through the `MapImporter` port (§4.5) (`.tmx` + `.tsx`). No in-engine editor in v1; formats and layer conventions are stable so a future pkrs map editor can read/write the same files (§1.4).
 - `pkrs check` validates engine conventions (required layers, property types).
 - `.tmj` (JSON) support depends on the `tiled` crate version. See §17.
 
@@ -444,7 +505,7 @@ Object properties reference scripts by name: an `npc` with `script = "maps/route
 
 ### 6.3 Grid movement
 - The player and NPCs occupy one tile. A step takes **16 ticks walking** and **8 ticks running** (configurable per project), with position interpolated over the step.
-- **Facing:** tapping a direction turns the player without moving (a tap shorter than N ticks only turns), as in the originals.
+- **Facing:** tapping a direction turns the player without moving (a tap shorter than N ticks only turns), as in classic GBA-era RPGs.
 - **Rules evaluated before a step:** bounds/connection → collision (tile + directional) → entity occupancy → terrain rule:
   - `ledge_<dir>`: can only be crossed in that direction, playing a hop animation over 2 tiles.
   - `water`: requires the `surf` field state (granted by a field action, see §9.5).
@@ -454,7 +515,7 @@ Object properties reference scripts by name: an `npc` with `script = "maps/route
 
 ### 6.4 Transitions & connections
 - **Warps:** `warp` objects specify `to_map`, `to_x`, `to_y` and optional `facing`/`transition` (`fade`, `none`, `door`). Entering one pushes a `Transition` state, swaps the map, then pops.
-- **Seamless connections:** `maps/world.ron` (or Tiled's `.world` file) declares `north/south/east/west` neighbours with an offset. The renderer draws the neighbour's edge strip, and walking past the edge swaps the active map without a fade, as in the originals.
+- **Seamless connections:** `maps/world.ron` (or Tiled's `.world` file) declares `north/south/east/west` neighbours with an offset. The renderer draws the neighbour's edge strip, and walking past the edge swaps the active map without a fade, as in classic GBA-era RPGs.
 - On map change: the old map's Lua event handlers are unloaded, the new map's script is loaded, and BGM crossfades if the track differs (§11).
 
 ### 6.5 Save-aware events & persistent map state
@@ -475,7 +536,7 @@ Story progression must survive saves: if the player already triggered an event, 
 
 ### 7.1 Turn state machine & phases
 
-The high-level loop matches classic turn-based RPGs. Internally, each turn is split into **phases** (similar in spirit to [Pokémon Showdown](https://github.com/smogon/pokemon-showdown)'s event ordering): hooks fire at phase boundaries so gimmicks (Mega Evolution, Terastal, Z-Moves, custom per-turn forms) slot in without new core code for each mechanic.
+The high-level loop matches classic turn-based RPGs. Internally, each turn is split into **phases** (similar in spirit to the event ordering used by open-source competitive battle simulators): hooks fire at phase boundaries so gimmicks (once-per-battle transformations, type-shifting mechanics, one-shot signature moves, custom per-turn forms) slot in without new core code for each mechanic.
 
 ```mermaid
 stateDiagram-v2
@@ -568,7 +629,7 @@ pub trait BattleHooks {
 | `on_faint(ctx, creature)` | — | — |
 | `on_end_of_turn(ctx)` | — | — |
 | `on_battle_end(ctx, result)` | Rewards (exp, money) | — |
-| `on_action_menu(ctx, side, options)` | Fight menu entries (Z-Move, Terastal, …) | — |
+| `on_action_menu(ctx, side, options)` | Fight menu entries (transformations, signature moves, …) | — |
 | `on_custom_action(ctx, id, payload)` | Executes custom actions | — |
 
 Full Rust docs for `BattleHooks`, contexts and payload types are generated into `docs/rust-api/` alongside `docs/lua-api/`.
@@ -733,7 +794,7 @@ conflicts   = ["overdrive"]
 **Registration model:** `init.lua` returns, or calls into, a registration API. Plugins can:
 - Subscribe to **battle hooks** (§7.4) and **world events** (§9.2) with a priority.
 - Register **content**: moves, abilities, items, statuses, terrains, data effect primitives.
-- Register **field actions** (e.g. "cut", "surf", "rock smash" equivalents) usable from the party menu or by facing a tile.
+- Register **field actions** (e.g. clearing an obstacle, crossing water, breaking a rock) usable from the party menu or by facing a tile.
 - Register **battle actions** (new entries in the fight menu) via `on_action_menu`/`on_custom_action`.
 - Register **UI screens** (Lua-defined states, see §9.5).
 - Store **plugin save data** in a namespaced table (`plugin.save.<key>`) that's persisted with the save.
@@ -853,7 +914,7 @@ Lua remains the default plugin surface (fast iteration, accessible to non-Rust a
 ## 10. Input
 
 - **Action layer:** the game reads actions, never keys: `Up, Down, Left, Right, Confirm, Cancel, Menu, Run, Select` plus plugin-registered actions (`input.register_action("resonance:toggle", default_keys)`).
-- **Devices:** keyboard via macroquad, gamepad via **gilrs** (standard mapping; the first connected pad by default). Both feed the same action state.
+- **Devices:** keyboard via the `MacroquadPlatform` adapter, gamepad via the `GilrsGamepad` adapter (standard mapping; the first connected pad by default). Both feed the same action state in the `Input` facade (§4.5).
 - **Rebinding:** bindings are stored in the per-user config file (§14.3), not in the save. A built-in "Controls" options screen and defaults come from `pkrs.toml [input]`.
 - **Per action and tick:** `down`, `pressed` (edge), `released`, `held_ticks`. Pressed edges are computed per **simulation tick**, so no press is lost or double-counted when multiple ticks run in one frame.
 - **Buffered input:**
@@ -863,7 +924,9 @@ Lua remains the default plugin surface (fast iteration, accessible to non-Rust a
 
 ---
 
-## 11. Audio (kira)
+## 11. Audio
+
+All behaviour below lives in the `Audio` facade; the `KiraAudio` adapter implements the `AudioBackend` port (§4.5).
 
 - **BGM:** OGG streaming, with **loop points** supported via metadata in the audio manifest (`assets/audio/bgm/index.ron`: `loop_start`, `loop_end` in samples), because many tracks have intros.
 - **Crossfade on map change** when the BGM id differs (default 30 ticks). Same id: keep playing.
@@ -877,22 +940,23 @@ Lua remains the default plugin surface (fast iteration, accessible to non-Rust a
 
 ## 12. Save system
 
-- **Model:** `SaveData { header: SaveHeader, world: WorldState, plugins: BTreeMap<PluginId, ron::Value> }`.
+- **Model:** `SaveData { header: SaveHeader, world: WorldState, plugins: BTreeMap<PluginId, pkrs_save::Value> }` (`Value` is our own dynamic value type; `ron` is used only inside the codec, §4.5).
   - `SaveHeader { format_version: u32, engine_version, game_id, game_version, timestamp, play_time_ticks, summary (player name, location, badges/progress count for the slot screen) }`.
   - `WorldState`: flags, variables, party, PC boxes, bag, money, current map + position + facing, RNG state, **per-map persistent state** (§6.5), NPC persistent state (moved/hidden), visited maps, options that belong to the save.
 - **Format (decided): RON**, pretty-printed. Human-readable and debuggable. Player editing is accepted for fan games.
-- **Versioning & migrations:** `format_version` is the engine's save schema version. Migrations are Rust functions `fn(ron::Value) -> Result<ron::Value>` registered per version step (`v1 → v2 → v3`). They run in sequence on load, before typed deserialization. **Game-level migrations:** a game may provide `scripts/migrate.lua` with `migrate(save, from_game_version)`, which runs after engine migrations for flag and variable renames.
+- **Versioning & migrations:** `format_version` is the engine's save schema version. Migrations are Rust functions `fn(Value) -> Result<Value, SaveError>` registered per version step (`v1 → v2 → v3`). They run in sequence on load, before typed deserialization. **Game-level migrations:** a game may provide `scripts/migrate.lua` with `migrate(save, from_game_version)`, which runs after engine migrations for flag and variable renames.
 - **Slots:** a configurable number of slots (default 3) plus an optional autosave slot. The slot screen reads only the headers.
 - **Corruption safety:** write to `slot1.sav.tmp`, `fsync`, rename over `slot1.sav` (atomic on all three OSes; on Windows via `MoveFileEx` with replace, which `std::fs::rename` uses). Keep the previous good save as `slot1.sav.bak`. On a load failure, offer the backup.
-- **Location:** per-OS data directory via `directories::ProjectDirs` from `game.id` (§14.3). `pkrs run` uses `<project>/saves/` instead to keep dev saves separate.
+- **Location:** per-OS data directory from the `UserPaths` port (`directories` adapter) keyed on `game.id` (§14.3). `pkrs run` uses `<project>/saves/` instead to keep dev saves separate.
 
 ---
 
 ## 13. Assets & resource management
 
-- **VFS (`pkrs-assets`):** one trait, `Vfs { read(path) -> Bytes, exists, list(dir) }`, with two backends:
+- **VFS (`pkrs-assets`):** one port, `Vfs { read(path) -> Bytes, exists, list(dir) }`, with three adapters (§4.5):
   - `FolderVfs`: loose project files, used by `pkrs run`.
-  - `PakVfs`: the `.pak` archive, used in release builds.
+  - `PakVfs`: the `.pak` archive (zip adapter), used in release builds.
+  - `MemoryVfs`: in-memory files for tests.
   - Plugin assets are mounted under `plugin_id:` prefixes.
 - **Handles:** typed `Handle<T>` (a `u32` index into a slot map with a generation) for textures, sounds, fonts, maps and animations. Data structs store handles, not paths, after resolution.
 - **Caching:** load on first request and keep it cached. Maps can declare preloads (tilesets, NPC sprites). Battle assets (creature sprites) load on battle start and are reference-counted for eviction on map change. Large games stay bounded by keeping only the current map, its neighbours and the party's assets resident.
@@ -950,7 +1014,7 @@ Lua remains the default plugin surface (fast iteration, accessible to non-Rust a
 - **`pkrs-battle` unit tests:** damage formula, type chart, status effects, turn order and the hook chain (with a mock `BattleHooks`). **Seeded replay tests:** a recorded `(seed, setup, inputs)` must produce the same `BattleEvent` stream (snapshot tests with `insta`).
 - **`pkrs-data`:** the template projects must pass validation, plus golden tests for error messages.
 - **`pkrs-script`:** sandbox tests (no `io`/`os`), error isolation (a throwing hook doesn't crash the battle), coroutine scheduler waits, plugin dependency resolution (cycles, conflicts, version mismatch).
-- **Headless state tests:** the runtime can run with a `NullRenderer`/`NullAudio` and **scripted input** (`tests/*.lua` with `press("confirm")`, `expect_state("Dialogue")`), to test transitions such as "talk to NPC → dialogue → choice → battle → back to overworld".
+- **Headless state tests:** the runtime can run with the `NullRenderer`/`NullAudio`/`NullGamepad` adapters (§4.5) and **scripted input** (`tests/*.lua` with `press("confirm")`, `expect_state("Dialogue")`), to test transitions such as "talk to NPC → dialogue → choice → battle → back to overworld".
 - **`pkrs-save`:** round-trip tests, migration tests from frozen fixture saves per format version, and an atomic write test (simulated crash leaves the old save intact).
 
 ### 15.3 CI gates
@@ -968,7 +1032,7 @@ Lua remains the default plugin surface (fast iteration, accessible to non-Rust a
 
 Each milestone is shippable and becomes **one issue**:
 
-1. **Skeleton & CI.** Workspace with the crates from §4.3 (empty where unused), macroquad window, fixed-step loop with interpolation, pixel-perfect 240×160 render target with integer scaling, one animated sprite on screen. CI green on Linux, Windows and macOS (fmt/clippy/test/build + smoke run).
+1. **Skeleton & CI.** Workspace with the crates from §4.3 (empty where unused), `Platform`/`Renderer` facades with their ports, macroquad and Null adapters, `cargo deny` wrapper bans (§4.5), window, fixed-step loop with interpolation, pixel-perfect 240×160 render target with integer scaling, one animated sprite on screen. CI green on Linux, Windows and macOS (fmt/clippy/test/build + smoke run).
 2. **Project model & overworld.** `pkrs new` (one-shot template), `pkrs run`, `pkrs.toml` parsing, folder VFS, Tiled map loading with the layer conventions, grid movement (facing, collisions, ledges), camera follow + clamp, warps.
 3. **Lua runtime & events.** mlua sandbox, coroutine scheduler, NPC interaction, dialogue box + bitmap text, choice menu, cutscene API (`say`, `move`, `wait`), state stack driven from scripts, flags and variables.
 4. **Battle core.** `pkrs-battle` logic (state machine, damage pipeline, types, statuses, AI, seeded RNG, hook trait) with full unit tests. Then the battle UI state that plays back `BattleEvent`s. Wild encounters.
@@ -990,7 +1054,7 @@ Each milestone is shippable and becomes **one issue**:
 | 5 | Number of crates vs. compile time and maintenance | Keep 13 / merge crates | **Keep the split**, merge if a crate stays under ~500 lines after M6 |
 | 6 | Double battles in core vs. as a plugin | Core from the start / default plugin | **Default plugin** (`plugins/doubles/`) on N-vs-N internal model (1v1 default config) |
 | 7 | Lua API level 1 freeze point | After M5 / after M8 | **After M8**: API is `0` (unstable) until the sample projects validate it |
-| 8 | macroquad global context & headless testing | Abstract the renderer behind a trait with `NullRenderer` | **NullRenderer + `--headless` planned** for CI (§15.2); spike during M1 — exact trait split still to be validated in code |
+| 8 | macroquad global context & headless testing | Abstract the renderer behind a trait with `NullRenderer` | **Resolved by §4.5:** `NullRenderer`/`NullAudio` are adapters of the `RenderBackend`/`AudioBackend` ports, used by `--headless` in CI (§15.2). The M1 spike validates the port surfaces in code |
 | 9 | Overriding built-in states (e.g. replacing the battle UI entirely from Lua) | Allow / forbid in v1 | **Forbid in v1**: plugins add screens and hook data; full override later |
 | 10 | Distribution of the CLI itself | `cargo install` only / prebuilt CLI binaries + an installer script | **Both**: prebuilt binaries are the primary path, since non-Rust users are the audience |
 
@@ -999,7 +1063,23 @@ Each milestone is shippable and becomes **one issue**:
 ## References
 - Glenn Fiedler, *Fix Your Timestep!*
 - Robert Nystrom, *Game Programming Patterns* (Game Loop, State, Component, Command, Event Queue, Service Locator)
+- Gamma, Helm, Johnson, Vlissides, *Design Patterns* (Adapter, Facade)
+- Alistair Cockburn, *Hexagonal Architecture* (Ports & Adapters)
 - Jason Gregory, *Game Engine Architecture*
 - [Are We Game Yet?](https://arewegameyet.rs)
-- pokered / pokeemerald disassemblies (structural reference only: map scripts, battle engine flow)
-- Crates: `macroquad`, `kira`, `gilrs`, `mlua`, `tiled`, `ron`, `serde`, `directories`, `notify`, `zip`, `texture_packer`, `rand_pcg`, `tracing`, `thiserror`, `anyhow`, `miette`, `insta`, `include_dir`
+- Crates: `macroquad`, `kira`, `gilrs`, `mlua`, `tiled`, `ron`, `serde`, `directories`, `notify`, `zip`, `texture_packer`, `rand_pcg`, `tracing`, `thiserror`, `anyhow`, `miette`, `insta`, `include_dir`, `cargo-deny`
+
+---
+
+## Review & sign-off
+
+| Role | Name | Decision | Date |
+|---|---|---|---|
+| Co-author | @arcangelochine | Review feedback incorporated | — |
+| Owner / final reviewer | Umberto Domenico Ciccia (@umbertocicciaa) | **ACK — approved for implementation** | 2026-11-03 |
+
+Final-review changes applied before sign-off:
+1. External dependencies isolated with **Ports & Adapters + Facade** (§4.5), with related updates in §0.3, §3.1, §3.3, §4.2, §4.3, §5.2, §5.6, §6.1, §10, §11, §12, §13, §15.2, §16, §17.
+2. Third-party franchise names and trademarked mechanic names removed from the text for licensing reasons (§1.1, §1.2, §1.3, §4.1, §6.3, §6.4, §7.1, §7.4, §9.4, References).
+
+Signed: *Umberto Domenico Ciccia*, 2026-11-03

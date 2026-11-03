@@ -97,7 +97,8 @@ impl<K: IdKind> IdInterner<K> {
                 _kind: PhantomData,
             });
         }
-        let index = u32::try_from(self.strings.len()).map_err(|_| CoreError::IdInternerExhausted)?;
+        let index =
+            u32::try_from(self.strings.len()).map_err(|_| CoreError::IdInternerExhausted)?;
         self.by_str.insert(raw.to_owned(), index);
         self.strings.push(raw.to_owned());
         Ok(TypedId {

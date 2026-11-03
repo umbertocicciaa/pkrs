@@ -32,6 +32,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde = { version = "1", features = ["derive"] }
 rand_core = "0.6"
 rand_pcg = "0.3"
+toml = { version = "1", default-features = false, features = ["parse", "serde", "std"] }
+semver = "1"
+serde_path_to_error = "0.1"
 
 # Wrapped vendor crates (§4.5): each may only be used by its owning crate
 # (enforced by deny.toml [bans] wrappers).

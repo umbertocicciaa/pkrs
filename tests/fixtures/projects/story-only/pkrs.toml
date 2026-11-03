@@ -1,0 +1,21 @@
+[game]
+name = "The Keeper's Letter"
+id   = "org.example.keepers-letter"
+
+[engine]
+version = "0.0"
+api     = 1
+
+[start]
+map      = "cottage"
+position = [2, 2]
+facing   = "up"
+script   = "scripts/intro.lua"
+
+[features]
+battles = false
+party   = false
+
+[locale]
+default   = "it"
+available = ["it", "en"]

@@ -9,6 +9,9 @@ const ROWS: &[(&str, &str, &str)] = &[
     ("pkrs-platform", "macroquad", "backend/macroquad.rs"),
     ("pkrs-platform", "directories", "backend/directories.rs"),
     ("pkrs-render", "macroquad", "backend/macroquad.rs"),
+    ("pkrs-core", "rand_pcg", "rng/adapter.rs"),
+    ("pkrs-core", "toml", "manifest/toml_codec.rs"),
+    ("pkrs-core", "semver", "version.rs"),
 ];
 
 fn workspace_root() -> PathBuf {

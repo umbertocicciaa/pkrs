@@ -1,0 +1,16 @@
+# Valid TOML that breaks several validation rules.
+[game]
+name = "Broken"
+id   = "not a reverse dns id"
+
+[engine]
+version = "whatever"
+api     = 0
+
+[display]
+scale = 0
+
+[start]
+map      = "Room"
+position = [1, 1]
+facing   = "north"

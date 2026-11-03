@@ -1,0 +1,12 @@
+# Smallest valid manifest: everything else takes its default (design §2.2).
+[game]
+name = "Minimal"
+id   = "com.example.minimal"
+
+[engine]
+version = "0.0"
+api     = 1
+
+[start]
+map      = "room"
+position = [3, 4]

@@ -24,6 +24,17 @@ impl Default for DisplaySettings {
     }
 }
 
+impl From<&pkrs_core::manifest::DisplayConfig> for DisplaySettings {
+    fn from(display: &pkrs_core::manifest::DisplayConfig) -> Self {
+        Self {
+            width: display.width,
+            height: display.height,
+            scale: display.scale,
+            fullscreen: display.fullscreen,
+        }
+    }
+}
+
 impl DisplaySettings {
     /// Window size in physical pixels for windowed mode: internal resolution × scale.
     pub fn window_size(&self) -> (u32, u32) {
@@ -81,6 +92,30 @@ mod tests {
             ..DisplaySettings::default()
         };
         assert_eq!(display.window_size(), (240, 160));
+    }
+
+    #[test]
+    fn manifest_display_defaults_match() {
+        let manifest = pkrs_core::manifest::DisplayConfig::default();
+        assert_eq!(DisplaySettings::from(&manifest), DisplaySettings::default());
+    }
+
+    #[test]
+    fn manifest_display_is_copied() {
+        let src = "[game]\nname = \"t\"\nid = \"t\"\n[engine]\nversion = \"0.0\"\napi = 1\n\
+                   [display]\nwidth = 320\nheight = 180\nscale = 2\nfullscreen = true\n\
+                   [start]\nmap = \"m\"\nposition = [0, 0]\n";
+        let manifest = pkrs_core::ProjectManifest::from_toml_str(src).expect("valid");
+        let display = DisplaySettings::from(&manifest.display);
+        assert_eq!(
+            display,
+            DisplaySettings {
+                width: 320,
+                height: 180,
+                scale: 2,
+                fullscreen: true
+            }
+        );
     }
 
     #[test]

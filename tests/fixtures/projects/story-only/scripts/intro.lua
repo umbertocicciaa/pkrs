@@ -1,0 +1,1 @@
+-- One-shot story entry point (placeholder until the Lua runtime lands, M3).

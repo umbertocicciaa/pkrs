@@ -1,0 +1,43 @@
+[game]
+name    = "Lighthouse Tale"
+id      = "com.example.lighthouse"
+version = "0.1.0"
+authors = ["Jane Doe"]
+
+[engine]
+version = "0.3"
+api     = 1
+
+[display]
+width      = 240
+height     = 160
+scale      = 3
+fullscreen = false
+
+[start]
+map      = "lighthouse_1f"
+position = [5, 7]
+facing   = "down"
+script   = "scripts/main.lua"
+
+[features]
+battles = true
+party   = true
+
+[plugins]
+enabled = ["resonance", "day-night"]
+
+[locale]
+default   = "en"
+available = ["en", "it"]
+
+[input]
+up      = ["up", "w"]
+down    = ["down", "s"]
+left    = ["left", "a"]
+right   = ["right", "d"]
+confirm = ["z", "enter"]
+cancel  = ["x", "backspace"]
+menu    = ["escape"]
+run     = ["left_shift"]
+"resonance:toggle" = ["r"]

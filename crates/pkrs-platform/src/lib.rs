@@ -9,6 +9,11 @@
 //!   (feature `directories`), and the vendor-free [`NullPlatform`] / [`FixedPaths`]
 //!   for tests and headless runs.
 //!
+//! **File I/O** here ([`Platform::read_file`] / [`Platform::write_file`]) is for per-user
+//! files on real filesystem paths (saves, config, logs under [`UserPaths`]). It is **not**
+//! the assets VFS: game content is read through `pkrs-assets` (`Vfs`: loose folder or
+//! `.pak`, §13).
+//!
 //! No vendor type appears in any public signature. Gamepad support (`GilrsGamepad`)
 //! and action mapping (the `Input` facade) come later.
 

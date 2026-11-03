@@ -164,11 +164,19 @@ impl Platform {
     }
 
     /// Reads a whole file through the backend.
+    ///
+    /// For user files on real filesystem paths
+    /// (saves, config, logs under [`UserPaths`](crate::UserPaths)). Not the assets VFS: game
+    /// content goes through `pkrs-assets` (§13).
     pub fn read_file(&self, path: &Path) -> Result<Vec<u8>> {
         self.backend.read_file(path)
     }
 
-    /// Writes a whole file through the backend.
+    /// Writes a whole file through the backend (no atomic replace; `pkrs-save` adds that).
+    ///
+    /// For user files on real filesystem paths
+    /// (saves, config, logs under [`UserPaths`](crate::UserPaths)). Not the assets VFS: game
+    /// content goes through `pkrs-assets` (§13).
     pub fn write_file(&mut self, path: &Path, bytes: &[u8]) -> Result<()> {
         self.backend.write_file(path, bytes)
     }

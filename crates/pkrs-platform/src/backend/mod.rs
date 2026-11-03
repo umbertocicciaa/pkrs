@@ -58,9 +58,13 @@ pub trait PlatformBackend {
     /// Switches between fullscreen and windowed mode.
     fn set_fullscreen(&mut self, fullscreen: bool);
 
-    /// Reads a whole file.
+    /// Reads a whole file from a real filesystem path.
+    ///
+    /// For user files on real filesystem paths
+    /// (saves, config, logs under [`UserPaths`](crate::UserPaths)). Not the assets VFS: game
+    /// content goes through `pkrs-assets` (§13).
     fn read_file(&self, path: &Path) -> Result<Vec<u8>>;
 
-    /// Writes a whole file, replacing it if it exists.
+    /// Writes a whole file to a real filesystem path, replacing it if it exists.
     fn write_file(&mut self, path: &Path, bytes: &[u8]) -> Result<()>;
 }

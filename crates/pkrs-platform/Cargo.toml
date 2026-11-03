@@ -1,6 +1,6 @@
 [package]
 name = "pkrs-platform"
-description = "Platform facade and ports: window, loop, keyboard, gamepad, file I/O, user paths."
+description = "Platform facade and ports: window, loop, keyboard, focus, file I/O, user paths (gamepad via gilrs comes later)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -234,8 +234,9 @@ impl PlatformBackend for MacroquadPlatform {
     }
 
     fn read_file(&self, path: &Path) -> Result<Vec<u8>> {
-        // Desktop-only for v1: macroquad's own `load_file` is async (for wasm) and also
-        // reads through `std::fs` on desktop.
+        // User files only (saves/config/logs), not the assets VFS (§13). Desktop-only for
+        // v1: macroquad's own `load_file` is async (for wasm) and also reads through
+        // `std::fs` on desktop.
         std::fs::read(path).map_err(|err| PlatformError::from_io(path, err))
     }
 

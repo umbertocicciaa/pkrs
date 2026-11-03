@@ -1,0 +1,4 @@
+# Force LF everywhere: rustfmt.toml sets newline_style = "Unix", and Windows
+# checkouts (core.autocrlf=true, the default on windows-latest runners) would
+# otherwise get CRLF and fail `cargo fmt --check`.
+* text=auto eol=lf

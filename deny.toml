@@ -1,0 +1,73 @@
+# cargo-deny configuration (https://embarkstudios.github.io/cargo-deny/).
+#
+# Run locally with `cargo deny check` (install: `cargo install cargo-deny --locked`).
+# CI runs it on every PR and push to `main` (see .github/workflows/ci.yml).
+
+[graph]
+all-features = true
+
+[output]
+feature-depth = 1
+
+# --- Advisories --------------------------------------------------------------
+[advisories]
+# Fail on any RUSTSEC vulnerability; unmaintained / unsound / yanked are reported too.
+version = 2
+yanked = "deny"
+ignore = []
+
+# --- Licenses ----------------------------------------------------------------
+[licenses]
+version = 2
+confidence-threshold = 0.9
+# Permissive licenses only. Adding a new one is a deliberate, reviewed change.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unlicense",
+    "Unicode-3.0",
+    "CC0-1.0",
+    "BSL-1.0",
+]
+unused-allowed-license = "allow"
+
+[licenses.private]
+# Workspace crates are `publish = false` and carry no license field yet.
+ignore = true
+
+# --- Bans --------------------------------------------------------------------
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+highlight = "all"
+
+# docs/design.md §4.5 Rule 2: one owning crate per vendor crate.
+# `wrappers` lists the only crates allowed to depend on the vendor crate *directly*;
+# any other direct dependent fails `cargo deny check bans`. Keep this list in sync
+# with the §4.5 dependency map.
+deny = [
+    { crate = "macroquad", wrappers = ["pkrs-platform", "pkrs-render"], reason = "§4.5: macroquad is wrapped by pkrs-platform (window/loop/input) and pkrs-render (GL)" },
+    { crate = "gilrs", wrappers = ["pkrs-platform"], reason = "§4.5: gilrs is wrapped by pkrs-platform (GilrsGamepad)" },
+    { crate = "directories", wrappers = ["pkrs-platform"], reason = "§4.5: directories is wrapped by pkrs-platform (DirectoriesPaths)" },
+    { crate = "kira", wrappers = ["pkrs-audio"], reason = "§4.5: kira is wrapped by pkrs-audio (KiraAudio)" },
+    { crate = "zip", wrappers = ["pkrs-assets"], reason = "§4.5: zip is wrapped by pkrs-assets (PakVfs)" },
+    { crate = "notify", wrappers = ["pkrs-assets"], reason = "§4.5: notify is wrapped by pkrs-assets (NotifyWatcher)" },
+    { crate = "tiled", wrappers = ["pkrs-world"], reason = "§4.5: tiled is wrapped by pkrs-world (TiledImporter)" },
+    { crate = "mlua", wrappers = ["pkrs-script"], reason = "§4.5: mlua is wrapped by pkrs-script (LuaScriptHost, LuaBattleHooks)" },
+    { crate = "rand_pcg", wrappers = ["pkrs-core"], reason = "§4.5: rand_pcg is wrapped by pkrs-core (Pcg64Rng)" },
+    { crate = "ron", wrappers = ["pkrs-data", "pkrs-save"], reason = "§4.5: ron is wrapped by pkrs-data and pkrs-save (RonCodec)" },
+    { crate = "texture_packer", wrappers = ["pkrs-cli"], reason = "§4.5: texture_packer is wrapped by pkrs-cli (TexturePackerAdapter)" },
+]
+
+# --- Sources -----------------------------------------------------------------
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

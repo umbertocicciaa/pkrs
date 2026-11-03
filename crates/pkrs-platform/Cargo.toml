@@ -1,0 +1,15 @@
+[package]
+name = "pkrs-platform"
+description = "Platform facade and ports: window, loop, keyboard, gamepad, file I/O, user paths."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+pkrs-core.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

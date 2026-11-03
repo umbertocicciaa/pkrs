@@ -1,0 +1,20 @@
+[package]
+name = "pkrs-script"
+description = "Lua runtime, sandbox, API bindings, coroutine scheduler and plugin loader."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+pkrs-world.workspace = true
+pkrs-battle.workspace = true
+pkrs-data.workspace = true
+pkrs-save.workspace = true
+pkrs-ui.workspace = true
+pkrs-audio.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

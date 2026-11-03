@@ -1,0 +1,27 @@
+[package]
+name = "pkrs-cli"
+description = "The pkrs command-line tool: new, run, check, build, upgrade, plugin."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "pkrs"
+path = "src/main.rs"
+
+[dependencies]
+pkrs-data.workspace = true
+pkrs-assets.workspace = true
+pkrs-world.workspace = true
+pkrs-script.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

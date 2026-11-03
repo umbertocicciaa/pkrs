@@ -1,0 +1,16 @@
+[package]
+name = "pkrs-ui"
+description = "State-stack UI states: dialogue, menus, window skins."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+pkrs-render.workspace = true
+pkrs-platform.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,15 @@
+[package]
+name = "pkrs-assets"
+description = "Assets facade: VFS (loose folder or .pak), handles, caching."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+pkrs-core.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

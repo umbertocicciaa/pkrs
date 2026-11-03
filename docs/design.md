@@ -20,6 +20,10 @@
 | Internal resolution | **Per project**, default **240×160**, integer-scaled and letterboxed |
 | Saves | **RON with a version header**, step-by-step migrations, write-temp-then-rename |
 | Distribution | **Prebuilt runtime per OS + a single `.pak` archive** per game, no Rust toolchain needed |
+| v1 platforms | **Linux, Windows, macOS only** (WASM dropped for v1; **Android** is a post-v1 target, e.g. handhelds) |
+| Shaders (v1+) | **Data-driven custom materials** on tiles/sprites (animated tiles, day/night tints, translucent water) via a small shader/material API in `pkrs-render` |
+| Plugins (v1) | **Lua only**; **native Rust plugins** are a planned extension for authors who want performance or engine-adjacent hooks |
+| Multiplayer | **Out of scope for v1**, but battle/world/save boundaries are shaped so a future **listen-server or dedicated server** binary can share verification and replay rules |
 
 ---
 
@@ -32,14 +36,14 @@ The first question: *what do we actually need to build?*
 | Option | What we get | What we'd still build | Verdict |
 |---|---|---|---|
 | **Bevy** (ship pkrs as a Bevy plugin set) | Renderer, ECS, asset server, audio, input, hot reload, large ecosystem | Game layer, Lua bridge | ❌ ECS-first design is overkill for a turn-based game with few entities. Frequent breaking releases mean constant migration churn for every pkrs game. Heavy compile times. Bridging Lua into Bevy's scheduler/world borrows is awkward. |
-| **macroquad** | Window, main loop, 2D batched rendering, render targets, textures, basic input, file loading, WASM support | Game layer, audio (via kira), gamepad (via gilrs) | ✅ **Chosen.** |
-| **ggez** | Similar to macroquad, built on wgpu | Same as macroquad | ❌ Slower release cadence and no WASM. No clear advantage over macroquad for this genre. |
+| **macroquad** | Window, main loop, 2D batched rendering, render targets, textures, basic input, file loading, GLSL materials | Game layer, audio (via kira), gamepad (via gilrs), custom shader pipeline (§5.6) | ✅ **Chosen.** |
+| **ggez** | Similar to macroquad, built on wgpu | Same as macroquad | ❌ Slower release cadence. No clear advantage over macroquad for this genre. |
 | **winit + wgpu + kira** | Maximum control | Everything: sprite batcher, render pipeline, text, texture management | ❌ Most code for the least gain. A GBA-style renderer doesn't need custom GPU pipelines in v1. |
 
 ### 0.2 Why macroquad
 
 - **Matches the genre.** Pixel-perfect 2D at a tiny internal resolution needs a render target, nearest-neighbour filtering and a batched `draw_texture_ex`. macroquad gives us exactly that.
-- **Cross-platform with no system deps.** Builds on Linux, Windows and macOS with plain `cargo build` (plus the usual X11/ALSA dev headers on Linux) and has first-class WASM support.
+- **Cross-platform with no system deps.** Builds on Linux, Windows and macOS with plain `cargo build` (plus the usual X11/ALSA dev headers on Linux). v1 targets desktop only; mobile (Android) is evaluated after the desktop MVP is stable.
 - **Small surface.** Fast compile times and an API that is easy to wrap behind our own traits.
 - **We own the game layer**, which we need anyway: state stack, grid movement, battles and scripting are all pkrs-specific.
 
@@ -54,13 +58,13 @@ We wrap macroquad behind a **thin platform facade** inside `pkrs-render` and `pk
 - Rewriting the macroquad file I/O used by `pkrs-assets` (we already route it through our own VFS, so this is small).
 - **Not** the state stack, world, battle, scripting, data or save code.
 
-Known macroquad limitations we accept: a **global context** (single window, main-thread only) and a **less flexible shader pipeline**. Neither matters for v1.
+Known macroquad limitations we accept for v1: a **global context** (single window, main-thread only). Shader flexibility is limited compared to raw wgpu, but macroquad's material system is enough for v1 custom tile/sprite effects; we wrap it behind our own material API so a backend swap does not rewrite game projects (§5.6).
 
 ### 0.4 Lua compatibility check
 
 - `mlua` with features `lua54` + `vendored` compiles the Lua C sources with `cc`. That works on Linux (gcc/clang), Windows (MSVC) and macOS (clang) with no system Lua.
 - mlua and macroquad don't interact. The Lua state lives on the main thread (macroquad is main-thread anyway), so we **don't** need mlua's `send` feature.
-- **WASM caveat:** macroquad targets `wasm32-unknown-unknown`, but vendored Lua needs a C toolchain and libc. That does not cleanly support `wasm32-unknown-unknown` (it needs emscripten or a WASI shim). WASM stays a stretch goal, and the risk is tracked in §17.
+- **Desktop-first:** vendored Lua + macroquad is validated on Linux, Windows and macOS. **WASM is not a v1 target** (dropped; see §17). **Android** may reuse the same runtime later with a different platform backend; we avoid design choices that assume web-only or single-player-only forever.
 
 ### 0.5 Engine vs. game project split
 
@@ -93,20 +97,35 @@ flowchart LR
 
 ### 1.1 In scope (v1)
 - **Genre:** Gen 1–3 style creature-collecting RPGs (GBA-era feel), single-player.
-- **Platforms (required):** Linux (x86_64), Windows (x86_64), macOS (x86_64 + arm64). **Stretch:** WASM (see §17).
+- **Platforms (required for v1):** Linux (x86_64), Windows (x86_64), macOS (x86_64 + arm64).
+- **Platforms (post-v1, planned):** Android (e.g. ARM64 handhelds). WASM and other targets are not planned for the first release.
 - **Game size:** the same engine handles everything from a **one-shot story** (one map, a handful of scenes, maybe no battles) to a **full fan game** (multiple regions, full dex, story, post-game).
 - Top-down tile overworld, grid movement, turn-based 1v1 battles (with doubles possible as a plugin later), menus, dialogue, data-driven content, Lua scripting and plugins, saves.
 
 ### 1.2 Non-goals for v1
-- 3D rendering or perspective cameras.
-- Networking: online battles, trading, multiplayer.
-- A built-in editor GUI. We use **Tiled** for maps and plain text editors for data and Lua.
-- Mobile and console targets.
-- Native-Rust plugins (dynamic libraries). Plugins are Lua only.
+- 3D rendering or perspective cameras (see §1.4 for how we avoid blocking a far-future 3D map mode).
+- **Playable multiplayer** (online battles, trading, co-op overworld). v1 is single-player only, but §4.4 records the constraints we follow so multiplayer does not require a rewrite later.
+- An **in-engine editor GUI**. v1 uses **Tiled** for maps and plain text editors for RON/Lua. The asset pipeline and map format are chosen so an internal editor can replace Tiled later without breaking projects.
+- **In-engine data authoring** (visual editors for moves, abilities, species, …). Content stays in RON files for v1.
+- Mobile and console targets in v1 (Android is explicitly **post-v1**, not abandoned).
+- **Native-Rust plugins** in v1. Plugins ship as **Lua** only; Rust dynamic plugins are a later, optional path for advanced authors (§9.9).
 - Shipping any Nintendo/Game Freak/The Pokémon Company IP. See §1.3.
 
 ### 1.3 IP policy
 The engine is generic. The repo contains **no** Pokémon names, sprites, music or data. Engine terminology is neutral ("creature", "species", "move", "trainer"). Templates and demo projects use original or CC-licensed assets, with licenses recorded in each asset folder (`LICENSES.md`).
+
+### 1.4 Long-term product direction (avoid technical debt)
+
+v1 is **write-oriented**: authors edit Tiled maps, RON data and Lua in external tools. Long term, pkrs should become **click-oriented** as well: integrated (or bundled) tooling for maps, encounters, dialogue flow and game data, without forcing everyone off text files on day one.
+
+Design rules so that future does not fight v1:
+
+| Future capability | What we do in v1 |
+|---|---|
+| **Internal map editor** (replace Tiled) | Keep Tiled as interchange: load/save `.tmx`/`.tsx`, document layer/property conventions in code (`pkrs-world`), store no editor-only secrets in the binary map model. |
+| **3D / perspective maps** (far future) | Map model separates **logical grid** (collision, warps, encounters) from **visual layers**. v1 visuals are 2D tiles; logical data stays backend-agnostic. |
+| **Game data editor** | RON schemas in `pkrs-data` are the source of truth; validation is shared by `pkrs check` and runtime. A future GUI is a front-end on the same schemas, not a parallel format. |
+| **Click-first workflows** | CLI and file layout stay stable; future UI generates the same `pkrs.toml`, `data/`, `maps/` tree. |
 
 ---
 
@@ -124,6 +143,7 @@ my-game/
     audio/sfx/       # OGG/WAV
     fonts/           # bitmap fonts (PNG + .ron glyph metrics) or BMFont .fnt
     ui/              # window skins, cursors, icons
+    shaders/         # optional GLSL for custom tile/sprite materials (§5.6)
   data/
     species/*.ron
     moves/*.ron
@@ -349,6 +369,15 @@ Key boundaries:
 - **Only `pkrs-platform` and `pkrs-render` import macroquad**, which keeps a future backend swap small (§0.3).
 - `pkrs-cli` reuses `pkrs-data`, `pkrs-world` and `pkrs-script` for `pkrs check` (it parses Lua without running the game).
 
+### 4.4 Multiplayer-ready boundaries (future, not v1)
+
+Multiplayer is not implemented in v1, but core crates are shaped so a later milestone can add:
+
+- **`pkrs-server` (future binary):** authoritative simulation for linked battles (and eventually overworld sync). Built from the same `pkrs-battle` + `pkrs-world` logic as the client, with no macroquad/mlua in the hot path unless hooks are explicitly enabled.
+- **Client modes:** **host** (embedded listen server + local player) or **connect** to a remote server process. Games ship the client runtime only; server is an optional second binary produced by `pkrs build --server` (exact packaging TBD).
+- **Integrity & verification:** battles use a **deterministic event log** (`BattleEvent` stream + inputs + config hash). Two peers (or a spectator) can re-run the same seed and inputs to verify outcomes. Single-player uses a **local RNG policy**; networked battles use a **authoritative server RNG policy** (§7.2) so replays and anti-cheat rules are defined once.
+- **Save model:** overworld flags/variables and per-map event state remain in the save (§6.5); server authoritative state for battles is separate from the long-lived save file.
+
 ---
 
 ## 5. Rendering
@@ -381,12 +410,22 @@ Key boundaries:
 - Dialogue box features: typewriter reveal (configurable speed), inline control codes (`{color:red}`, `{pause:20}`, `{player}`, `{var:rival_name}`), auto-wrap to box width, page breaks, and a "more" arrow.
 - All text goes through the localization table (`data/text/<lang>/`).
 
+### 5.6 Custom shaders & materials (creators)
+
+Authors need effects that plain blitting cannot express: **animated tiles** (e.g. flickering lanterns), **day/night colour cycling**, **translucent water**, simple palette swaps. v1 exposes this through **materials**, not raw engine internals:
+
+- **Tile/sprite materials** reference a small built-in shader library (`pkrs/shaders/*.glsl` in the engine) or a **project shader** under `assets/shaders/` (loaded via VFS, validated by `pkrs check`).
+- **Material descriptor (RON)** on a tileset, layer, or sprite: `shader`, `uniforms` (scalars, colours, time-driven flags), optional `atlas_region` for multi-tile animations.
+- **Uniforms:** engine provides `time_ticks`, `map_origin`, and plugin-registered globals (e.g. day-night phase from a plugin). No arbitrary GPU code from Lua in v1; Lua sets parameters, Rust/materials apply them.
+- **API surface:** `render.set_global_uniform(name, value)` from Rust hooks; plugins use Lua wrappers. Custom shaders must declare a **capability profile** (max uniforms, texture slots) so `pkrs check` can reject unsupported combinations.
+- **Backend note:** implemented with macroquad materials in v1; kept behind `pkrs-render::Material` so a wgpu backend later reuses the same descriptors.
+
 ---
 
 ## 6. World & maps
 
-### 6.1 Tiled as the map editor
-- Maps are authored in **Tiled** and loaded with the `tiled` crate (`.tmx` + `.tsx`). No custom editor in v1.
+### 6.1 Tiled as the map editor (v1)
+- Maps are authored in **Tiled** and loaded with the `tiled` crate (`.tmx` + `.tsx`). No in-engine editor in v1; formats and layer conventions are stable so a future pkrs map editor can read/write the same files (§1.4).
 - `pkrs check` validates engine conventions (required layers, property types).
 - `.tmj` (JSON) support depends on the `tiled` crate version. See §17.
 
@@ -418,17 +457,32 @@ Object properties reference scripts by name: an `npc` with `script = "maps/route
 - **Seamless connections:** `maps/world.ron` (or Tiled's `.world` file) declares `north/south/east/west` neighbours with an offset. The renderer draws the neighbour's edge strip, and walking past the edge swaps the active map without a fade, as in the originals.
 - On map change: the old map's Lua event handlers are unloaded, the new map's script is loaded, and BGM crossfades if the track differs (§11).
 
+### 6.5 Save-aware events & persistent map state
+
+Story progression must survive saves: if the player already triggered an event, the world must behave accordingly after load.
+
+- **Global flags & variables** (`game.flag`, `game.var`) live in `WorldState` and serialize with the save (§12).
+- **Per-map persistent state** (recommended for one-shot triggers): `MapState` keyed by `map_id`, stored in the save:
+  - **Object state:** NPC hidden/moved, item picked up, door opened — keyed by Tiled object `id` or stable `uid` property.
+  - **Trigger state:** `trigger` objects with `once = true` record `fired` so `on_enter` does not run again.
+  - **Script counters:** optional `game.map_var(map, name)` for map-local variables without polluting global namespace.
+- **Engine events** (`map_enter`, `step`, `interact`, …) consult persisted state before running scripts. Scripts should set flags or map state at the end of a branch, not rely on in-memory-only globals.
+- **`pkrs check`** warns on triggers marked `once` whose scripts never set a flag or map state (static heuristic where possible).
+
 ---
 
 ## 7. Battle system
 
-### 7.1 Turn state machine
+### 7.1 Turn state machine & phases
+
+The high-level loop matches classic turn-based RPGs. Internally, each turn is split into **phases** (similar in spirit to [Pokémon Showdown](https://github.com/smogon/pokemon-showdown)'s event ordering): hooks fire at phase boundaries so gimmicks (Mega Evolution, Terastal, Z-Moves, custom per-turn forms) slot in without new core code for each mechanic.
 
 ```mermaid
 stateDiagram-v2
   [*] --> Start: on_battle_start
   Start --> SelectActions
-  SelectActions --> ResolveOrder: all sides chose (player via UI, AI/trainer via policy)
+  SelectActions --> PreTurn: all sides chose
+  PreTurn --> ResolveOrder: on_pre_turn hooks (forme changes, items)
   ResolveOrder --> ExecuteAction
   ExecuteAction --> FaintCheck
   FaintCheck --> ExecuteAction: more actions queued
@@ -441,28 +495,70 @@ stateDiagram-v2
   End --> [*]: on_battle_end → BattleResult
 ```
 
+**Phase hooks (API level 1, additive over time):** `on_battle_start`, `on_turn_start`, `on_pre_turn` (before speed calc — forme/item activation), `on_action_order`, per-action substeps (§7.4), `on_mid_turn` (between actions if needed), `on_end_of_turn`, `on_battle_end`. Plugins that introduce a new gimmick typically attach to `on_pre_turn`, `on_before_move`, `on_damage_calc`, and custom actions.
+
 ### 7.2 Pure, deterministic core (`pkrs-battle`)
-- `Battle::new(setup: BattleSetup, seed: u64, hooks: &mut dyn BattleHooks)` → the battle steps through `step(input) -> Vec<BattleEvent>`.
-- **Input** is a set of chosen actions (`Fight{move_slot, target}`, `Switch{slot}`, `Item{id, target}`, `Run`, `Custom{id, payload}`).
-- **Output** is a list of `BattleEvent`s (`MoveUsed`, `Damage{amount, crit, effectiveness}`, `StatusApplied`, `StatChanged`, `Fainted`, `Message{key, args}`, …). The **UI layer plays these back** as animations and text. Logic never waits on rendering.
-- All randomness goes through the battle's `Pcg64` (seeded from the game RNG). Lua hooks get `ctx:random(n)` and cannot call `math.random` (removed in the sandbox), so **the same seed and inputs always replay the same battle**. This enables replay-based regression tests.
+
+- `Battle::new(setup: BattleSetup, config: BattleConfig, hooks: &mut dyn BattleHooks)` → the battle steps through `step(input) -> Vec<BattleEvent>`.
+- **Input** is a set of chosen actions (`Fight{move_slot, target}`, `Switch{slot}`, `Item{id, target}`, `Run`, `Custom{id, payload}`, plus plugin-defined payloads).
+- **Output** is an append-only **`BattleEvent` log** (`MoveUsed`, `FormeChanged`, `Damage{…}`, `StatusApplied`, `StatChanged`, `Fainted`, `Message{key, args}`, …). The **UI layer plays events back**; logic never waits on rendering. The same log is used for **replay verification** (§4.4).
+- **RNG policies (decided early to avoid debt):**
+  - **`RngPolicy::Local`** (default single-player): battle RNG is derived from the save's game RNG (`Pcg64`). Wild encounters and offline trainer battles use this. Lua hooks use `ctx:random(n)`; `math.random` is removed in the sandbox.
+  - **`RngPolicy::Authoritative { seed, stream_id }`** (future networked battles): only the server advances the battle RNG; clients submit actions and apply the event log. Clients do not roll damage locally. Single-player and multiplayer code paths share the same `step()` implementation; only the RNG source differs.
+  - **`RngPolicy::Fixed { seed }`** (debug, tests, `"Battle Factory"` style challenges): fully pinned seed for reproducible gauntlets.
+- **Determinism:** for a given `BattleSetup`, `RngPolicy`, hook registration order and player/AI inputs, `step()` produces an identical event stream. **Seeded replay tests** are mandatory (§15.2).
 
 ### 7.3 Data model
 - **Stats:** HP/Atk/Def/SpA/SpD/Spe, base stats, IVs/EVs (configurable to disable for simpler games), level, nature-like stat modifiers (data-defined, optional).
 - **Types:** a data-defined type list and effectiveness matrix (`data/types.ron`). Any number of types is supported.
 - **Damage formula:** a Gen-3 style default, implemented in Rust and exposed as a pipeline: `base → modifiers (STAB, type, crit, random, weather, …) → final`. Each modifier stage is a hook point, so plugins can insert or replace modifiers.
 - **Moves as data:** `power`, `accuracy`, `pp`, `type`, `category`, `priority`, `target`, `flags`, plus an `effects` list of **built-in effect primitives** (`Damage`, `ApplyStatus`, `StatStage`, `Heal`, `Recoil`, `Drain`, `MultiHit`, `Weather`, `Protect`, `SwitchOut`, …) with parameters. Moves needing bespoke logic set `script = "plugin_id:function"`.
-- **Status effects:** major statuses (sleep, poison, burn, paralysis, freeze, data-defined) and volatile statuses (confusion and similar). Each has `on_turn_start`/`on_before_move`/`on_end_of_turn` behaviour expressed as effect primitives or Lua.
+- **Status effects:** major statuses (sleep, poison, burn, paralysis, freeze, data-defined) and volatile statuses (confusion and similar). Each has phase-specific behaviour expressed as effect primitives or Lua hooks.
+- **Formats:** v1 battles are **1v1** in core data (`BattleSetup.side_size = 1`). The internal model uses **N active slots per side** so **double battles** ship as a **default plugin** (`plugins/doubles/` in the full-game template) rather than a core rewrite (§17).
 
-### 7.4 Hook points
-`pkrs-battle` defines `trait BattleHooks`, and `pkrs-script` implements it by dispatching to Lua handlers (§9.4). Hook list for API level 1:
+### 7.4 `BattleHooks` trait & hook points
+
+`pkrs-battle` owns a **`BattleHooks` trait**: synchronous callbacks invoked at named phases. **`pkrs-script`** implements the trait by dispatching to Lua (and, in the future, to native Rust plugins). Game Lua never implements the trait directly; it registers named handlers via `battle.on(...)`.
+
+**Design rules:**
+
+- Hooks receive a **`BattleHookCtx`** (read-only view of field, sides, active creatures, turn/phase, RNG accessor policy-aware) plus mutable **payload structs** for that hook (e.g. `DamageCalc`, `ActionMenu`).
+- Return **`HookResult<T>`**: `Ok(T)` with optional modifications, or **`Cancel { reason }`** where the hook site supports cancellation.
+- Handlers run in **priority order** (§9.4). The battle core records which hook ran for replay/debug (`BattleEvent::HookTrace` in dev builds).
+
+**Rust shape (illustrative — exact types live in `pkrs-battle`):**
+
+```rust
+pub trait BattleHooks {
+    fn on_battle_start(&mut self, ctx: &BattleHookCtx<'_>) -> Result<(), BattleError> { Ok(()) }
+    fn on_turn_start(&mut self, ctx: &BattleHookCtx<'_>) -> Result<(), BattleError> { Ok(()) }
+    fn on_pre_turn(&mut self, ctx: &mut PreTurnCtx<'_>) -> Result<(), BattleError> { Ok(()) }
+    fn on_action_order(&mut self, ctx: &BattleHookCtx<'_>, order: &mut ActionOrder) -> Result<(), BattleError> { Ok(()) }
+    fn on_before_move(&mut self, ctx: &BattleHookCtx<'_>, req: &mut MoveRequest) -> Result<HookResult<()>, BattleError> { Ok(HookResult::Continue) }
+    fn on_accuracy(&mut self, ctx: &BattleHookCtx<'_>, acc: &mut AccuracyCalc) -> Result<(), BattleError> { Ok(()) }
+    fn on_damage_calc(&mut self, ctx: &BattleHookCtx<'_>, dmg: &mut DamageCalc) -> Result<(), BattleError> { Ok(()) }
+    fn on_damage_taken(&mut self, ctx: &BattleHookCtx<'_>, hit: &mut DamageTaken) -> Result<HookResult<()>, BattleError> { Ok(HookResult::Continue) }
+    fn on_after_move(&mut self, ctx: &BattleHookCtx<'_>, res: &MoveResult) -> Result<(), BattleError> { Ok(()) }
+    fn on_status_apply(&mut self, ctx: &BattleHookCtx<'_>, req: &mut StatusApply) -> Result<HookResult<()>, BattleError> { Ok(HookResult::Continue) }
+    fn on_switch_in(&mut self, ctx: &BattleHookCtx<'_>, sw: &mut SwitchIn) -> Result<HookResult<()>, BattleError> { Ok(HookResult::Continue) }
+    fn on_switch_out(&mut self, ctx: &BattleHookCtx<'_>, sw: &mut SwitchOut) -> Result<HookResult<()>, BattleError> { Ok(HookResult::Continue) }
+    fn on_faint(&mut self, ctx: &BattleHookCtx<'_>, f: &FaintEvent) -> Result<(), BattleError> { Ok(()) }
+    fn on_end_of_turn(&mut self, ctx: &BattleHookCtx<'_>) -> Result<(), BattleError> { Ok(()) }
+    fn on_battle_end(&mut self, ctx: &BattleHookCtx<'_>, result: &mut BattleResult) -> Result<(), BattleError> { Ok(()) }
+    fn on_action_menu(&mut self, ctx: &BattleHookCtx<'_>, menu: &mut ActionMenu) -> Result<(), BattleError> { Ok(()) }
+    fn on_custom_action(&mut self, ctx: &mut CustomActionCtx<'_>) -> Result<(), BattleError> { Ok(()) }
+}
+```
+
+**Lua-facing hook list (API level 1)** mirrors the trait. Additional hooks (e.g. `on_forme_change`, `on_item_consumed`, `on_hit_substitute`) are added additively when mechanics need them; gimmick plugins should not require core forks.
 
 | Hook | Can modify | Can cancel |
 |---|---|---|
-| `on_battle_start(ctx)` | — | — |
+| `on_battle_start(ctx)` | Field setup (via declared side state) | — |
 | `on_turn_start(ctx)` | — | — |
+| `on_pre_turn(ctx)` | Formes, volatiles, item triggers before move selection resolves | — |
 | `on_action_order(ctx, actions)` | Ordering (priority/speed tiebreaks) | — |
-| `on_before_move(ctx, user, move, target)` | Move, target | ✅ (e.g. flinch, sleep) |
+| `on_before_move(ctx, user, move, target)` | Move, target, flags | ✅ (flinch, sleep, …) |
 | `on_accuracy(ctx, user, move, target, acc)` | Accuracy | — |
 | `on_damage_calc(ctx, user, move, target, dmg_info)` | Base power, modifiers, final damage | — |
 | `on_damage_taken(ctx, target, amount, source)` | Amount | ✅ |
@@ -472,11 +568,38 @@ stateDiagram-v2
 | `on_faint(ctx, creature)` | — | — |
 | `on_end_of_turn(ctx)` | — | — |
 | `on_battle_end(ctx, result)` | Rewards (exp, money) | — |
-| `on_action_menu(ctx, side, options)` | Adds action-menu entries (for custom actions) | — |
+| `on_action_menu(ctx, side, options)` | Fight menu entries (Z-Move, Terastal, …) | — |
 | `on_custom_action(ctx, id, payload)` | Executes custom actions | — |
 
-### 7.5 AI
-Trainer AI is a policy trait (`choose_action(view) -> Action`) with built-in tiers (random, basic: prefers super-effective moves, smart). It can be overridden per trainer by a Lua function (`ai = "plugin:ai_gym_leader"`).
+Full Rust docs for `BattleHooks`, contexts and payload types are generated into `docs/rust-api/` alongside `docs/lua-api/`.
+
+### 7.5 Trainer AI & custom profiles
+
+- **Built-in tiers:** `random`, `basic` (type-aware), `smart` (type + stat matchups, switching heuristics) — implemented in Rust for speed and determinism.
+- **Trainer profiles (data):** `data/trainers/*.ron` references an **`ai_profile`** id:
+
+```ron
+Trainer(
+  id: "champion_aria",
+  party: [ ... ],
+  ai_profile: "profiles/champion_hard",   // or inline profile id
+)
+```
+
+```ron
+// data/trainers/profiles/champion_hard.ron
+AiProfile(
+  id: "champion_hard",
+  tier: Smart,
+  script: "scripts/ai/champion.lua",       // optional Lua override
+  weights: (aggression: 0.8, switch: 0.6, predict: 0.9),
+  allow_items: true,
+)
+```
+
+- **Lua AI:** when `script` is set, the engine calls `choose_action(view) -> Action` in a sandboxed coroutine with a **read-only battle view** (same information a human would have in that format — configurable per profile for "cheating" boss fights).
+- **Plugin AI:** plugins register new profiles (`ai.register_profile("gauntlet:boss", fn)`) or replace behaviour for existing ids.
+- **Hard challenges:** profiles combine weights, item usage rules, and full Lua for multi-turn planning (e.g. champion sets). All AI decisions go through the same action input path as the player so replays stay valid.
 
 ---
 
@@ -535,7 +658,7 @@ All Lua APIs live in namespaced global tables, created per API level:
 | Module | Surface (examples) |
 |---|---|
 | `game` | `flag(name)`, `set_flag(name, v)`, `var(name)`, `set_var(name, v)`, `party()`, `bag()`, `money()`, `give_creature(...)`, `give_item(id, n)` |
-| `map` | `current()`, `warp(map, x, y, facing)`, `tile(x, y)`, `set_tile(layer, x, y, tile)`, `npc(id)`, `spawn_npc(def)`, `register_terrain(name, fn)` |
+| `map` | `current()`, `warp(map, x, y, facing)`, `tile(x, y)`, `set_tile(layer, x, y, tile)`, `npc(id)`, `spawn_npc(def)`, `register_terrain(name, fn)`, `var(name)` / `set_var` (map-local, persisted §6.5) |
 | `npc` (userdata) | `:move(path)`, `:face(dir)`, `:set_sprite(id)`, `:hide()`, `:pos()` |
 | `player` | `pos()`, `face(dir)`, `lock()`, `unlock()`, `set_field_state(name, bool)` |
 | `ui` | `say(text)`, `choose({opts})`, `yes_no(text)`, `push_screen(id, args)`, `notify(text)` |
@@ -716,6 +839,15 @@ ui.register_screen("resonance:log", {
 - Guidance: avoid per-tick Lua callbacks. `events.on("tick")` is available but flagged by `pkrs check` as a performance warning.
 - **Hot reload in dev:** on a script change, re-run the map's script file and replace its handlers. Plugin reload re-runs `init.lua` after clearing that plugin's registrations. Running coroutines keep the old code until they finish.
 
+### 9.9 Native Rust plugins (post-v1)
+
+Lua remains the default plugin surface (fast iteration, accessible to non-Rust authors). **Native Rust plugins** are a planned extension for teams that need heavy logic, custom serializers, or server-side hooks:
+
+- **v1:** not shipped; no dynamic loading in release builds.
+- **Future model (sketch):** `plugins/my-plugin/` contains `plugin.toml` + a `cdylib` built against a stable **`pkrs-plugin-sdk`** crate exporting the same hook registry as Lua (battle/world/events), plus optional `register_move`-style content from Rust.
+- **Safety:** Rust plugins run out-of-process or with a narrow SDK boundary in-process — exact sandbox TBD; they must not break determinism for battles used in verification (§4.4, §7.2).
+- **Distribution:** games declare native plugins in `pkrs.toml`; `pkrs build` packs signed/ hashed binaries per target OS. Lua and Rust plugins can coexist in one project.
+
 ---
 
 ## 10. Input
@@ -747,7 +879,7 @@ ui.register_screen("resonance:log", {
 
 - **Model:** `SaveData { header: SaveHeader, world: WorldState, plugins: BTreeMap<PluginId, ron::Value> }`.
   - `SaveHeader { format_version: u32, engine_version, game_id, game_version, timestamp, play_time_ticks, summary (player name, location, badges/progress count for the slot screen) }`.
-  - `WorldState`: flags, variables, party, PC boxes, bag, money, current map + position + facing, RNG state, NPC persistent state (moved/hidden), visited maps, options that belong to the save.
+  - `WorldState`: flags, variables, party, PC boxes, bag, money, current map + position + facing, RNG state, **per-map persistent state** (§6.5), NPC persistent state (moved/hidden), visited maps, options that belong to the save.
 - **Format (decided): RON**, pretty-printed. Human-readable and debuggable. Player editing is accepted for fan games.
 - **Versioning & migrations:** `format_version` is the engine's save schema version. Migrations are Rust functions `fn(ron::Value) -> Result<ron::Value>` registered per version step (`v1 → v2 → v3`). They run in sequence on load, before typed deserialization. **Game-level migrations:** a game may provide `scripts/migrate.lua` with `migrate(save, from_game_version)`, which runs after engine migrations for flag and variable renames.
 - **Slots:** a configurable number of slots (default 3) plus an optional autosave slot. The slot screen reads only the headers.
@@ -840,7 +972,7 @@ Each milestone is shippable and becomes **one issue**:
 2. **Project model & overworld.** `pkrs new` (one-shot template), `pkrs run`, `pkrs.toml` parsing, folder VFS, Tiled map loading with the layer conventions, grid movement (facing, collisions, ledges), camera follow + clamp, warps.
 3. **Lua runtime & events.** mlua sandbox, coroutine scheduler, NPC interaction, dialogue box + bitmap text, choice menu, cutscene API (`say`, `move`, `wait`), state stack driven from scripts, flags and variables.
 4. **Battle core.** `pkrs-battle` logic (state machine, damage pipeline, types, statuses, AI, seeded RNG, hook trait) with full unit tests. Then the battle UI state that plays back `BattleEvent`s. Wild encounters.
-5. **Plugin system.** Manifests, dependency resolution, per-plugin environments, priority-chain hooks into battle and world, content registration, Lua UI screens, the **Resonance** example plugin, `pkrs plugin new`.
+5. **Plugin system.** Manifests, dependency resolution, per-plugin environments, priority-chain hooks into battle and world, content registration, Lua UI screens, the **Resonance** example plugin, optional **doubles** default plugin, `pkrs plugin new`.
 6. **Data & saves.** Full RON schemas + 3-stage validation, `pkrs check`, localization tables, party/bag/summary menus, save slots with atomic writes + migrations, debug hot reload.
 7. **Distribution & audio.** `.pak` packer, `pkrs build` for all three OSes with prebuilt runtimes from the release workflow, per-OS paths, macOS `.app`, the Windows no-console build, kira audio (BGM loop points, crossfades, jingles, battle transitions), input rebinding + gamepad, `pkrs upgrade`.
 8. **Sample projects.** `examples/one-shot` (a short story with no battles) and `examples/full-game-slice` (two routes, a town, a trainer, wild encounters, the Resonance plugin), both built for all three OSes in CI.
@@ -849,17 +981,17 @@ Each milestone is shippable and becomes **one issue**:
 
 ## 17. Open questions & risks
 
-| # | Question / risk | Options | Leaning |
+| # | Question / risk | Options | Leaning / decision |
 |---|---|---|---|
-| 1 | **WASM vs. vendored Lua.** macroquad targets `wasm32-unknown-unknown`, but Lua's C code needs libc. | (a) Build Lua via emscripten + macroquad glue; (b) a pure-Rust Lua (e.g. `piccolo`) for web only; (c) drop WASM | **(c) for v1**, re-evaluate after milestone 8 |
+| 1 | **WASM** | Ship web build / drop for v1 | **Dropped for v1.** Revisit only if a concrete need appears; **Android** is the more likely post-desktop target. |
 | 2 | `.tmj` (JSON) map support in the `tiled` crate | Require `.tmx` only / add a converter | **`.tmx` only** for v1 |
 | 3 | Windows exe icon & metadata patching without a Windows toolchain | Pure-Rust PE resource editing / generic icon in v1 | **Generic icon in v1**, revisit in M7 |
 | 4 | macOS signing & notarization | Ad-hoc only / a Developer ID for the CLI-produced games (game author's cert) | **Unsigned + documented workaround** in v1; `pkrs build --sign` later |
-| 5 | Number of crates vs. compile time and maintenance | Keep 13 / merge `pkrs-ui` into `pkrs-runtime`, `pkrs-save` into `pkrs-data` | **Keep the split**, merge if a crate stays under ~500 lines after M6 |
-| 6 | Double battles in core vs. as a plugin | Core from the start / plugin later | **Model the battle as N-vs-N sides internally** (1v1 configured), so doubles don't need a rewrite |
+| 5 | Number of crates vs. compile time and maintenance | Keep 13 / merge crates | **Keep the split**, merge if a crate stays under ~500 lines after M6 |
+| 6 | Double battles in core vs. as a plugin | Core from the start / default plugin | **Default plugin** (`plugins/doubles/`) on N-vs-N internal model (1v1 default config) |
 | 7 | Lua API level 1 freeze point | After M5 / after M8 | **After M8**: API is `0` (unstable) until the sample projects validate it |
-| 8 | macroquad global context & headless testing | Abstract the renderer behind a trait with `NullRenderer` | **Yes**, needed for CI smoke tests (§15.2) |
-| 9 | Overriding built-in states (e.g. replacing the battle UI entirely from Lua) | Allow / forbid in v1 | **Forbid in v1**: plugins add screens and hook data, and a full override can come later |
+| 8 | macroquad global context & headless testing | Abstract the renderer behind a trait with `NullRenderer` | **NullRenderer + `--headless` planned** for CI (§15.2); spike during M1 — exact trait split still to be validated in code |
+| 9 | Overriding built-in states (e.g. replacing the battle UI entirely from Lua) | Allow / forbid in v1 | **Forbid in v1**: plugins add screens and hook data; full override later |
 | 10 | Distribution of the CLI itself | `cargo install` only / prebuilt CLI binaries + an installer script | **Both**: prebuilt binaries are the primary path, since non-Rust users are the audience |
 
 ---

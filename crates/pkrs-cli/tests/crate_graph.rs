@@ -34,6 +34,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
     (
         "pkrs-runtime",
         &[
+            "pkrs-platform",
             "pkrs-script",
             "pkrs-render",
             "pkrs-audio",

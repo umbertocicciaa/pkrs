@@ -268,6 +268,7 @@ loop {
 - VSync on by default (macroquad's default swap interval). A config option allows an uncapped frame rate for debugging.
 - Slow frames: accumulated time is clamped to `MAX_FRAME`, so the game slows down instead of running dozens of catch-up ticks.
 - The window losing focus pauses the simulation (configurable) and ducks audio.
+- Policy lives in the `Platform` facade (`pkrs-platform`): `frame_time()` is clamped to `MAX_FRAME` and reports `0` while paused by focus loss (`PlatformConfig::pause_on_focus_lost`), and focus changes surface as `PlatformEvent::FocusLost` / `FocusGained`. The macroquad adapter derives focus from miniquad's minimize/restore events, which fire on focus changes on X11, macOS and wasm; **miniquad does not report focus on Windows**, so there the window is treated as always focused until the adapter gains a native hook.
 
 ### 3.3 Deterministic update order
 Within a tick:

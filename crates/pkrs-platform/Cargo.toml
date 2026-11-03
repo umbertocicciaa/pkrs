@@ -1,15 +1,24 @@
 [package]
 name = "pkrs-platform"
-description = "Platform facade and ports: window, loop, keyboard, gamepad, file I/O, user paths."
+description = "Platform facade and ports: window, loop, keyboard, focus, file I/O, user paths (gamepad via gilrs comes later)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+default = ["macroquad", "directories"]
+# `MacroquadPlatform` adapter (window, main loop, keyboard, focus) — §4.5.
+macroquad = ["dep:macroquad"]
+# `DirectoriesPaths` adapter (per-OS user dirs keyed on `game.id`) — §14.3.
+directories = ["dep:directories"]
+
 [dependencies]
 pkrs-core.workspace = true
 thiserror.workspace = true
+macroquad = { workspace = true, optional = true }
+directories = { workspace = true, optional = true }
 
 [lints]
 workspace = true

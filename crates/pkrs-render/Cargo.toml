@@ -7,10 +7,15 @@ rust-version.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+default = ["macroquad"]
+macroquad = ["dep:macroquad"]
+
 [dependencies]
 pkrs-platform.workspace = true
 pkrs-assets.workspace = true
 thiserror.workspace = true
+macroquad = { workspace = true, optional = true }
 
 [lints]
 workspace = true

@@ -1,0 +1,4 @@
+(
+    types: ["normal", "fire", "water"],
+    chart: { ("fire", "water"): 0.5, ("water", "fire"): 2.0 },
+)

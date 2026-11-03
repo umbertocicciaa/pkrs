@@ -1,2 +1,2 @@
 # pkrs
-Pokemon fun game SDK written in Rust
+2D RPG SDK written in Rust

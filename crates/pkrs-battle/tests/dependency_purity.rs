@@ -20,7 +20,11 @@ fn dependency_tree_has_no_render_script_or_io() {
         .args(["tree", "-p", "pkrs-battle", "--prefix", "none"])
         .output()
         .expect("cargo tree");
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let tree = String::from_utf8_lossy(&output.stdout);
     for name in FORBIDDEN {
         assert!(

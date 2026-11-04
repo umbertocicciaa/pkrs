@@ -17,6 +17,7 @@ pub enum TickPhase {
     AudioFlush,
 }
 
+#[cfg(test)]
 const ORDER: [TickPhase; 6] = [
     TickPhase::InputActions,
     TickPhase::Scripts,
@@ -44,16 +45,12 @@ pub trait TickHooks {
 
 /// Runs one simulation tick through the §3.3 pipeline.
 pub fn run_tick(hooks: &mut dyn TickHooks, dt: f64) {
-    for phase in ORDER {
-        match phase {
-            TickPhase::InputActions => hooks.input_actions(dt),
-            TickPhase::Scripts => hooks.scripts(dt),
-            TickPhase::StateStack => hooks.state_stack(dt),
-            TickPhase::DeferredTransitions => hooks.deferred_transitions(),
-            TickPhase::Events => hooks.events(),
-            TickPhase::AudioFlush => hooks.audio_flush(),
-        }
-    }
+    hooks.input_actions(dt);
+    hooks.scripts(dt);
+    hooks.state_stack(dt);
+    hooks.deferred_transitions();
+    hooks.events();
+    hooks.audio_flush();
 }
 
 /// No-op hooks for headless smoke runs.

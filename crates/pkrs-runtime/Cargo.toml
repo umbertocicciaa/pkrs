@@ -7,9 +7,6 @@ rust-version.workspace = true
 repository.workspace = true
 publish.workspace = true
 
-[lib]
-path = "src/lib.rs"
-
 [[bin]]
 name = "pkrs-runtime"
 path = "src/main.rs"

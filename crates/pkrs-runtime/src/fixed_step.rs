@@ -18,6 +18,9 @@ impl FixedStepClock {
     /// Adds `frame_time` seconds (already clamped by [`Platform`](pkrs_platform::Platform)).
     ///
     /// Returns how many simulation ticks to run this frame.
+    ///
+    /// Time is accumulated in `f64` seconds; if long-run tick counts drift in tests,
+    /// switch to a fixed nanosecond rational accumulator.
     pub fn advance(&mut self, frame_time: f64) -> u32 {
         if frame_time.is_finite() && frame_time > 0.0 {
             self.acc += frame_time;
@@ -32,11 +35,7 @@ impl FixedStepClock {
 
     /// Interpolation factor in `[0, 1)` between the previous and current tick (§3.1).
     pub fn alpha(&self) -> f32 {
-        if TICK_DT > 0.0 {
-            (self.acc / TICK_DT) as f32
-        } else {
-            0.0
-        }
+        (self.acc / TICK_DT) as f32
     }
 
     /// Remaining accumulated time after the last [`advance`](Self::advance).
@@ -45,7 +44,7 @@ impl FixedStepClock {
     }
 }
 
-/// Linear interpolation for render extrapolation between ticks.
+/// Linear interpolation for render blending between ticks.
 #[must_use]
 pub fn lerp_f32(prev: f32, curr: f32, alpha: f32) -> f32 {
     prev + (curr - prev) * alpha
@@ -64,6 +63,12 @@ impl InterpolatedPosition {
     /// Sets a new logical position, moving the old `pos` into `prev`.
     pub fn set(&mut self, x: f32, y: f32) {
         self.prev = self.pos;
+        self.pos = (x, y);
+    }
+
+    /// Snaps both `prev` and `pos` (teleport / room load).
+    pub fn teleport(&mut self, x: f32, y: f32) {
+        self.prev = (x, y);
         self.pos = (x, y);
     }
 
@@ -133,5 +138,14 @@ mod tests {
         let mid = p.at(0.5);
         assert!((mid.0 - 5.0).abs() < 1e-5);
         assert!((mid.1 - 10.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn interpolated_position_teleport() {
+        let mut p = InterpolatedPosition::default();
+        p.set(1.0, 2.0);
+        p.teleport(9.0, 8.0);
+        assert_eq!(p.at(0.0), (9.0, 8.0));
+        assert_eq!(p.at(1.0), (9.0, 8.0));
     }
 }

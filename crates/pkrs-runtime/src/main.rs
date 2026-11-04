@@ -11,6 +11,9 @@ use tracing_subscriber::EnvFilter;
 /// Log filter used when `RUST_LOG` is not set.
 const DEFAULT_LOG_FILTER: &str = "info";
 
+/// Default `--ticks` when running headless without an explicit limit (avoids a busy spin).
+const DEFAULT_HEADLESS_TICKS: u64 = 600;
+
 fn main() -> anyhow::Result<()> {
     init_tracing()?;
     let cli = RuntimeCliOptions::parse()?;
@@ -22,8 +25,14 @@ fn main() -> anyhow::Result<()> {
         "pkrs-runtime starting"
     );
 
+    let max_ticks = if cli.headless {
+        Some(cli.ticks.unwrap_or(DEFAULT_HEADLESS_TICKS))
+    } else {
+        cli.ticks
+    };
+
     let config = RuntimeLoopConfig {
-        max_ticks: cli.ticks,
+        max_ticks,
         max_frames: None,
         vsync: cli.vsync,
     };
@@ -53,12 +62,8 @@ fn run_headless(config: RuntimeLoopConfig) -> anyhow::Result<()> {
 }
 
 fn run_windowed(config: RuntimeLoopConfig) -> anyhow::Result<()> {
-    let window = WindowConfig::from_display("pkrs", &DisplaySettings::default());
-    if !config.vsync {
-        tracing::warn!(
-            "vsync disabled: macroquad still uses its default swap interval until WindowConfig exposes this (§3.2)"
-        );
-    }
+    let mut window = WindowConfig::from_display("pkrs", &DisplaySettings::default());
+    window.vsync = config.vsync;
     MacroquadPlatform::run(&window, move |backend| async move {
         let mut platform = Platform::new(
             Box::new(backend),
@@ -86,12 +91,16 @@ struct RuntimeCliOptions {
 
 impl RuntimeCliOptions {
     fn parse() -> anyhow::Result<Self> {
+        Self::parse_from(std::env::args().skip(1))
+    }
+
+    fn parse_from(args: impl IntoIterator<Item = impl AsRef<str>>) -> anyhow::Result<Self> {
         let mut headless = false;
         let mut ticks = None;
         let mut vsync = true;
-        let mut args = std::env::args().skip(1);
+        let mut args = args.into_iter();
         while let Some(arg) = args.next() {
-            match arg.as_str() {
+            match arg.as_ref() {
                 "--headless" => headless = true,
                 "--no-vsync" => vsync = false,
                 "--ticks" => {
@@ -100,6 +109,7 @@ impl RuntimeCliOptions {
                         .context("--ticks requires a non-negative integer")?;
                     ticks = Some(
                         value
+                            .as_ref()
                             .parse::<u64>()
                             .context("--ticks must be a non-negative integer")?,
                     );
@@ -131,7 +141,7 @@ USAGE:
 
 OPTIONS:
     --headless       Use NullPlatform (no window, for CI)
-    --ticks N        Stop after N simulation ticks (60 Hz)
+    --ticks N        Stop after N simulation ticks (60 Hz); default 600 with --headless
     --no-vsync       Debug: request uncapped frame rate (§3.2)
     -h, --help       Print help
 "
@@ -160,14 +170,42 @@ mod tests {
     }
 
     #[test]
+    fn tracing_initialises_once() {
+        assert!(init_tracing().is_ok());
+        assert!(
+            init_tracing().is_err(),
+            "a second global subscriber must be rejected"
+        );
+    }
+
+    #[test]
     fn cli_parse_ticks_and_headless() {
-        let opts = RuntimeCliOptions {
-            headless: true,
-            ticks: Some(600),
-            vsync: false,
-        };
+        let opts = RuntimeCliOptions::parse_from(["--headless", "--ticks", "600", "--no-vsync"])
+            .expect("parse");
         assert!(opts.headless);
         assert_eq!(opts.ticks, Some(600));
         assert!(!opts.vsync);
+    }
+
+    #[test]
+    fn cli_headless_without_ticks_is_allowed() {
+        let opts = RuntimeCliOptions::parse_from(["--headless"]).expect("parse");
+        assert!(opts.headless);
+        assert_eq!(opts.ticks, None);
+    }
+
+    #[test]
+    fn cli_rejects_missing_ticks_value() {
+        assert!(RuntimeCliOptions::parse_from(["--ticks"]).is_err());
+    }
+
+    #[test]
+    fn cli_rejects_negative_ticks() {
+        assert!(RuntimeCliOptions::parse_from(["--ticks", "-1"]).is_err());
+    }
+
+    #[test]
+    fn cli_rejects_unknown_flag() {
+        assert!(RuntimeCliOptions::parse_from(["--nope"]).is_err());
     }
 }

@@ -3,7 +3,7 @@
 use pkrs_platform::Platform;
 
 use crate::fixed_step::{FixedStepClock, TICK_DT};
-use crate::tick::{TickHooks, run_tick};
+use crate::tick::run_tick;
 
 /// Why the loop stopped.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,11 +38,14 @@ impl Default for RuntimeLoopConfig {
 /// Host for one running game: input polling, ticks, render.
 pub trait SimulationHost {
     /// Poll keyboard / gamepad once per rendered frame (§3.1).
+    ///
+    /// At high refresh rates many frames run zero simulation ticks, so implementations
+    /// must latch edge-triggered input (e.g. key-down) until the next [`begin_tick`](Self::begin_tick).
     fn poll_input(&mut self, platform: &Platform);
     /// Edge detection reset at the start of each simulation tick.
     fn begin_tick(&mut self);
-    /// One 60 Hz tick through §3.3 (default delegates to [`TickHooks`]).
-    fn simulation_tick(&mut self, dt: f64, hooks: &mut dyn TickHooks);
+    /// One 60 Hz tick through §3.3; the host runs [`run_tick`](crate::tick::run_tick) with its own hooks.
+    fn simulation_tick(&mut self, dt: f64);
     /// Draw with interpolation factor `alpha` (§3.1).
     fn render(&mut self, platform: &Platform, alpha: f32);
 }
@@ -56,8 +59,8 @@ impl SimulationHost for StubSimulationHost {
 
     fn begin_tick(&mut self) {}
 
-    fn simulation_tick(&mut self, dt: f64, hooks: &mut dyn TickHooks) {
-        run_tick(hooks, dt);
+    fn simulation_tick(&mut self, dt: f64) {
+        run_tick(&mut crate::tick::NullTickHooks, dt);
     }
 
     fn render(&mut self, _platform: &Platform, _alpha: f32) {}
@@ -71,7 +74,6 @@ pub async fn run_loop(
 ) -> LoopExit {
     let mut clock = FixedStepClock::new();
     let mut sim_ticks: u64 = 0;
-    let mut tick_hooks = crate::tick::NullTickHooks;
 
     loop {
         host.poll_input(platform);
@@ -79,7 +81,7 @@ pub async fn run_loop(
         let ticks_this_frame = clock.advance(frame_time);
         for _ in 0..ticks_this_frame {
             host.begin_tick();
-            host.simulation_tick(TICK_DT, &mut tick_hooks);
+            host.simulation_tick(TICK_DT);
             sim_ticks = sim_ticks.saturating_add(1);
             if config.max_ticks.is_some_and(|limit| sim_ticks >= limit) {
                 return LoopExit::TickLimit;

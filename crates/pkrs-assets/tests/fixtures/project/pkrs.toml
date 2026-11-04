@@ -1,0 +1,11 @@
+[game]
+name = "Assets Fixture"
+id   = "com.example.assets-fixture"
+
+[engine]
+version = "0.0"
+api     = 1
+
+[start]
+map      = "town"
+position = [0, 0]

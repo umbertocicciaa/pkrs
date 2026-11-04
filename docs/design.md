@@ -369,7 +369,7 @@ flowchart TD
   save[pkrs-save] --> core & data
   ui[pkrs-ui] --> render & platform
   script[pkrs-script] --> world & battle & data & save & ui & audio
-  runtime[pkrs-runtime] --> script & render & audio & ui & save & world
+  runtime[pkrs-runtime] --> script & render & audio & ui & save & world & platform
   cli[pkrs-cli] --> data & assets & world & script
 ```
 

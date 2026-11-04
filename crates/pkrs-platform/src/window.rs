@@ -59,6 +59,8 @@ pub struct WindowConfig {
     pub fullscreen: bool,
     /// Whether the user can resize the window (the integer scaler handles any size, §5.1).
     pub resizable: bool,
+    /// When `false`, request an uncapped frame rate via swap interval 0 (§3.2).
+    pub vsync: bool,
 }
 
 impl WindowConfig {
@@ -71,6 +73,7 @@ impl WindowConfig {
             height,
             fullscreen: display.fullscreen,
             resizable: true,
+            vsync: true,
         }
     }
 }

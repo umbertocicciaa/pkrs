@@ -120,14 +120,16 @@ fn from_vendor(code: KeyCode) -> Option<Key> {
 }
 
 fn to_conf(window: &WindowConfig) -> Conf {
-    Conf {
+    let mut conf = Conf {
         window_title: window.title.clone(),
         window_width: i32::try_from(window.width).unwrap_or(i32::MAX),
         window_height: i32::try_from(window.height).unwrap_or(i32::MAX),
         fullscreen: window.fullscreen,
         window_resizable: window.resizable,
         ..Conf::default()
-    }
+    };
+    conf.platform.swap_interval = Some(if window.vsync { 1 } else { 0 });
+    conf
 }
 
 /// Receives the miniquad events macroquad replays to input subscribers.
@@ -266,12 +268,14 @@ mod tests {
             height: 480,
             fullscreen: true,
             resizable: false,
+            vsync: false,
         };
         let conf = to_conf(&window);
         assert_eq!(conf.window_title, "t");
         assert_eq!((conf.window_width, conf.window_height), (720, 480));
         assert!(conf.fullscreen);
         assert!(!conf.window_resizable);
+        assert_eq!(conf.platform.swap_interval, Some(0));
     }
 
     #[test]

@@ -206,7 +206,14 @@ enabled     = ["resonance", "day-night"]   # load order hint; final order is res
 [locale]
 default     = "en"
 available   = ["en", "it"]
+
+[input]                      # default bindings (§10): action = [key names]; players rebind per-user (§14.3)
+confirm     = ["z", "enter"]
+cancel      = ["x", "backspace"]
+"resonance:toggle" = ["r"]   # plugin actions are namespaced `plugin:action`
 ```
+
+**Loading & validation (`pkrs_core::manifest`).** The manifest model lives in `pkrs-core` so the runtime and the CLI share it. Loading has two stages: (1) TOML parsing, value types and unknown keys (typos are errors), reported with the field path and line/column; (2) validation of ranges, id formats and semver, which reports *every* problem at once, each with its dotted field path (`display.scale`, `plugins.enabled[1]`). Only `[game]` (`name`, `id`), `[engine]` (`version`, `api`) and `[start]` (`map`, `position`) are required. Defaults: `game.version = "0.1.0"`, `display` 240×160 at scale 3 windowed, `start.facing = "down"`, all `features` on, no plugins, `locale.default = "en"` with `available = [default]`, no `[input]` overrides. Rules: `game.id` is dot-separated ASCII segments; `engine.api ≥ 1`; `display.width/height` in 1–4096 and `scale` in 1–16; `start.map` is a content id; `start.position` is non-negative; `start.script` is a project-relative `.lua` path with no `..`; plugin ids are lowercase with `_`/`-`; locale tags are BCP-47-style and `available` must contain `default`; lists have no duplicates.
 
 ### 2.3 CLI commands
 
@@ -428,10 +435,12 @@ flowchart LR
 | `tiled` | `MapImporter` | `TiledImporter` | `pkrs-world::Map` model | `pkrs-world` |
 | `mlua` | `BattleHooks` (from `pkrs-battle`) + `ScriptHost` | `LuaScriptHost`, `LuaBattleHooks` | `ScriptHost` | `pkrs-script` |
 | `rand_pcg` | `GameRng` | `Pcg64Rng` | `ctx.rng` | `pkrs-core` |
+| `toml` | manifest codec in `pkrs-core` | `manifest::toml_codec` | `ProjectManifest` | `pkrs-core` |
+| `semver` | — (engine newtypes) | `Version`, `VersionReq` | `ProjectManifest.engine`, plugin versions (§9.4) | `pkrs-core` |
 | `ron` | codec functions in `pkrs-data` / `pkrs-save` | `RonCodec` | typed structs, `pkrs_save::Value` | `pkrs-data`, `pkrs-save` |
 | `texture_packer` | `AtlasPacker` | `TexturePackerAdapter` | `pkrs build` pipeline | `pkrs-cli` |
 
-**Not wrapped (allowed directly), and why:** `serde` (derive framework; it *is* the abstraction), `thiserror` (compile-time only), `tracing` (already a logging facade), `anyhow`, `miette`, `include_dir` (binaries only, never in library APIs), `insta` (dev-only). Adding a new crate to this list requires a note in this section.
+**Not wrapped (allowed directly), and why:** `serde` (derive framework; it *is* the abstraction), `serde_path_to_error` (serde helper that only adds the failing field path to errors; never in public APIs), `thiserror` (compile-time only), `tracing` (already a logging facade), `anyhow`, `miette`, `include_dir` (binaries only, never in library APIs), `insta` (dev-only). Adding a new crate to this list requires a note in this section.
 
 **Rules:**
 1. **No vendor type in any public signature** of a pkrs library crate. Facades and ports use engine types only.

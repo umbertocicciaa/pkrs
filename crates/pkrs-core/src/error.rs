@@ -20,4 +20,26 @@ pub enum CoreError {
     /// The id interner ran out of handles.
     #[error("id interner exhausted (too many unique ids)")]
     IdInternerExhausted,
+
+    /// A semantic version string did not parse.
+    #[error("invalid version `{input}`: {reason}")]
+    InvalidVersion {
+        /// The rejected input.
+        input: String,
+        /// Why it was rejected.
+        reason: String,
+    },
+
+    /// A semver requirement string did not parse.
+    #[error("invalid version requirement `{input}`: {reason}")]
+    InvalidVersionReq {
+        /// The rejected input.
+        input: String,
+        /// Why it was rejected.
+        reason: String,
+    },
+
+    /// The project manifest (`pkrs.toml`) could not be read or is invalid.
+    #[error(transparent)]
+    Manifest(#[from] crate::manifest::ManifestError),
 }

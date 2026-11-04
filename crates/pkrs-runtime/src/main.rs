@@ -5,7 +5,8 @@ use pkrs_platform::{
     DisplaySettings, FixedPaths, MacroquadPlatform, NullPlatform, Platform, PlatformConfig,
     WindowConfig,
 };
-use pkrs_runtime::{RuntimeLoopConfig, StubSimulationHost, block_on_loop, run_loop};
+use pkrs_render::MacroquadRenderer;
+use pkrs_runtime::{AnimationDemoHost, RuntimeLoopConfig, block_on_loop, run_loop};
 use tracing_subscriber::EnvFilter;
 
 /// Log filter used when `RUST_LOG` is not set.
@@ -51,7 +52,7 @@ fn run_headless(config: RuntimeLoopConfig) -> anyhow::Result<()> {
         Box::new(FixedPaths::under("pkrs")),
         PlatformConfig::default(),
     );
-    let mut host = StubSimulationHost;
+    let (mut host, _log) = AnimationDemoHost::headless().context("animation demo host")?;
     let exit = block_on_loop(&mut platform, &mut host, &config);
     tracing::info!(
         ?exit,
@@ -70,7 +71,14 @@ fn run_windowed(config: RuntimeLoopConfig) -> anyhow::Result<()> {
             Box::new(FixedPaths::under("pkrs")),
             PlatformConfig::default(),
         );
-        let mut host = StubSimulationHost;
+        let host = match AnimationDemoHost::new(MacroquadRenderer::new()) {
+            Ok(host) => host,
+            Err(err) => {
+                tracing::error!(%err, "failed to create animation demo host");
+                return;
+            }
+        };
+        let mut host = host;
         let exit = run_loop(&mut platform, &mut host, &config).await;
         tracing::info!(
             ?exit,

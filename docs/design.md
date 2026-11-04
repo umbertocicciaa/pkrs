@@ -437,7 +437,7 @@ flowchart LR
 | `rand_pcg` | `GameRng` | `Pcg64Rng` | `ctx.rng` | `pkrs-core` |
 | `toml` | manifest codec in `pkrs-core` | `manifest::toml_codec` | `ProjectManifest` | `pkrs-core` |
 | `semver` | — (engine newtypes) | `Version`, `VersionReq` | `ProjectManifest.engine`, plugin versions (§9.4) | `pkrs-core` |
-| `ron` | codec functions in `pkrs-data` / `pkrs-save` | `RonCodec` | typed structs, `pkrs_save::Value` | `pkrs-data`, `pkrs-save` |
+| `ron` | codec functions in `pkrs-data` / `pkrs-save`; sprite animation descriptors in `pkrs-render` | `RonCodec`; `parse_animation_descriptor` | typed structs, `pkrs_save::Value`; `SpriteSheetAnimation` | `pkrs-data`, `pkrs-save`, `pkrs-render` |
 | `texture_packer` | `AtlasPacker` | `TexturePackerAdapter` | `pkrs build` pipeline | `pkrs-cli` |
 
 **Not wrapped (allowed directly), and why:** `serde` (derive framework; it *is* the abstraction), `serde_path_to_error` (serde helper that only adds the failing field path to errors; never in public APIs), `thiserror` (compile-time only), `tracing` (already a logging facade), `anyhow`, `miette`, `include_dir` (binaries only, never in library APIs), `insta` (dev-only). Adding a new crate to this list requires a note in this section.

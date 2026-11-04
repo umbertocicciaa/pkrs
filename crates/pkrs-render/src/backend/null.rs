@@ -18,6 +18,8 @@ pub struct RecordedDraw {
     pub layer: Layer,
     /// Texture handle.
     pub texture: TextureHandle,
+    /// Source region in texels.
+    pub src: crate::rect::Rect,
     /// Destination rectangle on the internal target.
     pub dst: crate::rect::Rect,
     /// Horizontal flip flag.
@@ -96,6 +98,7 @@ impl RenderBackend for NullRenderer {
         self.log.0.borrow_mut().push(RecordedDraw {
             layer: draw.layer,
             texture: draw.texture,
+            src: draw.src,
             dst: draw.dst,
             flip_x: draw.flip_x,
         });

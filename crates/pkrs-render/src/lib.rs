@@ -2,6 +2,7 @@
 //!
 //! See `docs/design.md` §4.5 and §5.1 for crate boundaries.
 
+mod animation;
 mod backend;
 mod camera;
 mod color;
@@ -13,6 +14,10 @@ mod renderer;
 mod texture;
 mod viewport;
 
+pub use animation::{
+    AnimationClip, ClipPlayer, DirectionalClip, SpriteSheetAnimation, clip_for_direction,
+    frame_pos_after_ticks, parse_animation_descriptor,
+};
 #[cfg(feature = "macroquad")]
 pub use backend::MacroquadRenderer;
 pub use backend::{DrawLog, NullRenderer, RecordedDraw, RenderBackend};

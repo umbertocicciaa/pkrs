@@ -5,7 +5,7 @@ use pkrs_platform::{
     DisplaySettings, FixedPaths, MacroquadPlatform, NullPlatform, Platform, PlatformConfig,
     WindowConfig,
 };
-use pkrs_runtime::{RuntimeLoopConfig, StubSimulationHost, block_on_loop, run_loop};
+use pkrs_runtime::{RuntimeHost, RuntimeLoopConfig, block_on_loop, run_loop};
 use tracing_subscriber::EnvFilter;
 
 /// Log filter used when `RUST_LOG` is not set.
@@ -51,7 +51,7 @@ fn run_headless(config: RuntimeLoopConfig) -> anyhow::Result<()> {
         Box::new(FixedPaths::under("pkrs")),
         PlatformConfig::default(),
     );
-    let mut host = StubSimulationHost;
+    let mut host = RuntimeHost::with_title();
     let exit = block_on_loop(&mut platform, &mut host, &config);
     tracing::info!(
         ?exit,
@@ -70,7 +70,7 @@ fn run_windowed(config: RuntimeLoopConfig) -> anyhow::Result<()> {
             Box::new(FixedPaths::under("pkrs")),
             PlatformConfig::default(),
         );
-        let mut host = StubSimulationHost;
+        let mut host = RuntimeHost::with_title();
         let exit = run_loop(&mut platform, &mut host, &config).await;
         tracing::info!(
             ?exit,

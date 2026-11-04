@@ -1,5 +1,7 @@
 //! Synchronous battle hooks (§7.4); default implementations are no-ops.
 
+use crate::accuracy::AccuracyCalc;
+use crate::damage::DamageCalc;
 use crate::error::Result;
 use crate::event::BattleEvent;
 use crate::model::{BattleResult, SideId, SlotIndex};
@@ -48,6 +50,16 @@ pub trait BattleHooks {
         _ctx: &BattleHookCtx<'_>,
         _order: &mut ActionOrder,
     ) -> Result<()> {
+        Ok(())
+    }
+
+    /// Called before resolving hit/miss for a move.
+    fn on_accuracy(&mut self, _ctx: &BattleHookCtx<'_>, _acc: &mut AccuracyCalc) -> Result<()> {
+        Ok(())
+    }
+
+    /// Called after the default damage pipeline; may adjust final damage.
+    fn on_damage_calc(&mut self, _ctx: &BattleHookCtx<'_>, _dmg: &mut DamageCalc) -> Result<()> {
         Ok(())
     }
 

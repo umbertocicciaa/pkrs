@@ -1,0 +1,8 @@
+(
+    id: "splash",
+    types: ["fire"],
+    hp: 35,
+    attack: 20,
+    defense: 15,
+    speed: 18,
+)

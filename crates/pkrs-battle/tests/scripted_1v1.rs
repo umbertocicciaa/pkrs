@@ -39,8 +39,15 @@ fn scripted_1v1_runs_to_player_win() {
     let setup = battle_testkit::wild_1v1();
     let config = battle_testkit::singles_config();
     let mut hooks = NullBattleHooks;
-    let mut battle =
-        Battle::new(setup, config, RngPolicy::Fixed { seed: 1 }, &mut hooks).expect("new");
+    let resources = battle_testkit::default_resources();
+    let mut battle = Battle::new(
+        setup,
+        config,
+        resources,
+        RngPolicy::Fixed { seed: 1 },
+        &mut hooks,
+    )
+    .expect("new");
 
     let empty = BattleInput::default();
     while battle.phase() != BattlePhase::End {
@@ -65,6 +72,7 @@ fn run_ends_battle_as_fled() {
     let mut battle = Battle::new(
         setup,
         BattleConfig::default(),
+        battle_testkit::default_resources(),
         RngPolicy::Fixed { seed: 2 },
         &mut hooks,
     )

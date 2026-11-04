@@ -1,11 +1,18 @@
 //! Data-driven content: RON schemas, loading, validation and cross-reference checks.
 //!
-//! This crate is currently a skeleton; see `docs/design.md` §4.3 for its role
-//! and dependency boundaries.
+//! See `docs/design.md` §7.3 for battle-related schemas (full content pipeline in M6).
 
+mod battle_pack;
 mod error;
+mod move_def;
+mod species;
+mod type_chart;
 
+pub use battle_pack::BattlePack;
 pub use error::{DataError, Result};
+pub use move_def::{MoveCategory, MoveDef, MoveEffect, StatId};
+pub use species::SpeciesDef;
+pub use type_chart::TypeChart;
 
 #[cfg(test)]
 mod tests {

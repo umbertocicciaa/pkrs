@@ -1,6 +1,9 @@
 //! Battle state machine (§7.1–§7.2).
 
+use crate::accuracy::roll_accuracy;
 use crate::action::{BattleAction, BattleInput, SideInput};
+use crate::damage::{DamageCalc, DamageInputs, effective_defense, effective_offense};
+use crate::effects::apply_effects;
 use crate::error::{BattleError, Result};
 use crate::event::BattleEvent;
 use crate::hooks::{ActionOrder, BattleHookCtx, BattleHooks};
@@ -10,11 +13,15 @@ use crate::model::{
 };
 use crate::order::{QueuedAction, resolve_order};
 use crate::phase::BattlePhase;
+use crate::resources::BattleResources;
 use crate::rng::{BattleRng, RngPolicy};
+use crate::stat_stage::StatStages;
+use pkrs_data::MoveCategory;
 
 struct SideState {
     party: Vec<ActiveCreature>,
     active: Vec<Option<PartyIndex>>,
+    slot_stages: Vec<StatStages>,
 }
 
 impl SideState {
@@ -47,7 +54,19 @@ impl SideState {
                 }
             }
         }
-        Ok(Self { party, active })
+        Ok(Self {
+            party,
+            active,
+            slot_stages: vec![StatStages::zero(); side_size as usize],
+        })
+    }
+
+    fn stages_mut(&mut self, slot: SlotIndex) -> Option<&mut StatStages> {
+        self.slot_stages.get_mut(slot as usize)
+    }
+
+    fn stages(&self, slot: SlotIndex) -> Option<&StatStages> {
+        self.slot_stages.get(slot as usize)
     }
 
     fn creature(&self, slot: SlotIndex) -> Option<&ActiveCreature> {
@@ -91,6 +110,7 @@ pub struct Battle {
     queue_index: usize,
     result: Option<BattleResult>,
     rng: BattleRng,
+    resources: BattleResources,
     player_actions: Vec<(SlotIndex, BattleAction)>,
     opponent_actions: Vec<(SlotIndex, BattleAction)>,
     pending_outcome: Option<BattleOutcome>,
@@ -101,6 +121,7 @@ impl Battle {
     pub fn new(
         setup: BattleSetup,
         config: BattleConfig,
+        resources: BattleResources,
         rng_policy: RngPolicy,
         _hooks: &mut dyn BattleHooks,
     ) -> Result<Self> {
@@ -117,6 +138,7 @@ impl Battle {
             queue_index: 0,
             result: None,
             rng: BattleRng::new(rng_policy),
+            resources,
             player_actions: Vec::new(),
             opponent_actions: Vec::new(),
             pending_outcome: None,
@@ -302,17 +324,17 @@ impl Battle {
                 }
                 self.queue_index = 0;
                 self.phase = BattlePhase::ExecuteAction;
-                self.run_current_action(out)?;
+                self.run_current_action(hooks, out)?;
             }
             BattlePhase::ExecuteAction => {
-                self.run_current_action(out)?;
+                self.run_current_action(hooks, out)?;
             }
             BattlePhase::FaintCheck => {
                 if let Some((side, slot)) = self.next_replace_needed() {
                     self.phase = BattlePhase::Replace { side, slot };
                 } else if self.queue_index < self.queue.len() {
                     self.phase = BattlePhase::ExecuteAction;
-                    self.run_current_action(out)?;
+                    self.run_current_action(hooks, out)?;
                 } else if let Some(outcome) = self.check_battle_end() {
                     self.finish(outcome, hooks, out)?;
                 } else {
@@ -350,7 +372,11 @@ impl Battle {
         Ok(())
     }
 
-    fn run_current_action(&mut self, out: &mut Vec<BattleEvent>) -> Result<()> {
+    fn run_current_action(
+        &mut self,
+        hooks: &mut dyn BattleHooks,
+        out: &mut Vec<BattleEvent>,
+    ) -> Result<()> {
         if self.queue_index >= self.queue.len() {
             self.phase = BattlePhase::FaintCheck;
             return Ok(());
@@ -377,6 +403,7 @@ impl Battle {
                 move_slot,
                 target_side,
                 target_slot,
+                hooks,
                 out,
             )?,
             BattleAction::Switch { to_party } => {
@@ -403,6 +430,7 @@ impl Battle {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn execute_fight(
         &mut self,
         user_side: SideId,
@@ -410,50 +438,148 @@ impl Battle {
         move_slot: u8,
         target_side: SideId,
         target_slot: SlotIndex,
+        hooks: &mut dyn BattleHooks,
         out: &mut Vec<BattleEvent>,
     ) -> Result<()> {
-        let user = self
-            .side(user_side)
-            .creature(user_slot)
-            .ok_or_else(|| BattleError::InvalidAction("user not active".into()))?;
-        let mv = user
-            .template
-            .moves
-            .get(move_slot as usize)
-            .and_then(|m| m.as_ref())
-            .ok_or_else(|| BattleError::InvalidAction("invalid move slot".into()))?;
-        let power = mv.power;
-        let atk = user.template.stats.attack;
+        let (move_id, user_level, user_types, user_stats) = {
+            let user = self
+                .side(user_side)
+                .creature(user_slot)
+                .ok_or_else(|| BattleError::InvalidAction("user not active".into()))?;
+            let mv = user
+                .template
+                .moves
+                .get(move_slot as usize)
+                .and_then(|m| m.as_ref())
+                .ok_or_else(|| BattleError::InvalidAction("invalid move slot".into()))?;
+            (
+                mv.id.clone(),
+                user.template.level,
+                user.template.types.clone(),
+                user.template.stats.clone(),
+            )
+        };
+
+        let move_def = self
+            .resources
+            .pack
+            .move_by_id(&move_id)
+            .ok_or_else(|| BattleError::InvalidAction(format!("unknown move `{move_id}`")))?
+            .clone();
+
+        let (target_types, target_stats) = {
+            let target = self
+                .side(target_side)
+                .creature(target_slot)
+                .ok_or_else(|| BattleError::InvalidAction("invalid target".into()))?;
+            (target.template.types.clone(), target.template.stats.clone())
+        };
+
         out.push(BattleEvent::MoveUsed {
             user_side,
             user_slot,
-            move_id: mv.id.clone(),
+            move_id: move_id.clone(),
             target_side,
             target_slot,
         });
-        let def = self
+
+        let user_stages = self
+            .side(user_side)
+            .stages(user_slot)
+            .cloned()
+            .unwrap_or_default();
+        let target_stages = self
             .side(target_side)
-            .creature(target_slot)
-            .map(|c| c.template.stats.defense)
-            .unwrap_or(1);
-        let amount = stub_damage(power, atk, def);
-        let remaining = self.apply_damage(target_side, target_slot, amount)?;
-        out.push(BattleEvent::Damage {
-            target_side,
-            target_slot,
-            amount,
-            remaining_hp: remaining,
-        });
-        if remaining == 0 {
-            if let Some(party_index) = self.side(target_side).party_index(target_slot) {
-                out.push(BattleEvent::Fainted {
-                    side: target_side,
-                    slot: target_slot,
-                    party_index,
-                });
+            .stages(target_slot)
+            .cloned()
+            .unwrap_or_default();
+
+        let mut acc = roll_accuracy(
+            move_def.accuracy,
+            &user_stages,
+            &target_stages,
+            self.rng.as_game_rng(),
+        );
+        hooks.on_accuracy(&self.hook_ctx(out), &mut acc)?;
+        if !acc.hits {
+            out.push(BattleEvent::Missed {
+                target_side,
+                target_slot,
+                move_id,
+            });
+            return Ok(());
+        }
+
+        let offense = effective_offense(user_stats.attack, &user_stages, move_def.category);
+        let defense = effective_defense(target_stats.defense, &target_stages, move_def.category);
+
+        let inputs = DamageInputs {
+            level: user_level,
+            power: move_def.power,
+            category: move_def.category,
+            offense,
+            defense,
+            move_type: &move_def.type_id,
+            user_types: &user_types,
+            target_types: &target_types,
+            critical: false,
+        };
+
+        let mut calc = DamageCalc::compute(
+            inputs,
+            &self.resources.pack.type_chart,
+            self.rng.as_game_rng(),
+        );
+        hooks.on_damage_calc(&self.hook_ctx(out), &mut calc)?;
+        let amount = calc.final_damage();
+
+        if move_def.category != MoveCategory::Status {
+            let remaining = self.apply_damage(target_side, target_slot, amount)?;
+            out.push(BattleEvent::Damage {
+                target_side,
+                target_slot,
+                amount,
+                remaining_hp: remaining,
+            });
+            if remaining == 0 {
+                if let Some(party_index) = self.side(target_side).party_index(target_slot) {
+                    out.push(BattleEvent::Fainted {
+                        side: target_side,
+                        slot: target_slot,
+                        party_index,
+                    });
+                }
             }
         }
-        let _ = self.rng.as_game_rng().next_u32();
+
+        let user_side_id = user_side;
+        let user_slot_id = user_slot;
+        let target_side_id = target_side;
+        let target_slot_id = target_slot;
+        let effects = move_def.effects.clone();
+        let (user_side_state, target_side_state) = match user_side_id {
+            SideId::Player => (&mut self.player, &mut self.opponent),
+            SideId::Opponent => (&mut self.opponent, &mut self.player),
+        };
+        let user_stages_mut = user_side_state
+            .stages_mut(user_slot_id)
+            .ok_or_else(|| BattleError::InvalidAction("user slot missing".into()))?;
+        let target_stages_mut = target_side_state
+            .stages_mut(target_slot_id)
+            .ok_or_else(|| BattleError::InvalidAction("target slot missing".into()))?;
+        apply_effects(
+            &effects,
+            user_side_id,
+            user_slot_id,
+            target_side_id,
+            target_slot_id,
+            amount,
+            user_stages_mut,
+            target_stages_mut,
+            self.rng.as_game_rng(),
+            out,
+        );
+
         Ok(())
     }
 
@@ -549,9 +675,4 @@ impl Battle {
             SideId::Opponent => &mut self.opponent,
         }
     }
-}
-
-fn stub_damage(power: u16, attack: u32, defense: u32) -> u32 {
-    let defense = defense.max(1);
-    ((u32::from(power) * attack / defense) / 2).max(1)
 }

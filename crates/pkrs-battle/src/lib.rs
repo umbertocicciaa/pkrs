@@ -2,20 +2,27 @@
 //!
 //! See `docs/design.md` §7.1–§7.2 and §4.3 for crate boundaries.
 
+mod accuracy;
 mod action;
 mod battle;
 mod convert;
+mod damage;
+mod effects;
 mod error;
 mod event;
 mod hooks;
 mod model;
 mod order;
 mod phase;
+mod resources;
 mod rng;
+mod stat_stage;
 
+pub use accuracy::AccuracyCalc;
 pub use action::{BattleAction, BattleInput, SideInput};
 pub use battle::Battle;
 pub use convert::{IntoBattleSetup, testkit as battle_testkit};
+pub use damage::{DamageCalc, DamageModifierStage};
 pub use error::{BattleError, Result};
 pub use event::BattleEvent;
 pub use hooks::{ActionOrder, BattleHookCtx, BattleHooks, NullBattleHooks, RecordingBattleHooks};
@@ -24,7 +31,9 @@ pub use model::{
     CreatureStats, MoveSlot, PartyIndex, SideId, SlotIndex,
 };
 pub use phase::BattlePhase;
+pub use resources::BattleResources;
 pub use rng::{BattleRng, RngPolicy};
+pub use stat_stage::StatStages;
 
 #[cfg(test)]
 mod tests {

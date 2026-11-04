@@ -1,0 +1,12 @@
+(
+    id: "ember",
+    type: "fire",
+    category: special,
+    power: 40,
+    accuracy: 100,
+    priority: 0,
+    effects: [
+        (effect: "damage"),
+        (effect: "apply_status", status: "burn", chance: 10),
+    ],
+)

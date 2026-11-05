@@ -1,0 +1,11 @@
+(
+    types: ["normal", "fire", "water", "grass"],
+    chart: {
+        ("fire", "grass"): 2.0,
+        ("fire", "water"): 0.5,
+        ("grass", "fire"): 0.5,
+        ("grass", "water"): 2.0,
+        ("water", "fire"): 2.0,
+        ("water", "grass"): 0.5,
+    },
+)

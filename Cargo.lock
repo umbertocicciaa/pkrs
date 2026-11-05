@@ -431,6 +431,8 @@ name = "pkrs-data"
 version = "0.0.0"
 dependencies = [
  "pkrs-core",
+ "ron",
+ "serde",
  "thiserror",
 ]
 

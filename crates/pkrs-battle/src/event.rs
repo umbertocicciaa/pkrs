@@ -1,5 +1,7 @@
 //! Append-only battle log entries (§7.2).
 
+use pkrs_data::StatId;
+
 use crate::action::BattleAction;
 use crate::model::{BattleOutcome, PartyIndex, SideId, SlotIndex};
 
@@ -43,7 +45,7 @@ pub enum BattleEvent {
         /// Target slot.
         target_slot: SlotIndex,
     },
-    /// Stub damage (full pipeline is a later issue).
+    /// Damage dealt after the full pipeline.
     Damage {
         /// Target side.
         target_side: SideId,
@@ -53,6 +55,58 @@ pub enum BattleEvent {
         amount: u32,
         /// HP remaining on the target.
         remaining_hp: u32,
+    },
+    /// A move missed.
+    Missed {
+        /// Target side.
+        target_side: SideId,
+        /// Target slot.
+        target_slot: SlotIndex,
+        /// Move content id.
+        move_id: String,
+    },
+    /// A stat stage changed.
+    StatChanged {
+        /// Affected side.
+        side: SideId,
+        /// Active slot.
+        slot: SlotIndex,
+        /// Which stat.
+        stat: StatId,
+        /// New stage (-6..=6).
+        stages: i8,
+    },
+    /// A status was applied.
+    StatusApplied {
+        /// Target side.
+        target_side: SideId,
+        /// Target slot.
+        target_slot: SlotIndex,
+        /// Status id.
+        status: String,
+    },
+    /// Heal (absolute amount or percent placeholder in `amount`).
+    Heal {
+        /// Side healed.
+        side: SideId,
+        /// Slot healed.
+        slot: SlotIndex,
+        /// Heal amount (semantics depend on effect).
+        amount: u32,
+    },
+    /// Recoil damage to the user.
+    Recoil {
+        /// User side.
+        side: SideId,
+        /// User slot.
+        slot: SlotIndex,
+        /// Damage dealt to self.
+        amount: u32,
+    },
+    /// Field weather changed.
+    WeatherSet {
+        /// Weather id.
+        weather: String,
     },
     /// A creature fainted.
     Fainted {

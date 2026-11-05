@@ -1,0 +1,8 @@
+(
+    id: "leafkit",
+    types: ["grass"],
+    hp: 40,
+    attack: 18,
+    defense: 16,
+    speed: 14,
+)

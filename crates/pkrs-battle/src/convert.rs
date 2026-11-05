@@ -12,15 +12,48 @@ pub trait IntoBattleSetup {
 }
 
 /// Helper for tests and fixtures until `pkrs-data` provides real conversions.
+#[allow(clippy::expect_used)]
 pub mod testkit {
+    use std::collections::HashMap;
+
+    use pkrs_data::{BattlePack, MoveCategory, MoveDef, MoveEffect, TypeChart};
+
     use crate::model::{
         BattleConfig, BattleCreature, BattleSetup, BattleSideSetup, CreatureStats, MoveSlot,
     };
+    use crate::resources::BattleResources;
+
+    fn default_type_chart() -> TypeChart {
+        let mut chart = HashMap::new();
+        chart.insert(("fire".into(), "water".into()), 0.5);
+        chart.insert(("water".into(), "fire".into()), 2.0);
+        TypeChart::from_parts(vec!["normal".into(), "fire".into(), "water".into()], chart)
+    }
+
+    fn tackle_move() -> MoveDef {
+        MoveDef {
+            id: "tackle".into(),
+            type_id: "normal".into(),
+            category: MoveCategory::Physical,
+            power: 35,
+            accuracy: 100,
+            priority: 0,
+            effects: vec![MoveEffect::Damage],
+        }
+    }
+
+    /// Default battle content for unit/integration tests.
+    pub fn default_resources() -> BattleResources {
+        let mut pack = BattlePack::new(default_type_chart());
+        pack.insert_move(tackle_move()).expect("tackle");
+        BattleResources::new(pack)
+    }
 
     /// Minimal 1v1 wild battle for tests.
     pub fn wild_1v1() -> BattleSetup {
         let mk = |name: &str, hp: u32, atk: u32, def: u32, spe: u32, power: u16| BattleCreature {
             species_id: name.into(),
+            types: vec!["normal".into()],
             nickname: name.into(),
             level: 5,
             stats: CreatureStats::new(hp, atk, def, spe),

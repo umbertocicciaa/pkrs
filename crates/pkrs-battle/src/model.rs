@@ -97,6 +97,8 @@ pub struct MoveSlot {
 pub struct BattleCreature {
     /// Stable content id.
     pub species_id: String,
+    /// Element types (one or two) for STAB and effectiveness.
+    pub types: Vec<String>,
     /// Display name.
     pub nickname: String,
     /// Level (informational in this milestone).

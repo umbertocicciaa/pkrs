@@ -9,7 +9,9 @@ publish.workspace = true
 
 [dependencies]
 pkrs-core.workspace = true
+serde.workspace = true
 thiserror.workspace = true
+ron.workspace = true
 
 [lints]
 workspace = true

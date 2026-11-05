@@ -9,12 +9,13 @@ use pkrs_battle::{
 fn creature(name: &str, hp: u32, spe: u32, priority: i8) -> BattleCreature {
     BattleCreature {
         species_id: name.into(),
+        types: vec!["normal".into()],
         nickname: name.into(),
         level: 5,
         stats: CreatureStats::new(hp, 10, 10, spe),
         moves: [
             Some(MoveSlot {
-                id: "hit".into(),
+                id: "tackle".into(),
                 priority,
                 power: 40,
                 pp: 10,
@@ -34,6 +35,7 @@ fn start_reaches_select_actions() {
     let mut battle = Battle::new(
         setup,
         BattleConfig::default(),
+        pkrs_battle::battle_testkit::default_resources(),
         RngPolicy::Fixed { seed: 0 },
         &mut hooks,
     )
@@ -66,8 +68,14 @@ fn side_size_two_accepts_two_actions_per_side() {
     };
     let config = BattleConfig { side_size: 2 };
     let mut hooks = NullBattleHooks;
-    let mut battle =
-        Battle::new(setup, config, RngPolicy::Fixed { seed: 0 }, &mut hooks).expect("new");
+    let mut battle = Battle::new(
+        setup,
+        config,
+        pkrs_battle::battle_testkit::default_resources(),
+        RngPolicy::Fixed { seed: 0 },
+        &mut hooks,
+    )
+    .expect("new");
     battle
         .step(BattleInput::default(), &mut hooks)
         .expect("start");
@@ -101,6 +109,11 @@ fn side_size_two_accepts_two_actions_per_side() {
             ],
         },
     );
-    battle.step(input, &mut hooks).expect("turn");
-    assert_ne!(battle.phase(), BattlePhase::SelectActions);
+    let events = battle.step(input, &mut hooks).expect("turn");
+    let move_uses = events
+        .iter()
+        .filter(|e| matches!(e, BattleEvent::MoveUsed { .. }))
+        .count();
+    assert_eq!(move_uses, 4);
+    assert_eq!(battle.turn(), 2);
 }

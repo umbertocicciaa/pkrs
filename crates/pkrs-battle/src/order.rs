@@ -121,6 +121,7 @@ mod tests {
     fn creature(speed: u32, priority: i8) -> ActiveCreature {
         ActiveCreature::from_template(BattleCreature {
             species_id: "a".into(),
+            types: vec!["normal".into()],
             nickname: "A".into(),
             level: 5,
             stats: CreatureStats::new(20, 10, 10, speed),

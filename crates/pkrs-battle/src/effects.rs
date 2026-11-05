@@ -1,13 +1,13 @@
 //! Move effect primitive execution (§7.3).
 
 use pkrs_core::GameRng;
-use pkrs_data::{EffectTarget, MoveEffect};
+use pkrs_data::{BattleRules, EffectTarget, MoveEffect};
 
 use crate::event::BattleEvent;
 use crate::model::{ActiveCreature, SideId};
 use crate::stat_stage::StatStages;
 
-/// Applies non-damage effects after a successful hit.
+/// Applies non-damage effects after a successful hit (`ApplyStatus` is handled in [`Battle`]).
 #[allow(clippy::too_many_arguments)]
 pub fn apply_effects(
     effects: &[MoveEffect],
@@ -21,25 +21,14 @@ pub fn apply_effects(
     _target_creature: &mut ActiveCreature,
     user_stages: &mut StatStages,
     target_stages: &mut StatStages,
+    rules: &BattleRules,
+    weather: &mut Option<(String, u8)>,
     rng: &mut dyn GameRng,
     out: &mut Vec<BattleEvent>,
-) {
+) -> crate::error::Result<()> {
     for effect in effects {
         match effect {
-            MoveEffect::Damage => {}
-            MoveEffect::ApplyStatus { status, chance } => {
-                if target_fainted {
-                    continue;
-                }
-                let roll = rng.gen_range_u32(100);
-                if roll < u32::from(*chance) {
-                    out.push(BattleEvent::StatusApplied {
-                        target_side,
-                        target_slot,
-                        status: status.clone(),
-                    });
-                }
-            }
+            MoveEffect::Damage | MoveEffect::ApplyStatus { .. } => {}
             MoveEffect::StatStage {
                 stat,
                 stages,
@@ -104,10 +93,13 @@ pub fn apply_effects(
                     key: format!("multi_hit:{extra}"),
                 });
             }
-            MoveEffect::Weather { weather } => {
-                out.push(BattleEvent::WeatherSet {
-                    weather: weather.clone(),
-                });
+            MoveEffect::Weather { weather: id } => {
+                if let Some(def) = rules.weather(id) {
+                    *weather = Some((id.clone(), def.default_turns));
+                    out.push(BattleEvent::WeatherSet {
+                        weather: id.clone(),
+                    });
+                }
             }
             MoveEffect::Protect => {
                 out.push(BattleEvent::Message {
@@ -121,6 +113,7 @@ pub fn apply_effects(
             }
         }
     }
+    Ok(())
 }
 
 fn heal_amount(creature: &mut ActiveCreature, percent: u8) -> u32 {
@@ -154,7 +147,7 @@ fn apply_damage_to(
 mod tests {
     use super::*;
     use pkrs_core::Pcg64Rng;
-    use pkrs_data::{MoveEffect, StatId};
+    use pkrs_data::{BattleRules, MoveEffect, StatId};
 
     fn creature(hp: u32) -> ActiveCreature {
         use crate::model::{BattleCreature, CreatureStats};
@@ -176,6 +169,8 @@ mod tests {
         let mut target_stages = StatStages::zero();
         let mut rng = Pcg64Rng::from_seed(0);
         let mut out = Vec::new();
+        let rules = BattleRules::gen3_defaults();
+        let mut weather = None;
         apply_effects(
             &[MoveEffect::StatStage {
                 stat: StatId::Attack,
@@ -193,9 +188,12 @@ mod tests {
             &mut target,
             &mut user_stages,
             &mut target_stages,
+            &rules,
+            &mut weather,
             &mut rng,
             &mut out,
-        );
+        )
+        .expect("effects");
         assert_eq!(user_stages.attack, 1);
         assert_eq!(target_stages.attack, 0);
         assert!(matches!(
@@ -216,6 +214,8 @@ mod tests {
         let mut target_stages = StatStages::zero();
         let mut rng = Pcg64Rng::from_seed(0);
         let mut out = Vec::new();
+        let rules = BattleRules::gen3_defaults();
+        let mut weather = None;
         apply_effects(
             &[MoveEffect::Heal { percent: 50 }],
             SideId::Player,
@@ -228,9 +228,12 @@ mod tests {
             &mut target,
             &mut user_stages,
             &mut target_stages,
+            &rules,
+            &mut weather,
             &mut rng,
             &mut out,
-        );
+        )
+        .expect("effects");
         assert_eq!(user.current_hp, 100);
         assert_eq!(
             out[0],

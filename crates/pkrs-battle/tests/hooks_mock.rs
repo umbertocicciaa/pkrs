@@ -226,7 +226,20 @@ fn before_move_can_swap_the_move_and_bad_targets_fall_back() {
         }
     }
     let mut h = Swap;
-    let mut b = start(&mut h);
+    let mut s = setup();
+    // Opponent must move before player's spore, or sleep would block the tackle.
+    s.player.party[0] = creature("hero", 100, 10);
+    s.opponent.party[0] = creature("foe", 100, 50);
+    let mut b = Battle::new(
+        s,
+        BattleConfig::default(),
+        resources(),
+        RngPolicy::Fixed { seed: 3 },
+        &mut h,
+    )
+    .unwrap();
+    b.step(BattleInput::default(), &mut h).unwrap();
+    assert_eq!(b.phase(), BattlePhase::SelectActions);
     let events = b.step(tackle_turn(), &mut h).unwrap();
     assert!(events.iter().any(|e| matches!(e, BattleEvent::MoveUsed { user_side: SideId::Player, move_id, .. } if move_id == "spore")));
     assert_eq!(

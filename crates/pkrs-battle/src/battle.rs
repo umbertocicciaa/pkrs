@@ -192,6 +192,8 @@ pub struct Battle {
     player_actions: Vec<(SlotIndex, BattleAction)>,
     opponent_actions: Vec<(SlotIndex, BattleAction)>,
     pending_outcome: Option<BattleOutcome>,
+    /// Active weather id and turns remaining.
+    weather: Option<(String, u8)>,
     /// Events produced outside `step` (e.g. by `on_action_menu`), emitted by the next `step`.
     deferred: Vec<BattleEvent>,
     /// Move being executed (exposed to hooks through [`BattleView::current_move`]).
@@ -225,6 +227,7 @@ impl Battle {
             player_actions: Vec::new(),
             opponent_actions: Vec::new(),
             pending_outcome: None,
+            weather: None,
             deferred: Vec::new(),
             current_move: None,
         })
@@ -554,9 +557,12 @@ impl Battle {
             }
             BattlePhase::EndOfTurn => {
                 self.run_hook(out, "on_end_of_turn", |ctx| hooks.on_end_of_turn(ctx))?;
+                crate::status::process_end_of_turn(self, out)?;
                 out.push(BattleEvent::TurnEnded { turn: self.turn });
                 if let Some(outcome) = self.check_battle_end() {
                     self.finish(outcome, hooks, out)?;
+                } else if let Some((side, slot)) = self.next_replace_needed() {
+                    self.phase = BattlePhase::Replace { side, slot };
                 } else if self.side(SideId::Player).side_has_any_usable()
                     && self.side(SideId::Opponent).side_has_any_usable()
                 {
@@ -757,6 +763,20 @@ impl Battle {
             (t.template.types.clone(), t.template.stats.clone())
         };
 
+        let rules = self.resources.rules.clone();
+        let blocked = Self::status_blocks_move(
+            &mut self.player,
+            &mut self.opponent,
+            &mut self.rng,
+            &rules,
+            user.side,
+            user.slot,
+            out,
+        )?;
+        if blocked {
+            return Ok(());
+        }
+
         out.push(BattleEvent::MoveUsed {
             user_side: user.side,
             user_slot: user.slot,
@@ -851,6 +871,9 @@ impl Battle {
                 if target_fainted {
                     continue;
                 }
+                if rules.status(status).is_none() {
+                    continue;
+                }
                 let roll = self.rng.as_game_rng().gen_range_u32(100);
                 if roll < u32::from(*chance) {
                     self.apply_status(
@@ -887,9 +910,11 @@ impl Battle {
                     &mut target_copy,
                     user_stages_mut,
                     &mut target_stages_copy,
+                    &rules,
+                    &mut self.weather,
                     self.rng.as_game_rng(),
                     out,
-                );
+                )?;
                 continue;
             }
             let (user_creature, user_stages_mut) =
@@ -908,9 +933,11 @@ impl Battle {
                 target_creature,
                 user_stages_mut,
                 target_stages_mut,
+                &rules,
+                &mut self.weather,
                 self.rng.as_game_rng(),
                 out,
-            );
+            )?;
         }
 
         let result = MoveResult {
@@ -979,6 +1006,17 @@ impl Battle {
         hooks: &mut dyn BattleHooks,
         out: &mut Vec<BattleEvent>,
     ) -> Result<()> {
+        let rules = self.resources.rules.clone();
+        if rules.status(&req.status).is_none() {
+            return Ok(());
+        }
+        if let Some(creature) = self.side(req.target.side).creature(req.target.slot) {
+            if let Some(def) = rules.status(&req.status) {
+                if pkrs_data::status_blocked_by_types(def, &creature.template.types) {
+                    return Ok(());
+                }
+            }
+        }
         let original = req.status.clone();
         let verdict = self.run_hook(out, "on_status_apply", |ctx| {
             hooks.on_status_apply(ctx, &mut req)
@@ -991,18 +1029,41 @@ impl Battle {
                 reason,
             }),
             HookResult::Continue if !req.status.is_empty() => {
-                out.push(BattleEvent::StatusApplied {
-                    target_side: req.target.side,
-                    target_slot: req.target.slot,
-                    status: req.status,
-                });
+                let hook_changed = req.status != original;
+                let side = match req.target.side {
+                    SideId::Player => &mut self.player,
+                    SideId::Opponent => &mut self.opponent,
+                };
+                let applied =
+                    if let Ok((creature, _)) = side.party_creature_and_stages(req.target.slot) {
+                        crate::status::apply_status_to_creature(
+                            creature,
+                            &req.status,
+                            &rules,
+                            self.rng.as_game_rng(),
+                        )
+                    } else {
+                        false
+                    };
+                if applied || hook_changed {
+                    out.push(BattleEvent::StatusApplied {
+                        target_side: req.target.side,
+                        target_slot: req.target.slot,
+                        status: req.status,
+                    });
+                }
             }
             HookResult::Continue => {}
         }
         Ok(())
     }
 
-    fn apply_damage(&mut self, side: SideId, slot: SlotIndex, amount: u32) -> Result<u32> {
+    pub(crate) fn apply_damage(
+        &mut self,
+        side: SideId,
+        slot: SlotIndex,
+        amount: u32,
+    ) -> Result<u32> {
         let creature = self
             .side_mut(side)
             .creature_mut(slot)
@@ -1121,6 +1182,68 @@ impl Battle {
         self.result = Some(result);
         self.phase = BattlePhase::End;
         Ok(())
+    }
+
+    pub(crate) fn rules(&self) -> &pkrs_data::BattleRules {
+        &self.resources.rules
+    }
+
+    pub(crate) fn weather_snapshot(&self) -> Option<(String, u8)> {
+        self.weather.clone()
+    }
+
+    pub(crate) fn tick_weather(&mut self) -> bool {
+        let Some((_, turns)) = &mut self.weather else {
+            return false;
+        };
+        if *turns > 0 {
+            *turns = turns.saturating_sub(1);
+        }
+        if *turns == 0 {
+            self.weather = None;
+            return true;
+        }
+        false
+    }
+
+    pub(crate) fn creature(&self, side: SideId, slot: SlotIndex) -> Option<&ActiveCreature> {
+        self.side(side).creature(slot)
+    }
+
+    pub(crate) fn creature_mut(
+        &mut self,
+        side: SideId,
+        slot: SlotIndex,
+    ) -> Option<&mut ActiveCreature> {
+        self.side_mut(side).creature_mut(slot)
+    }
+
+    pub(crate) fn party_index(&self, side: SideId, slot: SlotIndex) -> Option<PartyIndex> {
+        self.side(side).party_index(slot)
+    }
+
+    fn status_blocks_move(
+        player: &mut SideState,
+        opponent: &mut SideState,
+        rng: &mut BattleRng,
+        rules: &pkrs_data::BattleRules,
+        user_side: SideId,
+        user_slot: SlotIndex,
+        out: &mut Vec<BattleEvent>,
+    ) -> Result<bool> {
+        let side = match user_side {
+            SideId::Player => player,
+            SideId::Opponent => opponent,
+        };
+        let (creature, _) = side.party_creature_and_stages(user_slot)?;
+        Ok(crate::status::blocks_move_attempt(
+            creature,
+            user_side,
+            user_slot,
+            rules,
+            rng.as_game_rng(),
+            out,
+        ))
     }
 
     fn side(&self, side: SideId) -> &SideState {

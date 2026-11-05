@@ -3,6 +3,7 @@
 //! See `docs/design.md` §7.3 for battle-related schemas (full content pipeline in M6).
 
 mod battle_pack;
+mod battle_rules;
 mod error;
 mod move_def;
 mod species;
@@ -10,6 +11,10 @@ mod trainer;
 mod type_chart;
 
 pub use battle_pack::BattlePack;
+pub use battle_rules::{
+    BattleRules, ResidualKind, StatusDef, StatusKind, WeatherDef, residual_amount,
+    status_blocked_by_types, weather_chip_blocked,
+};
 pub use error::{DataError, Result};
 pub use move_def::{EffectTarget, MoveCategory, MoveDef, MoveEffect, StatId};
 pub use species::SpeciesDef;

@@ -33,6 +33,16 @@ pub enum DataError {
         /// Duplicate id.
         id: String,
     },
+    /// Invalid field value in content data.
+    #[error("invalid {field} in `{context}`: {message}")]
+    InvalidField {
+        /// Field name.
+        field: String,
+        /// Record or table context.
+        context: String,
+        /// Why the value is invalid.
+        message: String,
+    },
     /// Error from `pkrs-core`.
     #[error(transparent)]
     Core(#[from] pkrs_core::CoreError),

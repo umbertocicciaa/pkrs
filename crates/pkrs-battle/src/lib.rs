@@ -18,6 +18,7 @@ mod phase;
 mod resources;
 mod rng;
 mod stat_stage;
+mod status;
 
 pub use accuracy::AccuracyCalc;
 pub use action::{BattleAction, BattleInput, SideInput};

@@ -18,6 +18,21 @@ pub enum RngPolicy {
 }
 
 impl RngPolicy {
+    /// Seed of the AI decision stream for `side`, independent of the battle stream so AI
+    /// rolls never shift damage rolls and recorded inputs replay without the AI (§7.5).
+    #[must_use]
+    pub fn ai_seed(&self, side: crate::model::SideId) -> u64 {
+        let base = match self {
+            Self::Local { parent_seed } => *parent_seed,
+            Self::Fixed { seed } => *seed,
+        };
+        let label: u64 = match side {
+            crate::model::SideId::Player => 0x00A1_0001,
+            crate::model::SideId::Opponent => 0x00A1_0002,
+        };
+        Pcg64Rng::from_seed(base ^ label.rotate_left(40)).derive_sub_seed(label)
+    }
+
     /// Opens a battle-local RNG stream.
     pub fn open(&self) -> Pcg64Rng {
         match self {

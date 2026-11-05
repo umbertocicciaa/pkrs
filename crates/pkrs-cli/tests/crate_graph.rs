@@ -26,6 +26,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
     (
         "pkrs-script",
         &[
+            "pkrs-core",
             "pkrs-world",
             "pkrs-battle",
             "pkrs-data",

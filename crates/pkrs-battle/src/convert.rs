@@ -86,6 +86,6 @@ pub mod testkit {
 
     /// Default singles config.
     pub fn singles_config() -> BattleConfig {
-        BattleConfig { side_size: 1 }
+        BattleConfig::with_side_size(1)
     }
 }

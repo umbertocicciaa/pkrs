@@ -7,6 +7,7 @@ mod game_host;
 mod main_loop;
 pub mod project;
 pub mod scene;
+pub mod scripts;
 mod state;
 mod tick;
 pub mod wiring;

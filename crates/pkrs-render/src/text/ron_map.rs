@@ -6,7 +6,7 @@ use serde::Deserialize;
 
 use crate::error::{RenderError, Result};
 use crate::rect::Rect;
-use crate::text::font::{BitmapFont, GlyphMetrics};
+use crate::text::font::{BitmapFont, GlyphMetrics, insert_glyph};
 use crate::text::util;
 
 #[derive(Debug, Deserialize)]
@@ -62,7 +62,8 @@ pub fn parse_glyph_map_ron(source: &str) -> Result<BitmapFont> {
                 detail: format!("glyph `{key}` has zero size"),
             });
         }
-        glyphs.insert(
+        insert_glyph(
+            &mut glyphs,
             codepoint,
             GlyphMetrics {
                 src: Rect::new(
@@ -75,23 +76,30 @@ pub fn parse_glyph_map_ron(source: &str) -> Result<BitmapFont> {
                 yoffset: g.yoff,
                 xadvance: g.xadv,
             },
-        );
+        )?;
     }
-    Ok(BitmapFont::from_glyphs(
+    BitmapFont::from_glyphs(
         raw.line_height,
         raw.base,
         raw.atlas.width,
         raw.atlas.height,
         glyphs,
-    ))
+        BTreeMap::new(),
+    )
 }
 
 fn decode_glyph_key(key: &str) -> Result<u32> {
     if key.starts_with("U+") || key.starts_with("u+") {
         let hex = &key[2..];
+        if hex.starts_with('+') {
+            return Err(RenderError::FontParse {
+                detail: format!("glyph key `{key}`: invalid U+ form"),
+            });
+        }
         let cp = u32::from_str_radix(hex, 16).map_err(|e| RenderError::FontParse {
             detail: format!("glyph key `{key}`: {e}"),
         })?;
+        validate_codepoint(cp, key)?;
         return Ok(cp);
     }
     let mut chars = key.chars();
@@ -104,6 +112,15 @@ fn decode_glyph_key(key: &str) -> Result<u32> {
         });
     }
     Ok(u32::from(ch))
+}
+
+fn validate_codepoint(cp: u32, key: &str) -> Result<()> {
+    if cp > 0x10_FFFF || (0xD800..=0xDFFF).contains(&cp) {
+        return Err(RenderError::FontParse {
+            detail: format!("glyph key `{key}`: not a Unicode scalar value"),
+        });
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -124,5 +141,18 @@ mod tests {
         let font = parse_glyph_map_ron(src).expect("parse");
         assert!(font.glyph('A'.into()).is_some());
         assert!(font.glyph(' '.into()).is_some());
+    }
+
+    #[test]
+    fn rejects_out_of_atlas_glyph() {
+        let src = r#"(
+            line_height: 10,
+            base: 8,
+            atlas: (width: 32, height: 16),
+            glyphs: {
+                "A": (x: 4000, y: 0, w: 6, h: 8, xadv: 7),
+            },
+        )"#;
+        assert!(parse_glyph_map_ron(src).is_err());
     }
 }

@@ -21,8 +21,8 @@ use crate::texture::TextureHandle;
 /// Style for [`Renderer::draw_text`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TextStyle {
-    /// Tint colour (atlas is assumed white; backends may ignore until materials land).
-    pub color: Color,
+    /// Tint colour (atlas is assumed white).
+    pub tint: Color,
     /// Integer scale for crisp pixels (§5.5).
     pub scale: u32,
     /// Draw layer.
@@ -32,12 +32,7 @@ pub struct TextStyle {
 impl Default for TextStyle {
     fn default() -> Self {
         Self {
-            color: Color {
-                r: 255,
-                g: 255,
-                b: 255,
-                a: 255,
-            },
+            tint: Color::WHITE,
             scale: 1,
             layer: Layer::Ui,
         }
@@ -59,6 +54,7 @@ impl Renderer {
         style: TextStyle,
     ) {
         let scale_f = util::scale_f(style.scale);
+        let text = text.replace('\r', "");
         let mut cursor_x = x.floor();
         let mut cursor_y = y.floor();
         for (line_index, line) in text.split('\n').enumerate() {
@@ -66,12 +62,12 @@ impl Renderer {
                 cursor_y += util::u32_px(font.line_height) * scale_f;
                 cursor_x = x.floor();
             }
+            let mut prev: Option<char> = None;
             for ch in line.chars() {
-                let Some(metrics) = font.glyph(u32::from(ch)).or_else(|| font.fallback_glyph())
-                else {
+                let Some(metrics) = font.resolve_glyph(ch) else {
+                    prev = Some(ch);
                     continue;
                 };
-                let _ = style.color;
                 let dst_w = metrics.src.width * scale_f;
                 let dst_h = metrics.src.height * scale_f;
                 let dst_x = cursor_x + util::i32_px(metrics.xoffset) * scale_f;
@@ -81,9 +77,11 @@ impl Renderer {
                     src: metrics.src,
                     dst: Rect::new(dst_x, dst_y, dst_w, dst_h),
                     flip_x: false,
+                    tint: style.tint,
                     layer: style.layer,
                 });
-                cursor_x += util::u32_px(metrics.xadvance) * scale_f;
+                cursor_x += font.advance(prev, ch) * scale_f;
+                prev = Some(ch);
             }
         }
     }

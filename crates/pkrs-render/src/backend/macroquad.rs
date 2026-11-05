@@ -132,7 +132,12 @@ impl RenderBackend for MacroquadRenderer {
             texture,
             draw.dst.x,
             draw.dst.y,
-            ::macroquad::prelude::WHITE,
+            ::macroquad::prelude::Color::new(
+                f32::from(draw.tint.r) / 255.0,
+                f32::from(draw.tint.g) / 255.0,
+                f32::from(draw.tint.b) / 255.0,
+                f32::from(draw.tint.a) / 255.0,
+            ),
             DrawTextureParams {
                 source: Some(::macroquad::prelude::Rect::new(
                     draw.src.x,

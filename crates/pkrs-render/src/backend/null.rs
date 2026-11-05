@@ -24,6 +24,8 @@ pub struct RecordedDraw {
     pub dst: crate::rect::Rect,
     /// Horizontal flip flag.
     pub flip_x: bool,
+    /// Tint applied to the sprite.
+    pub tint: Color,
 }
 
 /// Shared log of recorded draws (clone before moving the backend into a [`Renderer`](crate::Renderer)).
@@ -101,6 +103,7 @@ impl RenderBackend for NullRenderer {
             src: draw.src,
             dst: draw.dst,
             flip_x: draw.flip_x,
+            tint: draw.tint,
         });
     }
 
@@ -110,6 +113,7 @@ impl RenderBackend for NullRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::color::Color;
     use crate::rect::Rect;
 
     #[test]
@@ -121,6 +125,7 @@ mod tests {
             src: Rect::new(0.0, 0.0, 8.0, 8.0),
             dst: Rect::new(1.0, 2.0, 8.0, 8.0),
             flip_x: false,
+            tint: Color::WHITE,
             layer: Layer::Entities,
         });
         backend.draw_sprite(&SpriteDraw {
@@ -128,6 +133,7 @@ mod tests {
             src: Rect::new(0.0, 0.0, 8.0, 8.0),
             dst: Rect::new(3.0, 4.0, 8.0, 8.0),
             flip_x: true,
+            tint: Color::WHITE,
             layer: Layer::Ui,
         });
         assert_eq!(log.draws().len(), 2);

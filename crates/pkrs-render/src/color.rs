@@ -21,4 +21,12 @@ impl Color {
         b: 0,
         a: 255,
     };
+
+    /// Opaque white.
+    pub const WHITE: Self = Self {
+        r: 255,
+        g: 255,
+        b: 255,
+        a: 255,
+    };
 }

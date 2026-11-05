@@ -12,6 +12,8 @@ pub enum LoopExit {
     TickLimit,
     /// Reached [`RuntimeLoopConfig::max_frames`].
     FrameLimit,
+    /// [`Transition::Quit`](crate::Transition) was applied (§4.1).
+    Quit,
 }
 
 /// Policy for the outer loop (§3.1–§3.2).
@@ -48,6 +50,10 @@ pub trait SimulationHost {
     fn simulation_tick(&mut self, dt: f64);
     /// Draw with interpolation factor `alpha` (§3.1).
     fn render(&mut self, platform: &Platform, alpha: f32);
+    /// The game asked to exit (§4.1 `Transition::Quit`).
+    fn should_quit(&self) -> bool {
+        false
+    }
 }
 
 /// Default host that runs stub §3.3 hooks only.
@@ -82,6 +88,9 @@ pub async fn run_loop(
         for _ in 0..ticks_this_frame {
             host.begin_tick();
             host.simulation_tick(TICK_DT);
+            if host.should_quit() {
+                return LoopExit::Quit;
+            }
             sim_ticks = sim_ticks.saturating_add(1);
             if config.max_ticks.is_some_and(|limit| sim_ticks >= limit) {
                 return LoopExit::TickLimit;

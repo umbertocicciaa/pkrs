@@ -7,6 +7,35 @@ use thiserror::Error;
 /// Convenience alias for results whose error is [`PlatformError`].
 pub type Result<T, E = PlatformError> = std::result::Result<T, E>;
 
+/// Convenience alias for input facade results.
+pub type InputResult<T> = std::result::Result<T, InputError>;
+
+/// Errors from the [`Input`](crate::Input) facade and action registry.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum InputError {
+    /// The action name is not valid `snake_case` or `plugin:action`.
+    #[error("invalid action name `{0}`")]
+    InvalidActionName(String),
+    /// The action was already registered.
+    #[error("action `{0}` is already registered")]
+    DuplicateAction(String),
+    /// Too many custom actions were registered.
+    #[error("custom action registry is full")]
+    RegistryFull,
+    /// A manifest or config key name is unknown.
+    #[error("unknown key name `{key}` for action `{action}`")]
+    UnknownKeyName {
+        /// Action table entry in `pkrs.toml`.
+        action: String,
+        /// Key string that could not be parsed.
+        key: String,
+    },
+    /// A binding lists no keys.
+    #[error("action `{0}` must list at least one key")]
+    EmptyBinding(String),
+}
+
 /// Errors produced by `pkrs-platform`.
 #[derive(Debug, Error)]
 #[non_exhaustive]

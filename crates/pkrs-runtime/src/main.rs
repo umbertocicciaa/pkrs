@@ -63,7 +63,8 @@ fn run_headless(config: RuntimeLoopConfig) -> anyhow::Result<()> {
 }
 
 fn run_windowed(config: RuntimeLoopConfig) -> anyhow::Result<()> {
-    let mut window = WindowConfig::from_display("pkrs", &DisplaySettings::default());
+    let display = DisplaySettings::default();
+    let mut window = WindowConfig::from_display("pkrs", &display);
     window.vsync = config.vsync;
     MacroquadPlatform::run(&window, move |backend| async move {
         let mut platform = Platform::new(

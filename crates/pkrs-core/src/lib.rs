@@ -19,7 +19,7 @@ pub use error::{CoreError, Result};
 pub use events::{EngineEvent, EventPayload, EventQueue};
 pub use grid::GridPos;
 pub use id::{IdInterner, IdKind, MoveKind, SpeciesKind, TypedId, validate_id};
-pub use manifest::{ManifestError, ProjectManifest};
+pub use manifest::{ManifestError, ProjectManifest, is_action_name, is_plugin_id};
 pub use rng::{GameRng, Pcg64Rng, RngState};
 pub use version::{Version, VersionReq};
 

@@ -29,9 +29,9 @@ pub use error::{BattleError, Result};
 pub use event::BattleEvent;
 pub use hooks::{
     ActionMenu, ActionOrder, BattleHookCtx, BattleHooks, BattleValue, BattleView, CreatureView,
-    CustomAction, DamageTaken, FaintEvent, HookResult, MenuOption, MoveRequest, MoveResult,
-    MoveView, NullBattleHooks, RecordingBattleHooks, SideView, SlotRef, StatusApply, SwitchIn,
-    SwitchOut,
+    CurrentMove, CustomAction, DamageTaken, FaintEvent, HookResult, MenuOption, MoveRequest,
+    MoveResult, MoveView, NullBattleHooks, RecordingBattleHooks, SideView, SlotRef, StatusApply,
+    SwitchIn, SwitchOut,
 };
 pub use model::{
     BattleConfig, BattleCreature, BattleOutcome, BattleResult, BattleSetup, BattleSideSetup,

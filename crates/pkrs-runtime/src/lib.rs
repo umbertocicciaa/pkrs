@@ -5,6 +5,7 @@ mod demo;
 mod fixed_step;
 mod game_host;
 mod main_loop;
+pub mod scripts;
 mod state;
 mod tick;
 

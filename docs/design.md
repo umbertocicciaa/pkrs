@@ -368,8 +368,8 @@ flowchart TD
   battle[pkrs-battle] --> core & data
   save[pkrs-save] --> core & data
   ui[pkrs-ui] --> render & platform
-  script[pkrs-script] --> world & battle & data & save & ui & audio
-  runtime[pkrs-runtime] --> core & script & render & audio & ui & save & world & platform
+  script[pkrs-script] --> core & world & battle & data & save & ui & audio
+  runtime[pkrs-runtime] --> core & assets & script & render & audio & ui & save & world & platform
   cli[pkrs-cli] --> data & assets & world & script
 ```
 
@@ -746,6 +746,14 @@ All Lua APIs live in namespaced global tables, created per API level:
 
 **Rust-only:** rendering internals, collision resolution, file I/O, save serialization, asset decoding, the main loop and the battle step engine. Lua influences these through declared hooks, never by direct access.
 
+**Battle module implementation notes (`pkrs_script::LuaBattleHooks`, M4).**
+- **Registration and arguments.** `battle.on(name, fn, { priority = n })` accepts the §7.4 hook names. Handlers receive `ctx` followed by the arguments in the §7.4 table. Creatures are tables `{ side = "player"|"opponent", slot, is_player, party_index, species, name, level, hp, max_hp, types, stats }`; moves are `{ id, type, category, power, accuracy, priority }`.
+- **Return values.** `nil` means unchanged; a returned value replaces the payload; `{ cancel = true, message = … }` cancels and stops the chain. `on_damage_calc` gets `dmg = { base, value, critical, immune, modifiers }`, where `dmg.modifiers:push(name, mult)` and `dmg.final = n` map to `DamageCalc`.
+- **The `ctx` API.** `ctx:random(n)` returns 1..=n from the battle stream. `ctx.message`, `ctx.play_fx` (logged as `fx:<id>`), `ctx.volatile` / `set_volatile` / `clear_volatile`, `ctx.side_state` / `set_side_state`, `ctx.creature(side, slot)` and `ctx.active_creatures()` are also available; all work with `.` or `:`. Volatile and side-state values are **copies**, so write them back with `set_volatile`. Only booleans, integers, strings and tables of those are stored, keeping replays exact.
+- **Custom actions.** A custom action counts as handled when a handler returns `true` or changes battle state.
+- **Failures.** A failing handler's `ctx` changes are rolled back and its value passes through; after 3 consecutive failures (configurable) it is disabled.
+- **Starting battles.** `battle.start_wild(species, level)` / `battle.start_trainer(id)` must run inside a task (`ScriptHost::start_task`). They yield `WaitRequest::Battle(…)`, and the engine resumes the task with `{ outcome = "win"|"loss"|"fled", turns, exp, money }`.
+
 ### 9.2 Events (overworld)
 Engine events Lua can subscribe to: `game_start`, `map_enter`, `map_exit`, `step`, `interact(npc|sign|tile)`, `trigger_enter`, `battle_end`, `menu_open`, `save_before`, `load_after`, `tick` (discouraged, but available).
 
@@ -899,6 +907,7 @@ ui.register_screen("resonance:log", {
 - **Saves are never corrupted by scripts:** a save is only written from a consistent state between ticks. If the save serializer finds non-serializable plugin save data (functions, userdata), it skips that key and logs, while the rest of the save still writes.
 - **Runaway scripts:** an instruction-count hook (`mlua` `set_hook` with `every_nth_instruction`) aborts a single call that exceeds a budget (e.g. 10M instructions) so infinite loops don't hang the game.
 - Memory limit per Lua state (`Lua::set_memory_limit`), configurable.
+- **Implementation notes (`pkrs_script::LuaScriptHost`, M3).** `mlua` 0.11 (MSRV 1.85, matching the workspace). The budget hook is global (`set_global_hook`, every 1 000 instructions), so script-created coroutines inherit it; once it trips, the sandbox's `pcall`, `xpcall` and `coroutine.resume` re-raise the budget error so a loop cannot swallow it (they are thin Lua wrappers, so yields through `pcall` still work). Each owner's `_ENV` holds *copies* of the library tables, the shared string metatable is sealed (`getmetatable("") == false`) and `string.dump` is removed. `load` is text-only and defaults to the caller's `_ENV`; `collectgarbage` accepts only `"count"`; `math.randomseed` is a no-op; `print` goes to `tracing` (target `script`). `require("a.b")` searches `<root>/a/b.lua` then `<root>/a/b/init.lua`, with roots `scripts/` for the game and `plugins/<id>/` then `scripts/` for a plugin; names are dotted identifiers only, results are cached per owner, and cycles are errors. Script files are read through the `ScriptFiles` port, which the runtime implements over the assets VFS.
 
 ### 9.7 API stability & versioning
 - The **scripting API level** is a single integer (`api = 1, 2, …`) that increments only when the Lua API changes incompatibly.

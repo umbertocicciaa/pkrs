@@ -98,6 +98,14 @@ impl RenderBackend for MacroquadRenderer {
         ::macroquad::prelude::clear_background(to_mq(color));
     }
 
+    fn create_texture_from_image(&mut self, encoded: &[u8]) -> Result<(TextureHandle, u32, u32)> {
+        let image = ::macroquad::texture::Image::from_file_with_format(encoded, None)
+            .map_err(|e| RenderError::Backend(format!("cannot decode image: {e}")))?;
+        let (width, height) = (u32::from(image.width), u32::from(image.height));
+        let handle = self.create_texture(width, height, &image.bytes)?;
+        Ok((handle, width, height))
+    }
+
     fn create_texture(&mut self, width: u32, height: u32, rgba: &[u8]) -> Result<TextureHandle> {
         let expected = (width as usize)
             .checked_mul(height as usize)
@@ -132,7 +140,12 @@ impl RenderBackend for MacroquadRenderer {
             texture,
             draw.dst.x,
             draw.dst.y,
-            ::macroquad::prelude::WHITE,
+            ::macroquad::prelude::Color::new(
+                f32::from(draw.tint.r) / 255.0,
+                f32::from(draw.tint.g) / 255.0,
+                f32::from(draw.tint.b) / 255.0,
+                f32::from(draw.tint.a) / 255.0,
+            ),
             DrawTextureParams {
                 source: Some(::macroquad::prelude::Rect::new(
                     draw.src.x,

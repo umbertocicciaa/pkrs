@@ -1,5 +1,6 @@
 //! Draw commands passed to [`RenderBackend`](crate::backend::RenderBackend).
 
+use crate::color::Color;
 use crate::layer::Layer;
 use crate::rect::Rect;
 use crate::texture::TextureHandle;
@@ -15,6 +16,8 @@ pub struct SpriteDraw {
     pub dst: Rect,
     /// Mirror horizontally (e.g. `walk_left` reused for right).
     pub flip_x: bool,
+    /// Tint multiplied with the texture sample.
+    pub tint: Color,
     /// Draw order band.
     pub layer: Layer,
 }

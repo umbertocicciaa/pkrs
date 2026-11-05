@@ -18,6 +18,10 @@ pub enum DamageModifierStage {
     TypeEffectiveness,
     /// Random 85–100% roll (Gen 3).
     Random,
+    /// A multiplier pushed by a hook ([`DamageCalc::push_modifier`]).
+    Hook,
+    /// A final value set by a hook ([`DamageCalc::set_final`]).
+    Override,
 }
 
 /// Inputs to the physical/special damage formula.
@@ -48,6 +52,9 @@ pub struct DamageInputs<'a> {
 pub struct DamageCalc {
     /// Value after each named stage (last element is final before min-1 clamp).
     pub trace: Vec<(DamageModifierStage, u32)>,
+    /// Names and multipliers of hook modifiers, in the order of their
+    /// [`DamageModifierStage::Hook`] trace entries.
+    pub hook_modifiers: Vec<(String, f64)>,
 }
 
 impl DamageCalc {
@@ -77,7 +84,10 @@ impl DamageCalc {
         let type_mult = type_chart.combined_multiplier(inputs.move_type, inputs.target_types);
         if type_mult == 0.0 {
             trace.push((DamageModifierStage::TypeEffectiveness, 0));
-            return Self { trace };
+            return Self {
+                trace,
+                hook_modifiers: Vec::new(),
+            };
         }
         value = apply_multiplier(value, type_mult);
         trace.push((DamageModifierStage::TypeEffectiveness, value));
@@ -86,7 +96,42 @@ impl DamageCalc {
         value = apply_multiplier(value, f64::from(roll) / 100.0);
         trace.push((DamageModifierStage::Random, value));
 
-        Self { trace }
+        Self {
+            trace,
+            hook_modifiers: Vec::new(),
+        }
+    }
+
+    /// Current value (last stage), before the min-1 clamp.
+    #[must_use]
+    pub fn current(&self) -> u32 {
+        self.trace.last().map_or(0, |(_, v)| *v)
+    }
+
+    /// `true` when the type chart made the target immune.
+    #[must_use]
+    pub fn is_immune(&self) -> bool {
+        self.trace
+            .iter()
+            .any(|(stage, v)| *stage == DamageModifierStage::TypeEffectiveness && *v == 0)
+    }
+
+    /// Applies a named multiplier (e.g. `("resonance", 1.5)`) to the current value (§9.5).
+    /// Negative multipliers count as `0`; non-finite ones are ignored (`1`).
+    pub fn push_modifier(&mut self, name: impl Into<String>, multiplier: f64) {
+        let mult = if multiplier.is_finite() {
+            multiplier.max(0.0)
+        } else {
+            1.0
+        };
+        let value = apply_multiplier(self.current(), mult);
+        self.hook_modifiers.push((name.into(), mult));
+        self.trace.push((DamageModifierStage::Hook, value));
+    }
+
+    /// Replaces the final damage with `value`.
+    pub fn set_final(&mut self, value: u32) {
+        self.trace.push((DamageModifierStage::Override, value));
     }
 
     /// Final damage (0 on immunity; otherwise minimum 1 when non-zero).
@@ -96,7 +141,7 @@ impl DamageCalc {
     }
 }
 
-fn gen3_base_damage(level: u8, power: u16, offense: u32, defense: u32) -> u32 {
+pub(crate) fn gen3_base_damage(level: u8, power: u16, offense: u32, defense: u32) -> u32 {
     let level = u64::from(level);
     let power = u64::from(power);
     let offense = u64::from(offense.max(1));

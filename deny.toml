@@ -19,6 +19,8 @@ yanked = "deny"
 ignore = [
     { id = "RUSTSEC-2025-0035", reason = "macroquad soundness issues, no fixed release; macroquad is the v1 backend (§0.2) and is confined to the pkrs-platform/pkrs-render adapters" },
     { id = "RUSTSEC-2026-0192", reason = "ttf-parser unmaintained (via macroquad -> fontdue), no alternative release; only parses fonts shipped with the game" },
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml <0.41 quadratic duplicate-attribute check (DoS), pinned by tiled 0.16 (latest); only parses maps authored for and shipped with the game, confined to the TiledImporter adapter (§4.5)" },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml <0.41 unbounded namespace allocation in NsReader (DoS), pinned by tiled 0.16 (latest); only parses maps authored for and shipped with the game, confined to the TiledImporter adapter (§4.5)" },
 ]
 
 # --- Licenses ----------------------------------------------------------------

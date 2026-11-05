@@ -34,14 +34,18 @@ impl AnimationDemoHost {
 
     /// Builds the demo with the given render backend (already on the main thread for macroquad).
     pub fn new(backend: impl RenderBackend + 'static) -> pkrs_render::Result<Self> {
-        let sheet = parse_animation_descriptor(DEMO_RON)?;
-        let resolved = clip_for_direction(&sheet, "walk", Direction::Down)?;
-        let flip_x = resolved.flip_x;
-        let mut renderer = Renderer::new(
+        Self::with_renderer(Renderer::new(
             Box::new(backend),
             pkrs_platform::DisplaySettings::default(),
             RendererConfig::default(),
-        );
+        ))
+    }
+
+    /// Builds the demo on an already-wired [`Renderer`] facade (see [`crate::wiring`]).
+    pub fn with_renderer(mut renderer: Renderer) -> pkrs_render::Result<Self> {
+        let sheet = parse_animation_descriptor(DEMO_RON)?;
+        let resolved = clip_for_direction(&sheet, "walk", Direction::Down)?;
+        let flip_x = resolved.flip_x;
         let texture = renderer.create_texture(DEMO_WIDTH, DEMO_HEIGHT, DEMO_RGBA)?;
         Ok(Self {
             player: ClipPlayer::new(resolved.clip),
@@ -62,6 +66,7 @@ impl AnimationDemoHost {
             src,
             dst: Rect::new(112.0, 72.0, 16.0, 16.0),
             flip_x: self.flip_x,
+            tint: pkrs_render::Color::WHITE,
             layer: Layer::Entities,
         });
         self.renderer.end_frame();

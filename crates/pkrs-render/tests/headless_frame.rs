@@ -21,6 +21,7 @@ fn headless_frame_records_layered_sprite() {
         src: Rect::new(0.0, 0.0, 16.0, 16.0),
         dst: Rect::new(100.0, 50.0, 16.0, 16.0),
         flip_x: false,
+        tint: pkrs_render::Color::WHITE,
         layer: Layer::Entities,
     });
     renderer.end_frame();
@@ -48,6 +49,7 @@ fn multiple_frames_accumulate_in_log_when_not_cleared() {
             src: Rect::new(0.0, 0.0, 8.0, 8.0),
             dst: Rect::new(0.0, 0.0, 8.0, 8.0),
             flip_x: false,
+            tint: pkrs_render::Color::WHITE,
             layer: Layer::Ground,
         });
         renderer.end_frame();

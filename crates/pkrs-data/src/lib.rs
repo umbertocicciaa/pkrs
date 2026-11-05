@@ -7,6 +7,7 @@ mod battle_rules;
 mod error;
 mod move_def;
 mod species;
+mod trainer;
 mod type_chart;
 
 pub use battle_pack::BattlePack;
@@ -17,6 +18,10 @@ pub use battle_rules::{
 pub use error::{DataError, Result};
 pub use move_def::{EffectTarget, MoveCategory, MoveDef, MoveEffect, StatId};
 pub use species::SpeciesDef;
+pub use trainer::{
+    AiProfile, AiTier, AiWeights, BUILTIN_PROFILES, TrainerDef, TrainerMember, check_ai_profiles,
+    resolve_ai_profile,
+};
 pub use type_chart::TypeChart;
 
 #[cfg(test)]

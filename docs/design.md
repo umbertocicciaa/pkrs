@@ -232,6 +232,8 @@ cancel      = ["x", "backspace"]
 
 Templates are embedded in the CLI binary with `include_dir`, so `pkrs new` works offline.
 
+**Implementation notes (M2).** Templates live in `crates/pkrs-cli/templates/<name>/`. Text files (`.toml`, `.md`, `.lua`, `.txt`, `_gitignore`) get `{{name}}`, `{{id}}` (`com.example.<slug>`) and `{{engine_version}}` (the CLI's own version) substituted, and `_gitignore` is written as `.gitignore` (it ignores `saves/` and `dist/`). The v1 `one-shot` template is one 20×14 map with original CC0 art, a player sprite and `LICENSES.md`; the full story content ships with M8, and `full-game` is rejected until then. `pkrs run` finds the nearest `pkrs.toml` upwards, launches `$PKRS_RUNTIME` or the `pkrs-runtime` next to the `pkrs` executable (downloads are M7), and forwards `--project <dir> [--map <id>] [--warp x,y] [--headless] [--ticks N]`. The runtime checks `engine.version` and `engine.api`, mounts the folder through `FolderVfs`, loads `maps/<map>.tmx`, and writes dev saves under `<project>/saves/`. Until grid movement lands (§6.3), the runtime moves the player one tile per held direction, respecting collision.
+
 ### 2.5 Engine version pinning & upgrades
 - `engine.version` is a semver requirement. `pkrs run`/`build` pick the newest installed or downloadable runtime that satisfies it.
 - While pkrs is `0.x`, minor bumps may break things. From 1.0, normal semver applies.
@@ -364,13 +366,13 @@ flowchart TD
   data[pkrs-data] --> core
   render[pkrs-render] --> core & platform & assets
   audio[pkrs-audio] --> assets
-  world[pkrs-world] --> data & assets
+  world[pkrs-world] --> core & data & assets
   battle[pkrs-battle] --> core & data
   save[pkrs-save] --> core & data
   ui[pkrs-ui] --> render & platform
-  script[pkrs-script] --> world & battle & data & save & ui & audio
-  runtime[pkrs-runtime] --> core & script & render & audio & ui & save & world & platform
-  cli[pkrs-cli] --> data & assets & world & script
+  script[pkrs-script] --> core & world & battle & data & save & ui & audio
+  runtime[pkrs-runtime] --> core & assets & script & render & audio & ui & save & world & platform
+  cli[pkrs-cli] --> core & data & assets & world & script
 ```
 
 Key boundaries:
@@ -440,7 +442,7 @@ flowchart LR
 | `ron` | codec functions in `pkrs-data` / `pkrs-save`; sprite animation descriptors in `pkrs-render` | `RonCodec`; `parse_animation_descriptor` | typed structs, `pkrs_save::Value`; `SpriteSheetAnimation` | `pkrs-data`, `pkrs-save`, `pkrs-render` |
 | `texture_packer` | `AtlasPacker` | `TexturePackerAdapter` | `pkrs build` pipeline | `pkrs-cli` |
 
-**Not wrapped (allowed directly), and why:** `serde` (derive framework; it *is* the abstraction), `serde_path_to_error` (serde helper that only adds the failing field path to errors; never in public APIs), `thiserror` (compile-time only), `tracing` (already a logging facade), `anyhow`, `miette`, `include_dir` (binaries only, never in library APIs), `insta` (dev-only). Adding a new crate to this list requires a note in this section.
+**Not wrapped (allowed directly), and why:** `serde` (derive framework; it *is* the abstraction), `serde_path_to_error` (serde helper that only adds the failing field path to errors; never in public APIs), `thiserror` (compile-time only), `tracing` (already a logging facade), `anyhow`, `miette`, `include_dir` (binaries only, never in library APIs), `clap` (CLI argument parsing in the `pkrs` binary only), `insta` (dev-only). Adding a new crate to this list requires a note in this section.
 
 **Rules:**
 1. **No vendor type in any public signature** of a pkrs library crate. Facades and ports use engine types only.
@@ -512,6 +514,8 @@ Authors need effects that plain blitting cannot express: **animated tiles** (e.g
 | `encounters` | Object layer (rects) | `table = "route1_grass"`, `rate = 20` |
 
 Object properties reference scripts by name: an `npc` with `script = "maps/route1.lua:old_man"`, a `trigger` with `on_enter = "cutscenes/rival_intro"`.
+
+**Implementation notes (`pkrs_world::conventions`).** `ground` is required and draws in the `Ground` band; `ground2`, `ground3`, … draw in `GroundDecor`. A tile layer named `terrain` is logical only (never drawn). Tile properties `solid`, `block_n/s/e/w` and `terrain` are honoured on **any** tile layer, and later layers override earlier terrain. A tile on the `collision` layer is fully solid unless it only declares `block_*` edges (fences) or says `solid = false`. Directional blocking is checked on both sides of the shared edge. Object classes and their properties: `warp` (`to_map`, `to_x`, `to_y` required; `facing`, `transition`), `npc` (`script`, `sprite`, `facing` = `down`), `trigger` (`on_enter`, `once` = false), `sign` (`script` or `text`), `item` (`item` required, `count` = 1), `spawn` (`facing`); objects may set `uid` as their persistent key (§6.5). Encounter rects need `table` (string) and `rate` (int 0–100). Object pixel rects are converted to whole tiles. Orthogonal, finite maps only; image and group layers are rejected. Importers translate their format into an editor-neutral `RawMap`, so a future pkrs map editor reuses the same convention checks.
 
 ### 6.3 Grid movement
 - The player and NPCs occupy one tile. A step takes **16 ticks walking** and **8 ticks running** (configurable per project), with position interpolated over the step.
@@ -644,6 +648,8 @@ pub trait BattleHooks {
 
 Full Rust docs for `BattleHooks`, contexts and payload types are generated into `docs/rust-api/` alongside `docs/lua-api/`.
 
+**Implementation notes (`pkrs_battle::hooks`, M4).** Every hook takes `&mut BattleHookCtx`, which holds a read-only `BattleView` snapshot (sides, active creatures, stages, volatiles, side state), the event log so far, the policy-aware battle RNG (`ctx.random(n)`), and a command buffer (`set_volatile` / `clear_volatile` / `set_side_state` / `message`). Commands are applied right after the hook returns and logged as `VolatileChanged` / `SideStateChanged` / `Message` events, so replays capture them. Cancellable hooks return the non-generic `HookResult::{Continue, Cancel { reason }}`, and payloads are mutated in place. Cancellations are logged as `MoveCancelled`, `DamagePrevented`, `StatusBlocked` and `SwitchCancelled`. Hook-modified move slots or targets that are invalid fall back to the original choice. `DamageCalc::push_modifier(name, mult)` / `set_final(v)` back the Lua `dmg.modifiers:push(...)`. `on_switch_in`/`on_switch_out` can only cancel **voluntary** switches (now accepted during `SelectActions`); forced replacements after a faint always happen. `Battle::action_menu(slot, hooks)` runs `on_action_menu` over the built-in `fight`/`bag`/`party`/`run` entries. `BattleAction::Custom` runs `on_custom_action`, and the implementing handler sets `handled`. `BattleEvent::HookTrace { hook }` is emitted before each call when `BattleConfig::trace_hooks` is set; that flag defaults to on with the `hook-trace` cargo feature (dev builds), and stripping the traces leaves the untraced stream unchanged. A queued action is dropped when its creature fainted or was replaced before acting.
+
 ### 7.5 Trainer AI & custom profiles
 
 - **Built-in tiers:** `random`, `basic` (type-aware), `smart` (type + stat matchups, switching heuristics) — implemented in Rust for speed and determinism.
@@ -671,6 +677,7 @@ AiProfile(
 - **Lua AI:** when `script` is set, the engine calls `choose_action(view) -> Action` in a sandboxed coroutine with a **read-only battle view** (same information a human would have in that format — configurable per profile for "cheating" boss fights).
 - **Plugin AI:** plugins register new profiles (`ai.register_profile("gauntlet:boss", fn)`) or replace behaviour for existing ids.
 - **Hard challenges:** profiles combine weights, item usage rules, and full Lua for multi-turn planning (e.g. champion sets). All AI decisions go through the same action input path as the player so replays stay valid.
+- **Implementation notes (`pkrs_battle::TrainerAi`, M4).** The AI implements `BattleAi` over an `AiView` (the hooks' `BattleView` plus move data); `ai_side_input` turns its choices into ordinary `SideInput`s. `random` picks a usable move and target uniformly. `basic` scores power × STAB × effectiveness and uses status moves only as a last resort. `smart` scores expected damage (the Gen-3 formula with stages, average roll, no crit) as a fraction of the target's HP. It always takes a KO (higher priority first), and switches out of a *walled* matchup (best hit ≤ 15% of the foe's HP) to a bench creature whose matchup (offense − `predict` × threat) is clearly better, with probability `weights.switch`. Weights are converted to integer permille. `allow_items` uses the trainer's `items` list (first item, own HP ≤ `heal_below_percent`, default 25). Ties and probabilities roll on a **separate AI stream** per side (`RngPolicy::ai_seed`), never on the battle stream, so replaying the recorded inputs without any AI reproduces the battle exactly. `AiProfile` / `Trainer` live in `pkrs-data`; besides data-file profiles, a trainer may reference the built-in ids `random`, `basic` and `smart`.
 
 ---
 
@@ -742,6 +749,14 @@ All Lua APIs live in namespaced global tables, created per API level:
 | `time` | `ticks()`, `wait(n)` (coroutine only) |
 
 **Rust-only:** rendering internals, collision resolution, file I/O, save serialization, asset decoding, the main loop and the battle step engine. Lua influences these through declared hooks, never by direct access.
+
+**Battle module implementation notes (`pkrs_script::LuaBattleHooks`, M4).**
+- **Registration and arguments.** `battle.on(name, fn, { priority = n })` accepts the §7.4 hook names. Handlers receive `ctx` followed by the arguments in the §7.4 table. Creatures are tables `{ side = "player"|"opponent", slot, is_player, party_index, species, name, level, hp, max_hp, types, stats }`; moves are `{ id, type, category, power, accuracy, priority }`.
+- **Return values.** `nil` means unchanged; a returned value replaces the payload; `{ cancel = true, message = … }` cancels and stops the chain. `on_damage_calc` gets `dmg = { base, value, critical, immune, modifiers }`, where `dmg.modifiers:push(name, mult)` and `dmg.final = n` map to `DamageCalc`.
+- **The `ctx` API.** `ctx:random(n)` returns 1..=n from the battle stream. `ctx.message`, `ctx.play_fx` (logged as `fx:<id>`), `ctx.volatile` / `set_volatile` / `clear_volatile`, `ctx.side_state` / `set_side_state`, `ctx.creature(side, slot)` and `ctx.active_creatures()` are also available; all work with `.` or `:`. Volatile and side-state values are **copies**, so write them back with `set_volatile`. Only booleans, integers, strings and tables of those are stored, keeping replays exact.
+- **Custom actions.** A custom action counts as handled when a handler returns `true` or changes battle state.
+- **Failures.** A failing handler's `ctx` changes are rolled back and its value passes through; after 3 consecutive failures (configurable) it is disabled.
+- **Starting battles.** `battle.start_wild(species, level)` / `battle.start_trainer(id)` must run inside a task (`ScriptHost::start_task`). They yield `WaitRequest::Battle(…)`, and the engine resumes the task with `{ outcome = "win"|"loss"|"fled", turns, exp, money }`.
 
 ### 9.2 Events (overworld)
 Engine events Lua can subscribe to: `game_start`, `map_enter`, `map_exit`, `step`, `interact(npc|sign|tile)`, `trigger_enter`, `battle_end`, `menu_open`, `save_before`, `load_after`, `tick` (discouraged, but available).
@@ -896,6 +911,7 @@ ui.register_screen("resonance:log", {
 - **Saves are never corrupted by scripts:** a save is only written from a consistent state between ticks. If the save serializer finds non-serializable plugin save data (functions, userdata), it skips that key and logs, while the rest of the save still writes.
 - **Runaway scripts:** an instruction-count hook (`mlua` `set_hook` with `every_nth_instruction`) aborts a single call that exceeds a budget (e.g. 10M instructions) so infinite loops don't hang the game.
 - Memory limit per Lua state (`Lua::set_memory_limit`), configurable.
+- **Implementation notes (`pkrs_script::LuaScriptHost`, M3).** `mlua` 0.11 (MSRV 1.85, matching the workspace). The budget hook is global (`set_global_hook`, every 1 000 instructions), so script-created coroutines inherit it; once it trips, the sandbox's `pcall`, `xpcall` and `coroutine.resume` re-raise the budget error so a loop cannot swallow it (they are thin Lua wrappers, so yields through `pcall` still work). Each owner's `_ENV` holds *copies* of the library tables, the shared string metatable is sealed (`getmetatable("") == false`) and `string.dump` is removed. `load` is text-only and defaults to the caller's `_ENV`; `collectgarbage` accepts only `"count"`; `math.randomseed` is a no-op; `print` goes to `tracing` (target `script`). `require("a.b")` searches `<root>/a/b.lua` then `<root>/a/b/init.lua`, with roots `scripts/` for the game and `plugins/<id>/` then `scripts/` for a plugin; names are dotted identifiers only, results are cached per owner, and cycles are errors. Script files are read through the `ScriptFiles` port, which the runtime implements over the assets VFS.
 
 ### 9.7 API stability & versioning
 - The **scripting API level** is a single integer (`api = 1, 2, …`) that increments only when the Lua API changes incompatibly.

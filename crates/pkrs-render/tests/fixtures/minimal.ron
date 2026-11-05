@@ -1,0 +1,10 @@
+(
+    line_height: 10,
+    base: 8,
+    atlas: (width: 32, height: 16),
+    glyphs: {
+        "A": (x: 0, y: 0, w: 6, h: 8, xadv: 7),
+        "B": (x: 8, y: 0, w: 6, h: 8, xadv: 7),
+        "U+0020": (x: 16, y: 0, w: 4, h: 1, xadv: 4),
+    },
+)

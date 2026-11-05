@@ -9,9 +9,11 @@ const ROWS: &[(&str, &str, &str)] = &[
     ("pkrs-platform", "macroquad", "backend/macroquad.rs"),
     ("pkrs-platform", "directories", "backend/directories.rs"),
     ("pkrs-render", "macroquad", "backend/macroquad.rs"),
+    ("pkrs-world", "tiled", "importer/tiled.rs"),
     ("pkrs-core", "rand_pcg", "rng/adapter.rs"),
     ("pkrs-core", "toml", "manifest/toml_codec.rs"),
     ("pkrs-core", "semver", "version.rs"),
+    ("pkrs-script", "mlua", "lua/"),
 ];
 
 fn workspace_root() -> PathBuf {
@@ -59,7 +61,12 @@ fn offending_lines(crate_src: &Path, vendor: &str, adapter: &str) -> Vec<String>
     let mut offenders = Vec::new();
     for file in files {
         let rel = file.strip_prefix(crate_src).unwrap();
-        if rel == Path::new(adapter) {
+        // An adapter ending in `/` is a whole module folder.
+        let inside_adapter = match adapter.strip_suffix('/') {
+            Some(dir) => rel.starts_with(dir),
+            None => rel == Path::new(adapter),
+        };
+        if inside_adapter {
             continue;
         }
         for (n, line) in fs::read_to_string(&file).unwrap().lines().enumerate() {

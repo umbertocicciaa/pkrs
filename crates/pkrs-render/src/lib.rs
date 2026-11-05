@@ -11,7 +11,9 @@ mod error;
 mod layer;
 mod rect;
 mod renderer;
+mod text;
 mod texture;
+mod tilemap;
 mod viewport;
 
 pub use animation::{
@@ -21,14 +23,21 @@ pub use animation::{
 #[cfg(feature = "macroquad")]
 pub use backend::MacroquadRenderer;
 pub use backend::{DrawLog, NullRenderer, RecordedDraw, RenderBackend};
-pub use camera::Camera;
+pub use camera::{Camera, CameraBounds, CameraController, CameraTarget, snap};
 pub use color::Color;
 pub use draw::SpriteDraw;
 pub use error::{RenderError, Result};
 pub use layer::Layer;
 pub use rect::Rect;
 pub use renderer::{Renderer, RendererConfig};
+pub use text::{
+    BitmapFont, TextMetrics, TextStyle, measure_text, parse_bmfont_text, parse_glyph_map_ron,
+    wrap_text,
+};
 pub use texture::TextureHandle;
+pub use tilemap::{
+    EntitySprite, TileGrid, TileInstance, TileSheet, tile_layer_draws, visible_tiles, y_sort,
+};
 pub use viewport::{ViewportLayout, ViewportMode, compute_viewport};
 
 #[cfg(test)]

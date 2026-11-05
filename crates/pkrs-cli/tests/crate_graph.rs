@@ -19,13 +19,14 @@ const ALLOWED: &[(&str, &[&str])] = &[
         &["pkrs-core", "pkrs-platform", "pkrs-assets"],
     ),
     ("pkrs-audio", &["pkrs-assets"]),
-    ("pkrs-world", &["pkrs-data", "pkrs-assets"]),
+    ("pkrs-world", &["pkrs-core", "pkrs-data", "pkrs-assets"]),
     ("pkrs-battle", &["pkrs-core", "pkrs-data"]),
     ("pkrs-save", &["pkrs-core", "pkrs-data"]),
     ("pkrs-ui", &["pkrs-render", "pkrs-platform"]),
     (
         "pkrs-script",
         &[
+            "pkrs-core",
             "pkrs-world",
             "pkrs-battle",
             "pkrs-data",
@@ -39,6 +40,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
         &[
             "pkrs-core",
             "pkrs-platform",
+            "pkrs-assets",
             "pkrs-script",
             "pkrs-render",
             "pkrs-audio",
@@ -49,7 +51,13 @@ const ALLOWED: &[(&str, &[&str])] = &[
     ),
     (
         "pkrs-cli",
-        &["pkrs-data", "pkrs-assets", "pkrs-world", "pkrs-script"],
+        &[
+            "pkrs-core",
+            "pkrs-data",
+            "pkrs-assets",
+            "pkrs-world",
+            "pkrs-script",
+        ],
     ),
 ];
 

@@ -36,4 +36,22 @@ pub enum RenderError {
         /// Requested clip id.
         name: String,
     },
+    /// BMFont / glyph map parse failure.
+    #[error("font parse error: {detail}")]
+    FontParse {
+        /// Parser detail.
+        detail: String,
+    },
+    /// Invalid font metrics or glyph data.
+    #[error("invalid font: {detail}")]
+    FontInvalid {
+        /// Validation detail.
+        detail: String,
+    },
+    /// Glyph missing for a code point.
+    #[error("font missing glyph for U+{codepoint:04X}")]
+    FontMissingGlyph {
+        /// Unicode scalar.
+        codepoint: u32,
+    },
 }

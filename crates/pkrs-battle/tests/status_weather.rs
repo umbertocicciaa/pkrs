@@ -357,7 +357,9 @@ fn residual_faint_prompts_replace() {
         )
         .expect("poison");
     assert!(
-        events.iter().any(|e| matches!(e, BattleEvent::Fainted { .. })),
+        events
+            .iter()
+            .any(|e| matches!(e, BattleEvent::Fainted { .. })),
         "expected faint from poison residual, got {events:?}"
     );
     assert!(

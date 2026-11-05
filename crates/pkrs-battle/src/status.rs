@@ -9,7 +9,6 @@ use pkrs_data::{
 use crate::Battle;
 use crate::error::Result;
 use crate::event::BattleEvent;
-use crate::hooks::{BattleHookCtx, BattleHooks, HookResult, StatusApplyRequest};
 use crate::model::{ActiveCreature, MajorStatus, SideId, SlotIndex};
 
 /// Applies a status id to a creature using the rules catalog.
@@ -102,13 +101,7 @@ pub fn blocks_move_attempt(
 }
 
 /// Runs end-of-turn residuals in a stable order: weather chip → status residuals → timers.
-pub fn process_end_of_turn(
-    battle: &mut Battle,
-    hooks: &mut dyn BattleHooks,
-    out: &mut Vec<BattleEvent>,
-) -> Result<()> {
-    hooks.on_end_of_turn(&battle.hook_ctx(out))?;
-
+pub fn process_end_of_turn(battle: &mut Battle, out: &mut Vec<BattleEvent>) -> Result<()> {
     let rules = battle.rules().clone();
     let weather = battle.weather_snapshot();
     if let Some((weather_id, _)) = &weather {
@@ -271,42 +264,4 @@ fn tick_volatiles(
             });
         }
     }
-}
-
-/// Attempts to apply a status with type immunity and hook veto.
-#[allow(clippy::too_many_arguments)]
-pub fn try_apply_status(
-    hooks: &mut dyn BattleHooks,
-    ctx: &BattleHookCtx<'_>,
-    target_side: SideId,
-    target_slot: SlotIndex,
-    target: &mut ActiveCreature,
-    status_id: &str,
-    rules: &BattleRules,
-    rng: &mut dyn GameRng,
-    out: &mut Vec<BattleEvent>,
-) -> Result<bool> {
-    let Some(def) = rules.status(status_id) else {
-        return Ok(false);
-    };
-    if status_blocked_by_types(def, &target.template.types) {
-        return Ok(false);
-    }
-    let req = StatusApplyRequest {
-        target_side,
-        target_slot,
-        status_id: status_id.to_string(),
-    };
-    if hooks.on_status_apply(ctx, &req)? == HookResult::Cancel {
-        return Ok(false);
-    }
-    if apply_status_to_creature(target, status_id, rules, rng) {
-        out.push(BattleEvent::StatusApplied {
-            target_side,
-            target_slot,
-            status: status_id.to_string(),
-        });
-        return Ok(true);
-    }
-    Ok(false)
 }

@@ -4,6 +4,7 @@
 
 mod accuracy;
 mod action;
+mod ai;
 mod battle;
 mod convert;
 mod damage;
@@ -21,12 +22,18 @@ mod status;
 
 pub use accuracy::AccuracyCalc;
 pub use action::{BattleAction, BattleInput, SideInput};
+pub use ai::{AiView, BattleAi, TrainerAi, ai_side_input};
 pub use battle::Battle;
 pub use convert::{IntoBattleSetup, testkit as battle_testkit};
 pub use damage::{DamageCalc, DamageModifierStage};
 pub use error::{BattleError, Result};
 pub use event::BattleEvent;
-pub use hooks::{ActionOrder, BattleHookCtx, BattleHooks, NullBattleHooks, RecordingBattleHooks};
+pub use hooks::{
+    ActionMenu, ActionOrder, BattleHookCtx, BattleHooks, BattleValue, BattleView, CreatureView,
+    CurrentMove, CustomAction, DamageTaken, FaintEvent, HookResult, MenuOption, MoveRequest,
+    MoveResult, MoveView, NullBattleHooks, RecordingBattleHooks, SideView, SlotRef, StatusApply,
+    SwitchIn, SwitchOut,
+};
 pub use model::{
     BattleConfig, BattleCreature, BattleOutcome, BattleResult, BattleSetup, BattleSideSetup,
     CreatureStats, MoveSlot, PartyIndex, SideId, SlotIndex,

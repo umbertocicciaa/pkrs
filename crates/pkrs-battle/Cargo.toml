@@ -7,6 +7,10 @@ rust-version.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+# Emit `BattleEvent::HookTrace` by default (dev builds, section 7.4).
+hook-trace = []
+
 [dependencies]
 pkrs-core.workspace = true
 pkrs-data.workspace = true

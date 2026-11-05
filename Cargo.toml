@@ -43,6 +43,8 @@ macroquad = "0.4"
 directories = "6"
 # Lua 5.4 compiled from vendored C sources (no system Lua, §0.4). 0.11 keeps MSRV 1.85.
 mlua = { version = "0.11.6", features = ["lua54", "vendored"] }
+# `zstd` (default) compiles C code; v1 maps use CSV/base64(+zlib/gzip) layer data only.
+tiled = { version = "0.16", default-features = false }
 
 # Dev-only.
 serde_json = "1"

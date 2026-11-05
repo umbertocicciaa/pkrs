@@ -5,6 +5,8 @@ use pkrs_platform::DisplaySettings;
 use crate::backend::RenderBackend;
 use crate::color::Color;
 use crate::draw::SpriteDraw;
+use crate::layer::Layer;
+use crate::tilemap::{EntitySprite, TileGrid, TileSheet, tile_layer_draws, y_sort};
 use crate::viewport::{ViewportLayout, ViewportMode, compute_viewport};
 
 /// Engine policy applied on top of [`RenderBackend`].
@@ -56,6 +58,11 @@ impl Renderer {
         &self.display
     }
 
+    /// Internal view size `(width, height)` in pixels (the camera's view).
+    pub fn view_size(&self) -> (u32, u32) {
+        (self.display.width, self.display.height)
+    }
+
     /// Facade configuration (letterbox, scale mode, …).
     pub fn config(&self) -> &RendererConfig {
         &self.config
@@ -87,7 +94,35 @@ impl Renderer {
         self.pending.push(draw);
     }
 
+    /// Queues the visible tiles of `grid` on `layer`; `origin` is the camera's
+    /// [`origin`](crate::Camera::origin). Returns how many tiles were queued.
+    pub fn draw_tile_layer(
+        &mut self,
+        grid: &dyn TileGrid,
+        sheets: &[TileSheet],
+        tile_size: (u32, u32),
+        layer: Layer,
+        origin: (i32, i32),
+    ) -> usize {
+        let draws = tile_layer_draws(grid, sheets, tile_size, layer, origin, self.view_size());
+        let count = draws.len();
+        self.pending.extend(draws);
+        count
+    }
+
+    /// Y-sorts `entities` (feet Y, then stable id) and queues them on [`Layer::Entities`].
+    pub fn draw_entities(&mut self, entities: &mut [EntitySprite]) {
+        y_sort(entities);
+        self.pending.extend(entities.iter().map(|e| SpriteDraw {
+            layer: Layer::Entities,
+            ..e.draw
+        }));
+    }
+
     /// Submits queued draws and presents to the window.
+    ///
+    /// The sort by layer is stable, so draws within one layer keep their submission order
+    /// (file order for tile layers, y-sort order for entities).
     pub fn end_frame(&mut self) {
         self.pending.sort_by_key(|d| d.layer);
         for draw in &self.pending {

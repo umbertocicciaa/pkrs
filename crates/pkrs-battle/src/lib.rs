@@ -4,6 +4,7 @@
 
 mod accuracy;
 mod action;
+mod ai;
 mod battle;
 mod convert;
 mod damage;
@@ -20,6 +21,7 @@ mod stat_stage;
 
 pub use accuracy::AccuracyCalc;
 pub use action::{BattleAction, BattleInput, SideInput};
+pub use ai::{AiView, BattleAi, TrainerAi, ai_side_input};
 pub use battle::Battle;
 pub use convert::{IntoBattleSetup, testkit as battle_testkit};
 pub use damage::{DamageCalc, DamageModifierStage};

@@ -141,7 +141,7 @@ impl DamageCalc {
     }
 }
 
-fn gen3_base_damage(level: u8, power: u16, offense: u32, defense: u32) -> u32 {
+pub(crate) fn gen3_base_damage(level: u8, power: u16, offense: u32, defense: u32) -> u32 {
     let level = u64::from(level);
     let power = u64::from(power);
     let offense = u64::from(offense.max(1));

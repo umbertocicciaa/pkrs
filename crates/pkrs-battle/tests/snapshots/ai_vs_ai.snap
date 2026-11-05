@@ -1,0 +1,122 @@
+BattleStarted
+TurnStarted { turn: 1 }
+ActionsLocked
+OrderResolved { order: [(Player, 0), (Opponent, 0)] }
+ActionCommitted { side: Player, slot: 0, action: Fight { move_slot: 0, target_side: Opponent, target_slot: 0 } }
+MoveUsed { user_side: Player, user_slot: 0, move_id: "ember", target_side: Opponent, target_slot: 0 }
+Damage { target_side: Opponent, target_slot: 0, amount: 31, remaining_hp: 41 }
+ActionCommitted { side: Opponent, slot: 0, action: Fight { move_slot: 1, target_side: Player, target_slot: 0 } }
+MoveUsed { user_side: Opponent, user_slot: 0, move_id: "tackle", target_side: Player, target_slot: 0 }
+Damage { target_side: Player, target_slot: 0, amount: 9, remaining_hp: 61 }
+TurnEnded { turn: 1 }
+TurnStarted { turn: 2 }
+ActionsLocked
+OrderResolved { order: [(Player, 0), (Opponent, 0)] }
+ActionCommitted { side: Player, slot: 0, action: Fight { move_slot: 0, target_side: Opponent, target_slot: 0 } }
+MoveUsed { user_side: Player, user_slot: 0, move_id: "ember", target_side: Opponent, target_slot: 0 }
+Damage { target_side: Opponent, target_slot: 0, amount: 27, remaining_hp: 14 }
+ActionCommitted { side: Opponent, slot: 0, action: Fight { move_slot: 1, target_side: Player, target_slot: 0 } }
+MoveUsed { user_side: Opponent, user_slot: 0, move_id: "tackle", target_side: Player, target_slot: 0 }
+Damage { target_side: Player, target_slot: 0, amount: 9, remaining_hp: 52 }
+TurnEnded { turn: 2 }
+TurnStarted { turn: 3 }
+ActionsLocked
+OrderResolved { order: [(Player, 0), (Opponent, 0)] }
+ActionCommitted { side: Player, slot: 0, action: Fight { move_slot: 0, target_side: Opponent, target_slot: 0 } }
+MoveUsed { user_side: Player, user_slot: 0, move_id: "ember", target_side: Opponent, target_slot: 0 }
+Damage { target_side: Opponent, target_slot: 0, amount: 29, remaining_hp: 0 }
+Fainted { side: Opponent, slot: 0, party_index: 0 }
+Switched { side: Opponent, slot: 0, to_party: 2 }
+TurnEnded { turn: 3 }
+TurnStarted { turn: 4 }
+ActionsLocked
+OrderResolved { order: [(Player, 0), (Opponent, 0)] }
+ActionCommitted { side: Player, slot: 0, action: Fight { move_slot: 1, target_side: Opponent, target_slot: 0 } }
+MoveUsed { user_side: Player, user_slot: 0, move_id: "tackle", target_side: Opponent, target_slot: 0 }
+Damage { target_side: Opponent, target_slot: 0, amount: 9, remaining_hp: 69 }
+ActionCommitted { side: Opponent, slot: 0, action: Fight { move_slot: 0, target_side: Player, target_slot: 0 } }
+MoveUsed { user_side: Opponent, user_slot: 0, move_id: "water_gun", target_side: Player, target_slot: 0 }
+Damage { target_side: Player, target_slot: 0, amount: 30, remaining_hp: 22 }
+TurnEnded { turn: 4 }
+TurnStarted { turn: 5 }
+ActionsLocked
+OrderResolved { order: [(Player, 0), (Opponent, 0)] }
+ActionCommitted { side: Player, slot: 0, action: Switch { to_party: 2 } }
+Switched { side: Player, slot: 0, to_party: 2 }
+ActionCommitted { side: Opponent, slot: 0, action: Fight { move_slot: 0, target_side: Player, target_slot: 0 } }
+MoveUsed { user_side: Opponent, user_slot: 0, move_id: "water_gun", target_side: Player, target_slot: 0 }
+Damage { target_side: Player, target_slot: 0, amount: 8, remaining_hp: 72 }
+TurnEnded { turn: 5 }
+TurnStarted { turn: 6 }
+ActionsLocked
+OrderResolved { order: [(Opponent, 0), (Player, 0)] }
+ActionCommitted { side: Opponent, slot: 0, action: Fight { move_slot: 1, target_side: Player, target_slot: 0 } }
+MoveUsed { user_side: Opponent, user_slot: 0, move_id: "quick_attack", target_side: Player, target_slot: 0 }
+Damage { target_side: Player, target_slot: 0, amount: 10, remaining_hp: 62 }
+ActionCommitted { side: Player, slot: 0, action: Fight { move_slot: 0, target_side: Opponent, target_slot: 0 } }
+MoveUsed { user_side: Player, user_slot: 0, move_id: "vine_whip", target_side: Opponent, target_slot: 0 }
+Damage { target_side: Opponent, target_slot: 0, amount: 36, remaining_hp: 33 }
+TurnEnded { turn: 6 }
+TurnStarted { turn: 7 }
+ActionsLocked
+OrderResolved { order: [(Opponent, 0), (Player, 0)] }
+ActionCommitted { side: Opponent, slot: 0, action: Fight { move_slot: 1, target_side: Player, target_slot: 0 } }
+MoveUsed { user_side: Opponent, user_slot: 0, move_id: "quick_attack", target_side: Player, target_slot: 0 }
+Damage { target_side: Player, target_slot: 0, amount: 10, remaining_hp: 52 }
+ActionCommitted { side: Player, slot: 0, action: Fight { move_slot: 0, target_side: Opponent, target_slot: 0 } }
+MoveUsed { user_side: Player, user_slot: 0, move_id: "vine_whip", target_side: Opponent, target_slot: 0 }
+Damage { target_side: Opponent, target_slot: 0, amount: 32, remaining_hp: 1 }
+TurnEnded { turn: 7 }
+TurnStarted { turn: 8 }
+ActionsLocked
+OrderResolved { order: [(Opponent, 0), (Player, 0)] }
+ActionCommitted { side: Opponent, slot: 0, action: Fight { move_slot: 1, target_side: Player, target_slot: 0 } }
+MoveUsed { user_side: Opponent, user_slot: 0, move_id: "quick_attack", target_side: Player, target_slot: 0 }
+Damage { target_side: Player, target_slot: 0, amount: 10, remaining_hp: 42 }
+ActionCommitted { side: Player, slot: 0, action: Fight { move_slot: 1, target_side: Opponent, target_slot: 0 } }
+MoveUsed { user_side: Player, user_slot: 0, move_id: "quick_attack", target_side: Opponent, target_slot: 0 }
+Damage { target_side: Opponent, target_slot: 0, amount: 9, remaining_hp: 0 }
+Fainted { side: Opponent, slot: 0, party_index: 2 }
+Switched { side: Opponent, slot: 0, to_party: 1 }
+TurnEnded { turn: 8 }
+TurnStarted { turn: 9 }
+ActionsLocked
+OrderResolved { order: [(Player, 0), (Opponent, 0)] }
+ActionCommitted { side: Player, slot: 0, action: Switch { to_party: 1 } }
+Switched { side: Player, slot: 0, to_party: 1 }
+ActionCommitted { side: Opponent, slot: 0, action: Fight { move_slot: 0, target_side: Player, target_slot: 0 } }
+MoveUsed { user_side: Opponent, user_slot: 0, move_id: "ember", target_side: Player, target_slot: 0 }
+Damage { target_side: Player, target_slot: 0, amount: 7, remaining_hp: 68 }
+TurnEnded { turn: 9 }
+TurnStarted { turn: 10 }
+ActionsLocked
+OrderResolved { order: [(Opponent, 0), (Player, 0)] }
+ActionCommitted { side: Opponent, slot: 0, action: Fight { move_slot: 0, target_side: Player, target_slot: 0 } }
+MoveUsed { user_side: Opponent, user_slot: 0, move_id: "ember", target_side: Player, target_slot: 0 }
+Damage { target_side: Player, target_slot: 0, amount: 7, remaining_hp: 61 }
+ActionCommitted { side: Player, slot: 0, action: Fight { move_slot: 0, target_side: Opponent, target_slot: 0 } }
+MoveUsed { user_side: Player, user_slot: 0, move_id: "water_gun", target_side: Opponent, target_slot: 0 }
+Damage { target_side: Opponent, target_slot: 0, amount: 28, remaining_hp: 40 }
+TurnEnded { turn: 10 }
+TurnStarted { turn: 11 }
+ActionsLocked
+OrderResolved { order: [(Opponent, 0), (Player, 0)] }
+ActionCommitted { side: Opponent, slot: 0, action: Fight { move_slot: 0, target_side: Player, target_slot: 0 } }
+MoveUsed { user_side: Opponent, user_slot: 0, move_id: "ember", target_side: Player, target_slot: 0 }
+Damage { target_side: Player, target_slot: 0, amount: 7, remaining_hp: 54 }
+ActionCommitted { side: Player, slot: 0, action: Fight { move_slot: 0, target_side: Opponent, target_slot: 0 } }
+MoveUsed { user_side: Player, user_slot: 0, move_id: "water_gun", target_side: Opponent, target_slot: 0 }
+Damage { target_side: Opponent, target_slot: 0, amount: 31, remaining_hp: 9 }
+TurnEnded { turn: 11 }
+TurnStarted { turn: 12 }
+ActionsLocked
+OrderResolved { order: [(Opponent, 0), (Player, 0)] }
+ActionCommitted { side: Opponent, slot: 0, action: Fight { move_slot: 0, target_side: Player, target_slot: 0 } }
+MoveUsed { user_side: Opponent, user_slot: 0, move_id: "ember", target_side: Player, target_slot: 0 }
+Damage { target_side: Player, target_slot: 0, amount: 7, remaining_hp: 47 }
+ActionCommitted { side: Player, slot: 0, action: Fight { move_slot: 0, target_side: Opponent, target_slot: 0 } }
+MoveUsed { user_side: Player, user_slot: 0, move_id: "water_gun", target_side: Opponent, target_slot: 0 }
+Damage { target_side: Opponent, target_slot: 0, amount: 27, remaining_hp: 0 }
+Fainted { side: Opponent, slot: 0, party_index: 1 }
+BattleEnded { outcome: PlayerWin }
+result: BattleResult { outcome: PlayerWin, turns: 12, exp: 0, money: 0 }

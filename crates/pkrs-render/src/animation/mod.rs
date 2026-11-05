@@ -6,4 +6,4 @@ mod player;
 
 pub use descriptor::{AnimationClip, SpriteSheetAnimation, parse_animation_descriptor};
 pub use direction::{DirectionalClip, clip_for_direction};
-pub use player::{ClipPlayer, frame_pos_after_ticks};
+pub use player::ClipPlayer;

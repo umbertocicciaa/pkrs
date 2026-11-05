@@ -71,14 +71,13 @@ fn run_windowed(config: RuntimeLoopConfig) -> anyhow::Result<()> {
             Box::new(FixedPaths::under("pkrs")),
             PlatformConfig::default(),
         );
-        let host = match AnimationDemoHost::new(MacroquadRenderer::new()) {
+        let mut host = match AnimationDemoHost::new(MacroquadRenderer::new()) {
             Ok(host) => host,
             Err(err) => {
                 tracing::error!(%err, "failed to create animation demo host");
                 return;
             }
         };
-        let mut host = host;
         let exit = run_loop(&mut platform, &mut host, &config).await;
         tracing::info!(
             ?exit,

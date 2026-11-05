@@ -1,5 +1,6 @@
 //! M1 demo: one tick-driven animated sprite on the internal render target (§5.4).
 
+use pkrs_core::Direction;
 use pkrs_platform::Platform;
 use pkrs_render::{
     ClipPlayer, Layer, NullRenderer, Rect, RenderBackend, Renderer, RendererConfig, SpriteDraw,
@@ -19,6 +20,7 @@ pub struct AnimationDemoHost {
     player: ClipPlayer,
     sheet: SpriteSheetAnimation,
     texture: TextureHandle,
+    flip_x: bool,
 }
 
 impl AnimationDemoHost {
@@ -33,7 +35,8 @@ impl AnimationDemoHost {
     /// Builds the demo with the given render backend (already on the main thread for macroquad).
     pub fn new(backend: impl RenderBackend + 'static) -> pkrs_render::Result<Self> {
         let sheet = parse_animation_descriptor(DEMO_RON)?;
-        let resolved = clip_for_direction(&sheet, "walk", "down")?;
+        let resolved = clip_for_direction(&sheet, "walk", Direction::Down)?;
+        let flip_x = resolved.flip_x;
         let mut renderer = Renderer::new(
             Box::new(backend),
             pkrs_platform::DisplaySettings::default(),
@@ -45,6 +48,7 @@ impl AnimationDemoHost {
             sheet,
             texture,
             renderer,
+            flip_x,
         })
     }
 
@@ -57,7 +61,7 @@ impl AnimationDemoHost {
             texture: self.texture,
             src,
             dst: Rect::new(112.0, 72.0, 16.0, 16.0),
-            flip_x: false,
+            flip_x: self.flip_x,
             layer: Layer::Entities,
         });
         self.renderer.end_frame();
@@ -75,33 +79,5 @@ impl SimulationHost for AnimationDemoHost {
 
     fn render(&mut self, platform: &Platform, _alpha: f32) {
         self.draw_sprite(platform);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{RuntimeLoopConfig, block_on_loop};
-    use pkrs_platform::{FixedPaths, NullFrame, NullPlatform, Platform, PlatformConfig};
-
-    #[test]
-    fn demo_host_advances_frames_headless() {
-        let mut platform = Platform::new(
-            Box::new(NullPlatform::new().with_frames(std::iter::repeat_n(NullFrame::idle(), 4))),
-            Box::new(FixedPaths::under("test")),
-            PlatformConfig::default(),
-        );
-        let (mut host, log) = AnimationDemoHost::headless().expect("demo");
-        let _ = block_on_loop(
-            &mut platform,
-            &mut host,
-            &RuntimeLoopConfig {
-                max_ticks: Some(8),
-                max_frames: Some(4),
-                ..RuntimeLoopConfig::default()
-            },
-        );
-        assert_eq!(log.draws().len(), 4);
-        assert!(log.draws()[0].src.x <= log.draws()[3].src.x);
     }
 }

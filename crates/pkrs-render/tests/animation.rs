@@ -2,9 +2,9 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use pkrs_core::Direction;
 use pkrs_render::{
-    AnimationClip, ClipPlayer, SpriteSheetAnimation, clip_for_direction, frame_pos_after_ticks,
-    parse_animation_descriptor,
+    AnimationClip, ClipPlayer, SpriteSheetAnimation, clip_for_direction, parse_animation_descriptor,
 };
 
 const WALK_SHEET: &str = r#"(
@@ -31,6 +31,14 @@ const WALK_SHEET: &str = r#"(
 
 fn sample_sheet() -> SpriteSheetAnimation {
     parse_animation_descriptor(WALK_SHEET).expect("fixture parses")
+}
+
+fn frame_pos_after_ticks(clip: &AnimationClip, ticks: u64) -> usize {
+    let mut player = ClipPlayer::new(clip);
+    for _ in 0..ticks {
+        player.tick();
+    }
+    player.current_frame_pos()
 }
 
 #[test]
@@ -71,6 +79,18 @@ fn parse_errors_on_zero_ticks_per_frame() {
 }
 
 #[test]
+fn parse_errors_on_frame_address_overflow() {
+    let src = r#"(
+        frame_size: (16, 16),
+        columns: 4,
+        clips: {
+            "bad": (frames: [4000000000], ticks_per_frame: 1, loop: true),
+        },
+    )"#;
+    assert!(parse_animation_descriptor(src).is_err());
+}
+
+#[test]
 fn frame_src_rect_steps_horizontally() {
     let sheet = sample_sheet();
     assert_eq!(sheet.frame_src_rect(0).x, 0.0);
@@ -91,20 +111,54 @@ fn clip_player_loops_with_correct_frame_timing() {
 
 #[test]
 fn clip_player_non_loop_holds_last_frame() {
-    let sheet = sample_sheet();
-    let clip = sheet.clip("idle").expect("clip");
+    let src = r#"(
+        frame_size: (16, 16),
+        columns: 4,
+        clips: {
+            "dash": (
+                frames: [0, 1, 2],
+                ticks_per_frame: 2,
+                loop: false,
+            ),
+        },
+    )"#;
+    let sheet = parse_animation_descriptor(src).expect("parse");
+    let clip = sheet.clip("dash").expect("clip");
     let mut player = ClipPlayer::new(clip);
-    for _ in 0..200 {
+    for _ in 0..5 {
+        player.tick();
+    }
+    assert!(!player.is_finished());
+    assert_eq!(player.current_frame_index(), 2);
+    player.tick();
+    assert!(player.is_finished());
+    assert_eq!(player.current_frame_index(), 2);
+    for _ in 0..100 {
         player.tick();
     }
     assert!(player.is_finished());
+    assert_eq!(player.current_frame_index(), 2);
+}
+
+#[test]
+fn clip_player_empty_frames_does_not_panic() {
+    let clip = AnimationClip {
+        frames: vec![],
+        ticks_per_frame: 1,
+        r#loop: true,
+    };
+    let mut player = ClipPlayer::new(&clip);
+    assert_eq!(player.current_frame_index(), 0);
+    for _ in 0..10 {
+        player.tick();
+    }
     assert_eq!(player.current_frame_index(), 0);
 }
 
 #[test]
 fn direction_clip_uses_mirror_for_right() {
     let sheet = sample_sheet();
-    let resolved = clip_for_direction(&sheet, "walk", "right").expect("mirror");
+    let resolved = clip_for_direction(&sheet, "walk", Direction::Right).expect("mirror");
     assert!(resolved.flip_x);
     assert_eq!(resolved.clip.frames, [4, 5]);
 }
@@ -120,7 +174,7 @@ fn direction_clip_prefers_explicit_right() {
             r#loop: true,
         },
     );
-    let resolved = clip_for_direction(&sheet, "walk", "right").expect("explicit");
+    let resolved = clip_for_direction(&sheet, "walk", Direction::Right).expect("explicit");
     assert!(!resolved.flip_x);
     assert_eq!(resolved.clip.frames, [6, 7]);
 }
@@ -128,5 +182,5 @@ fn direction_clip_prefers_explicit_right() {
 #[test]
 fn direction_clip_missing_returns_error() {
     let sheet = sample_sheet();
-    assert!(clip_for_direction(&sheet, "walk", "up").is_err());
+    assert!(clip_for_direction(&sheet, "walk", Direction::Up).is_err());
 }

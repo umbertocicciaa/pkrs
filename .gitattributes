@@ -2,3 +2,4 @@
 # checkouts (core.autocrlf=true, the default on windows-latest runners) would
 # otherwise get CRLF and fail `cargo fmt --check`.
 * text=auto eol=lf
+*.rgba binary

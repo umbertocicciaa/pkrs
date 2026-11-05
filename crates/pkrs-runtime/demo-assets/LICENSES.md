@@ -1,8 +1,8 @@
 # Demo assets (`demo-assets/`)
 
-## `mascot.png`
+## `mascot.rgba`
 
-Original pixel art created for the pkrs engine M1 skeleton demo (2026).
+Raw RGBA8 pixel data (64×32) for the bundled M1 animation demo sprite sheet.
 
 - **License:** CC0 1.0 Universal (public domain dedication)
 - **Author:** pkrs contributors

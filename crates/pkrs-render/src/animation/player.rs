@@ -33,7 +33,7 @@ impl ClipPlayer {
 
     /// Index into the sheet grid for the frame currently displayed.
     pub fn current_frame_index(&self) -> u32 {
-        self.frames[self.frame_pos]
+        self.frames.get(self.frame_pos).copied().unwrap_or(0)
     }
 
     /// Zero-based position within the clip's `frames` list.
@@ -43,7 +43,7 @@ impl ClipPlayer {
 
     /// Advances one simulation tick; no-op when a non-looping clip is finished.
     pub fn tick(&mut self) {
-        if self.finished {
+        if self.finished || self.frames.is_empty() || self.ticks_per_frame == 0 {
             return;
         }
         self.tick_in_frame = self.tick_in_frame.saturating_add(1);
@@ -68,15 +68,4 @@ impl ClipPlayer {
         self.tick_in_frame = 0;
         self.finished = false;
     }
-}
-
-/// Returns the frame list index after `ticks` simulation steps from the start of `clip`.
-///
-/// Useful for table-driven unit tests of timing.
-pub fn frame_pos_after_ticks(clip: &AnimationClip, ticks: u64) -> usize {
-    let mut player = ClipPlayer::new(clip);
-    for _ in 0..ticks {
-        player.tick();
-    }
-    player.current_frame_pos()
 }

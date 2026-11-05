@@ -362,14 +362,14 @@ flowchart TD
   platform[pkrs-platform] --> core
   assets[pkrs-assets] --> core
   data[pkrs-data] --> core
-  render[pkrs-render] --> platform & assets
+  render[pkrs-render] --> core & platform & assets
   audio[pkrs-audio] --> assets
   world[pkrs-world] --> data & assets
   battle[pkrs-battle] --> core & data
   save[pkrs-save] --> core & data
   ui[pkrs-ui] --> render & platform
   script[pkrs-script] --> world & battle & data & save & ui & audio
-  runtime[pkrs-runtime] --> script & render & audio & ui & save & world & platform
+  runtime[pkrs-runtime] --> core & script & render & audio & ui & save & world & platform
   cli[pkrs-cli] --> data & assets & world & script
 ```
 

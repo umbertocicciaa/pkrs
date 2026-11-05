@@ -16,7 +16,7 @@ mod viewport;
 
 pub use animation::{
     AnimationClip, ClipPlayer, DirectionalClip, SpriteSheetAnimation, clip_for_direction,
-    frame_pos_after_ticks, parse_animation_descriptor,
+    parse_animation_descriptor,
 };
 #[cfg(feature = "macroquad")]
 pub use backend::MacroquadRenderer;

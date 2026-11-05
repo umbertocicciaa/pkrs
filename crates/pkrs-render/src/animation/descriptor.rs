@@ -89,6 +89,23 @@ fn validate_and_convert(raw: RawSheet) -> Result<SpriteSheetAnimation> {
                 detail: format!("clip `{name}` ticks_per_frame must be at least 1"),
             });
         }
+        for &f in &clip.frames {
+            let col = f % raw.columns;
+            let row = f / raw.columns;
+            let fits = col
+                .checked_add(1)
+                .and_then(|c| c.checked_mul(raw.frame_size.0))
+                .zip(
+                    row.checked_add(1)
+                        .and_then(|r| r.checked_mul(raw.frame_size.1)),
+                )
+                .is_some();
+            if !fits {
+                return Err(RenderError::AnimationInvalid {
+                    detail: format!("clip `{name}` frame {f} is outside the addressable sheet"),
+                });
+            }
+        }
         clips.insert(
             name,
             AnimationClip {

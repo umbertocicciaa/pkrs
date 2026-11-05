@@ -12,16 +12,13 @@ default = ["macroquad"]
 macroquad = ["dep:macroquad"]
 
 [dependencies]
+pkrs-core.workspace = true
 pkrs-platform.workspace = true
 pkrs-assets.workspace = true
 serde.workspace = true
 ron.workspace = true
 thiserror.workspace = true
 macroquad = { workspace = true, optional = true }
-
-[dev-dependencies]
-pkrs-platform.workspace = true
-pkrs-runtime = { path = "../pkrs-runtime" }
 
 [lints]
 workspace = true

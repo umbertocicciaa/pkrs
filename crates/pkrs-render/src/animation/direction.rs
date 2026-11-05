@@ -1,5 +1,7 @@
 //! Direction-aware clip lookup (`walk_<dir>`, horizontal mirroring).
 
+use pkrs_core::Direction;
+
 use crate::animation::descriptor::{AnimationClip, SpriteSheetAnimation};
 use crate::error::{RenderError, Result};
 
@@ -19,7 +21,7 @@ pub struct DirectionalClip<'a> {
 pub fn clip_for_direction<'a>(
     sheet: &'a SpriteSheetAnimation,
     prefix: &str,
-    direction: &str,
+    direction: Direction,
 ) -> Result<DirectionalClip<'a>> {
     let primary = format!("{prefix}_{direction}");
     if let Some(clip) = sheet.clip(&primary) {
@@ -29,7 +31,7 @@ pub fn clip_for_direction<'a>(
         });
     }
 
-    if direction == "right" {
+    if direction == Direction::Right {
         let mirror = format!("{prefix}_left");
         if let Some(clip) = sheet.clip(&mirror) {
             return Ok(DirectionalClip { clip, flip_x: true });

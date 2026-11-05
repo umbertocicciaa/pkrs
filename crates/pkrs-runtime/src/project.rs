@@ -12,7 +12,7 @@ use pkrs_platform::{
     Action, BuiltinAction, DisplaySettings, Input, InputFacadeConfig, Platform, UserPaths,
 };
 use pkrs_render::{Rect, Renderer, TextureHandle};
-use pkrs_world::{Map, MapImporter, TiledImporter};
+use pkrs_world::{GridStepper, Map, MapImporter, MovementConfig, StepEvent, TiledImporter};
 
 use crate::main_loop::SimulationHost;
 use crate::scene::{MapScene, PLAYER_ENTITY};
@@ -181,64 +181,11 @@ impl Project {
     }
 }
 
-/// Ticks per grid step (§6.3 default walking speed).
-pub const STEP_TICKS: u32 = 16;
+/// Ticks per grid step when walking (§6.3 default walking speed).
+pub const STEP_TICKS: u32 = MovementConfig::WALK_STEP_TICKS;
 
-/// Minimal tile-to-tile walking, so `pkrs run` shows a walkable map until grid movement
-/// (facing taps, ledges, running, terrain rules — §6.3) lands in `pkrs-world`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Walker {
-    /// Current (or destination, mid-step) tile.
-    pub pos: GridPos,
-    /// Facing.
-    pub facing: Direction,
-    from: GridPos,
-    progress: u32,
-}
-
-impl Walker {
-    /// Standing on `pos`.
-    #[must_use]
-    pub fn new(pos: GridPos, facing: Direction) -> Self {
-        Self {
-            pos,
-            facing,
-            from: pos,
-            progress: STEP_TICKS,
-        }
-    }
-
-    /// `true` between steps.
-    #[must_use]
-    pub fn is_idle(&self) -> bool {
-        self.progress >= STEP_TICKS
-    }
-
-    /// One tick: finish the current step, or start one towards `dir` if the grid allows it.
-    pub fn tick(&mut self, dir: Option<Direction>, grid: &pkrs_world::LogicalGrid) {
-        if !self.is_idle() {
-            self.progress += 1;
-            return;
-        }
-        let Some(dir) = dir else { return };
-        self.facing = dir;
-        if grid.can_cross(self.pos, dir) {
-            self.from = self.pos;
-            self.pos = self.pos.neighbour(dir);
-            self.progress = 1;
-        }
-    }
-
-    /// Fractional tile position (interpolated along the step).
-    #[must_use]
-    pub fn tile_position(&self) -> (f32, f32) {
-        let t = (self.progress.min(STEP_TICKS)) as f32 / STEP_TICKS as f32;
-        (
-            self.from.x as f32 + (self.pos.x - self.from.x) as f32 * t,
-            self.from.y as f32 + (self.pos.y - self.from.y) as f32 * t,
-        )
-    }
-}
+/// Grid movement with facing, tap-turn and terrain rules (§6.3).
+pub type Walker = GridStepper;
 
 /// The overworld of a loaded project: map scene, player and input.
 pub struct ProjectHost {
@@ -290,7 +237,7 @@ impl ProjectHost {
             renderer,
             scene,
             input,
-            walker: Walker::new(start, facing),
+            walker: GridStepper::new(start, facing),
             player_sprite,
             ticks: 0,
         })
@@ -360,7 +307,14 @@ impl SimulationHost for ProjectHost {
     fn simulation_tick(&mut self, _dt: f64) {
         self.ticks += 1;
         let dir = self.held_direction();
-        self.walker.tick(dir, &self.scene.map().grid);
+        let running = self.input.down(Action::Builtin(BuiltinAction::Run));
+        self.walker.set_running(running);
+        let grid = &self.scene.map().grid;
+        for event in self.walker.tick(dir, grid, &()) {
+            if matches!(event, StepEvent::StepCompleted { .. }) {
+                tracing::trace!(pos = %self.walker.pos(), "step");
+            }
+        }
         let (tx, ty) = self.walker.tile_position();
         let (tw, th) = (self.scene.map().tile_width, self.scene.map().tile_height);
         let (texture, src) = self.player_sprite;
@@ -383,36 +337,51 @@ impl SimulationHost for ProjectHost {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pkrs_world::LogicalGrid;
+    use pkrs_world::{GridStepper, LogicalGrid, MovementConfig};
 
     #[test]
     fn walker_steps_over_sixteen_ticks_and_respects_collision() {
         let mut grid = LogicalGrid::new(3, 1);
         grid.cell_mut(GridPos::new(2, 0)).unwrap().solid = true;
-        let mut w = Walker::new(GridPos::new(0, 0), Direction::Down);
-        w.tick(Some(Direction::Right), &grid);
-        assert_eq!(w.pos, GridPos::new(1, 0));
-        assert_eq!(w.facing, Direction::Right);
+        let cfg = MovementConfig {
+            tap_turn_ticks: 1,
+            walk_step_ticks: STEP_TICKS,
+            ..MovementConfig::default()
+        };
+        let mut w = GridStepper::with_config(GridPos::new(0, 0), Direction::Down, cfg);
+        w.tick(Some(Direction::Right), &grid, &());
+        w.tick(Some(Direction::Right), &grid, &());
+        assert_eq!(w.pos(), GridPos::new(1, 0));
+        assert_eq!(w.facing(), Direction::Right);
         assert!(!w.is_idle());
         for _ in 0..STEP_TICKS - 1 {
-            w.tick(None, &grid);
+            w.tick(None, &grid, &());
         }
         assert!(w.is_idle());
         assert_eq!(w.tile_position(), (1.0, 0.0));
-        // Solid tile ahead: turns but does not move.
-        w.tick(Some(Direction::Right), &grid);
-        assert_eq!(w.pos, GridPos::new(1, 0));
-        w.tick(Some(Direction::Up), &grid);
-        assert_eq!((w.pos, w.facing), (GridPos::new(1, 0), Direction::Up));
+        w.tick(Some(Direction::Right), &grid, &());
+        assert_eq!(w.pos(), GridPos::new(1, 0));
+        w.tick(Some(Direction::Up), &grid, &());
+        w.tick(Some(Direction::Up), &grid, &());
+        while !w.is_idle() {
+            w.tick(None, &grid, &());
+        }
+        assert_eq!((w.pos(), w.facing()), (GridPos::new(1, 0), Direction::Up));
     }
 
     #[test]
     fn walker_interpolates_mid_step() {
         let grid = LogicalGrid::new(2, 1);
-        let mut w = Walker::new(GridPos::new(0, 0), Direction::Down);
-        w.tick(Some(Direction::Right), &grid);
+        let cfg = MovementConfig {
+            tap_turn_ticks: 1,
+            walk_step_ticks: STEP_TICKS,
+            ..MovementConfig::default()
+        };
+        let mut w = GridStepper::with_config(GridPos::new(0, 0), Direction::Down, cfg);
+        w.tick(Some(Direction::Right), &grid, &());
+        w.tick(Some(Direction::Right), &grid, &());
         for _ in 0..7 {
-            w.tick(None, &grid);
+            w.tick(None, &grid, &());
         }
         assert_eq!(w.tile_position(), (0.5, 0.0));
     }

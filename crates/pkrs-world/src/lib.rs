@@ -12,6 +12,7 @@ pub mod conventions;
 mod error;
 mod importer;
 mod map;
+pub mod movement;
 pub mod raw;
 
 pub use conventions::{ConventionViolation, ViolationKind, ViolationLocation, build_map};
@@ -23,6 +24,10 @@ pub use map::{
     Cell, EdgeMask, EncounterZone, LogicalGrid, Map, MapObject, MapTileset, ObjectKind, Properties,
     PropertyValue, Terrain, TileLayer, TileRect, TileRef, TilesetImage, Transition,
     VisualLayerKind, Warp,
+};
+pub use movement::{
+    FieldState, GridStepper, MovementConfig, Occupancy, StepEvent, TerrainRuleFn,
+    TerrainRuleRegistry, TerrainStepVerdict,
 };
 
 #[cfg(test)]

@@ -11,6 +11,7 @@ mod error;
 mod layer;
 mod rect;
 mod renderer;
+mod text;
 mod texture;
 mod viewport;
 
@@ -28,6 +29,10 @@ pub use error::{RenderError, Result};
 pub use layer::Layer;
 pub use rect::Rect;
 pub use renderer::{Renderer, RendererConfig};
+pub use text::{
+    BitmapFont, TextMetrics, TextStyle, measure_text, parse_bmfont_text, parse_glyph_map_ron,
+    wrap_text,
+};
 pub use texture::TextureHandle;
 pub use viewport::{ViewportLayout, ViewportMode, compute_viewport};
 

@@ -13,5 +13,5 @@ pub use game_host::RuntimeHost;
 pub use main_loop::{
     LoopExit, RuntimeLoopConfig, SimulationHost, StubSimulationHost, block_on_loop, run_loop,
 };
-pub use state::{FadeTransition, GameState, StateStack, StateStackDebug, TitleState, Transition};
+pub use state::{FadeTransition, GameState, StateStack, TitleState, Transition};
 pub use tick::{NullTickHooks, TickHooks, TickPhase, run_tick};

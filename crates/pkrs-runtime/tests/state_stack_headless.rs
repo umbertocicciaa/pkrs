@@ -68,7 +68,7 @@ fn headless_run_applies_scripted_transitions_after_update() {
         },
     );
 
-    assert_eq!(exit, LoopExit::TickLimit);
+    assert_eq!(exit, LoopExit::Quit);
     assert!(host.should_quit());
 
     let events = log.borrow();

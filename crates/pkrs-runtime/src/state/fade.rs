@@ -1,6 +1,6 @@
 //! Full-screen fade transition (§6.4 warps); pops itself when complete.
 
-use pkrs_render::{Layer, Rect, Renderer, SpriteDraw, TextureHandle};
+use pkrs_render::Renderer;
 
 use super::{GameState, Transition};
 use crate::ctx::RuntimeCtx;
@@ -31,22 +31,15 @@ impl GameState for FadeTransition {
     }
 
     fn update(&mut self, _ctx: &mut RuntimeCtx) -> Transition {
+        self.ticks_remaining = self.ticks_remaining.saturating_sub(1);
         if self.ticks_remaining == 0 {
             Transition::Pop
         } else {
-            self.ticks_remaining -= 1;
             Transition::None
         }
     }
 
-    fn render(&self, renderer: &mut Renderer, _alpha: f32) {
-        let display = renderer.display();
-        renderer.draw_sprite(SpriteDraw {
-            texture: TextureHandle(0),
-            src: Rect::new(0.0, 0.0, 1.0, 1.0),
-            dst: Rect::new(0.0, 0.0, display.width as f32, display.height as f32),
-            flip_x: false,
-            layer: Layer::Transition,
-        });
+    fn render(&self, _renderer: &mut Renderer, _alpha: f32) {
+        // Visual fade waits for a fill/tint draw primitive on `Renderer` (§4.5).
     }
 }

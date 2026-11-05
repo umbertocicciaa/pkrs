@@ -5,13 +5,6 @@ use pkrs_render::Renderer;
 use super::{GameState, Transition};
 use crate::ctx::RuntimeCtx;
 
-/// Debug view of the stack for the F3 overlay (§15.1).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct StateStackDebug {
-    /// Bottom-to-top state ids.
-    pub ids: Vec<&'static str>,
-}
-
 /// Modal game states with §3.3 deferred transitions.
 #[derive(Default)]
 pub struct StateStack {
@@ -25,16 +18,6 @@ impl StateStack {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Stack with `initial` as the only state (`on_enter` is not called; use [`push`](Self::push)).
-    #[must_use]
-    pub fn with_initial(initial: Box<dyn GameState>) -> Self {
-        Self {
-            states: vec![initial],
-            pending: None,
-            quit_requested: false,
-        }
     }
 
     /// Number of states currently on the stack.
@@ -59,12 +42,6 @@ impl StateStack {
     #[must_use]
     pub fn quit_requested(&self) -> bool {
         self.quit_requested
-    }
-
-    /// Pending transition waiting for the deferred phase (tests / diagnostics).
-    #[must_use]
-    pub fn pending_transition(&self) -> Option<&Transition> {
-        self.pending.as_ref()
     }
 
     /// Pushes `state` and runs [`GameState::on_enter`].
@@ -114,31 +91,27 @@ impl StateStack {
         if self.states.is_empty() {
             return;
         }
-        let top = self.states.len() - 1;
-        let mut start = top;
-        while start > 0 && !self.states[start].is_opaque() {
-            start -= 1;
-        }
-        for state in &self.states[start..=top] {
+        let start = self.states.iter().rposition(|s| s.is_opaque()).unwrap_or(0);
+        for state in &self.states[start..] {
             state.render(renderer, alpha);
-        }
-    }
-
-    /// Bottom-to-top ids for debug overlays.
-    #[must_use]
-    pub fn debug_view(&self) -> StateStackDebug {
-        StateStackDebug {
-            ids: self.states.iter().map(|s| s.id()).collect(),
         }
     }
 
     /// Human-readable stack line (`a > b > c`) for logging and F3.
     #[must_use]
     pub fn format_debug_stack(&self) -> String {
-        self.debug_view().ids.join(" > ")
+        self.states
+            .iter()
+            .map(|s| s.id())
+            .collect::<Vec<_>>()
+            .join(" > ")
     }
 
     fn pop(&mut self, ctx: &mut RuntimeCtx) {
+        if self.states.len() <= 1 {
+            tracing::warn!("Pop ignored: cannot pop the last state on the stack");
+            return;
+        }
         let Some(mut top) = self.states.pop() else {
             return;
         };
@@ -159,14 +132,22 @@ impl StateStack {
     }
 
     fn pop_to(&mut self, ctx: &mut RuntimeCtx, target: &'static str) {
-        while self.states.last().is_some_and(|state| state.id() != target) {
-            let Some(mut top) = self.states.pop() else {
-                break;
-            };
-            top.on_exit(ctx);
+        let Some(keep) = self.states.iter().rposition(|s| s.id() == target) else {
+            tracing::warn!(
+                target,
+                stack = %self.format_debug_stack(),
+                "PopTo: no such state; ignored"
+            );
+            return;
+        };
+        if keep + 1 == self.states.len() {
+            return;
         }
-        if let Some(resumed) = self.states.last_mut() {
-            resumed.on_resume(ctx);
+        for mut state in self.states.drain(keep + 1..).rev() {
+            state.on_exit(ctx);
+        }
+        if let Some(top) = self.states.last_mut() {
+            top.on_resume(ctx);
         }
     }
 }
@@ -318,14 +299,12 @@ mod tests {
             "pushed",
             log.clone(),
         ))));
-        let mut stack = StateStack::with_initial(Box::new(top_state));
+        let mut stack = StateStack::new();
+        stack.push(&mut ctx, Box::new(top_state));
 
         stack.run_update(&mut ctx);
         assert_eq!(stack.len(), 1);
-        assert!(matches!(
-            stack.pending_transition(),
-            Some(Transition::Push(_))
-        ));
+        assert_eq!(stack.top_id(), Some("only"));
         stack.apply_pending(&mut ctx);
         assert_eq!(stack.len(), 2);
         assert_eq!(stack.top_id(), Some("pushed"));
@@ -395,5 +374,51 @@ mod tests {
         );
         stack.push(&mut ctx, Box::new(RecordingState::new("fade", log.clone())));
         assert_eq!(stack.format_debug_stack(), "title > fade");
+    }
+
+    #[test]
+    fn pop_to_unknown_id_leaves_stack_unchanged() {
+        let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut ctx = RuntimeCtx;
+        let mut stack = StateStack::new();
+        stack.push(
+            &mut ctx,
+            Box::new(RecordingState::new("overworld", log.clone())),
+        );
+        stack.push(&mut ctx, Box::new(RecordingState::new("menu", log.clone())));
+        let mut driver = RecordingState::new("dialog", log.clone());
+        driver.next = Some(Transition::PopTo("ovreworld"));
+        stack.push(&mut ctx, Box::new(driver));
+        tick(&mut stack, &mut ctx);
+        assert_eq!(stack.len(), 3);
+        assert_eq!(stack.format_debug_stack(), "overworld > menu > dialog");
+        assert!(!log.borrow().iter().any(|e| e == "exit:overworld"));
+    }
+
+    #[test]
+    fn pop_to_own_id_does_not_resume() {
+        let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut ctx = RuntimeCtx;
+        let mut stack = StateStack::new();
+        let mut top = RecordingState::new("a", log.clone());
+        top.next = Some(Transition::PopTo("a"));
+        stack.push(&mut ctx, Box::new(top));
+        tick(&mut stack, &mut ctx);
+        assert_eq!(stack.len(), 1);
+        assert!(!log.borrow().iter().any(|e| e == "resume:a"));
+    }
+
+    #[test]
+    fn pop_last_state_is_ignored() {
+        let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut ctx = RuntimeCtx;
+        let mut stack = StateStack::new();
+        let mut only = RecordingState::new("root", log.clone());
+        only.next = Some(Transition::Pop);
+        stack.push(&mut ctx, Box::new(only));
+        tick(&mut stack, &mut ctx);
+        assert_eq!(stack.len(), 1);
+        assert_eq!(stack.top_id(), Some("root"));
+        assert!(!log.borrow().iter().any(|e| e == "exit:root"));
     }
 }

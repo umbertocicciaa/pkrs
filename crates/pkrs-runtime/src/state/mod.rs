@@ -5,7 +5,7 @@ mod stack;
 mod title;
 
 pub use fade::FadeTransition;
-pub use stack::{StateStack, StateStackDebug};
+pub use stack::StateStack;
 pub use title::TitleState;
 
 use pkrs_render::Renderer;

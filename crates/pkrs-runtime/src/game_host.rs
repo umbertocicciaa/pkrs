@@ -12,20 +12,31 @@ use crate::tick::{TickHooks, run_tick};
 pub struct RuntimeHost {
     stack: StateStack,
     ctx: RuntimeCtx,
-    renderer: Option<Renderer>,
-    quit: bool,
+    renderer: Renderer,
 }
 
 impl RuntimeHost {
-    /// Title screen on a fresh stack.
+    /// Stack with title state and the given renderer (headless or windowed).
+    #[must_use]
+    pub fn new(renderer: Renderer) -> Self {
+        let mut ctx = RuntimeCtx;
+        let mut stack = StateStack::new();
+        stack.push(&mut ctx, Box::new(TitleState));
+        Self {
+            stack,
+            ctx,
+            renderer,
+        }
+    }
+
+    /// Title screen with a [`NullRenderer`] (tests and headless runs).
     #[must_use]
     pub fn with_title() -> Self {
-        Self {
-            stack: StateStack::with_initial(Box::new(TitleState)),
-            ctx: RuntimeCtx,
-            renderer: None,
-            quit: false,
-        }
+        Self::new(Renderer::new(
+            Box::new(NullRenderer::new()),
+            DisplaySettings::default(),
+            RendererConfig::default(),
+        ))
     }
 
     /// Active state stack (e.g. tests, debug overlay).
@@ -34,20 +45,10 @@ impl RuntimeHost {
         &self.stack
     }
 
-    /// Mutable stack access for scripted tests.
-    pub fn stack_mut(&mut self) -> &mut StateStack {
-        &mut self.stack
-    }
-
-    /// Shared context passed to states each tick.
-    pub fn ctx_mut(&mut self) -> &mut RuntimeCtx {
-        &mut self.ctx
-    }
-
     /// Whether [`Transition::Quit`] was applied.
     #[must_use]
     pub fn should_quit(&self) -> bool {
-        self.quit
+        self.stack.quit_requested()
     }
 
     /// Pushes `state` using the host context.
@@ -56,20 +57,10 @@ impl RuntimeHost {
     }
 
     fn render_frame(&mut self, platform: &Platform, alpha: f32) {
-        if self.renderer.is_none() {
-            let backend = Box::new(NullRenderer::new());
-            self.renderer = Some(Renderer::new(
-                backend,
-                DisplaySettings::default(),
-                RendererConfig::default(),
-            ));
-        }
-        if let Some(renderer) = self.renderer.as_mut() {
-            let (w, h) = platform.window_size();
-            renderer.begin_frame(w, h);
-            self.stack.render(renderer, alpha);
-            renderer.end_frame();
-        }
+        let (w, h) = platform.window_size();
+        self.renderer.begin_frame(w, h);
+        self.stack.render(&mut self.renderer, alpha);
+        self.renderer.end_frame();
     }
 }
 
@@ -80,9 +71,6 @@ impl TickHooks for RuntimeHost {
 
     fn deferred_transitions(&mut self) {
         self.stack.apply_pending(&mut self.ctx);
-        if self.stack.quit_requested() {
-            self.quit = true;
-        }
     }
 }
 
@@ -97,5 +85,9 @@ impl SimulationHost for RuntimeHost {
 
     fn render(&mut self, platform: &Platform, alpha: f32) {
         self.render_frame(platform, alpha);
+    }
+
+    fn should_quit(&self) -> bool {
+        self.stack.quit_requested()
     }
 }

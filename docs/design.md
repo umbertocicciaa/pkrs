@@ -364,7 +364,7 @@ flowchart TD
   data[pkrs-data] --> core
   render[pkrs-render] --> core & platform & assets
   audio[pkrs-audio] --> assets
-  world[pkrs-world] --> data & assets
+  world[pkrs-world] --> core & data & assets
   battle[pkrs-battle] --> core & data
   save[pkrs-save] --> core & data
   ui[pkrs-ui] --> render & platform
@@ -512,6 +512,8 @@ Authors need effects that plain blitting cannot express: **animated tiles** (e.g
 | `encounters` | Object layer (rects) | `table = "route1_grass"`, `rate = 20` |
 
 Object properties reference scripts by name: an `npc` with `script = "maps/route1.lua:old_man"`, a `trigger` with `on_enter = "cutscenes/rival_intro"`.
+
+**Implementation notes (`pkrs_world::conventions`).** `ground` is required and draws in the `Ground` band; `ground2`, `ground3`, … draw in `GroundDecor`. A tile layer named `terrain` is logical only (never drawn). Tile properties `solid`, `block_n/s/e/w` and `terrain` are honoured on **any** tile layer, and later layers override earlier terrain. A tile on the `collision` layer is fully solid unless it only declares `block_*` edges (fences) or says `solid = false`. Directional blocking is checked on both sides of the shared edge. Object classes and their properties: `warp` (`to_map`, `to_x`, `to_y` required; `facing`, `transition`), `npc` (`script`, `sprite`, `facing` = `down`), `trigger` (`on_enter`, `once` = false), `sign` (`script` or `text`), `item` (`item` required, `count` = 1), `spawn` (`facing`); objects may set `uid` as their persistent key (§6.5). Encounter rects need `table` (string) and `rate` (int 0–100). Object pixel rects are converted to whole tiles. Orthogonal, finite maps only; image and group layers are rejected. Importers translate their format into an editor-neutral `RawMap`, so a future pkrs map editor reuses the same convention checks.
 
 ### 6.3 Grid movement
 - The player and NPCs occupy one tile. A step takes **16 ticks walking** and **8 ticks running** (configurable per project), with position interpolated over the step.

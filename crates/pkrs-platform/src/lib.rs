@@ -26,7 +26,7 @@ mod paths;
 mod platform;
 mod window;
 
-pub use action::{Action, ActionRegistry, BuiltinAction, CustomActionId, resolve_action};
+pub use action::{Action, BuiltinAction, CustomActionId};
 #[cfg(feature = "directories")]
 pub use backend::DirectoriesPaths;
 #[cfg(feature = "macroquad")]

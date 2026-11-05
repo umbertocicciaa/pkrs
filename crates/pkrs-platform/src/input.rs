@@ -1,9 +1,9 @@
 //! Input facade: actions, per-tick edges, movement buffer and menu repeat (§10).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use pkrs_core::Direction;
-use pkrs_core::manifest::InputConfig as ManifestInputConfig;
+use pkrs_core::manifest::{InputConfig as ManifestInputConfig, is_action_name};
 
 use crate::action::{Action, ActionRegistry, BuiltinAction, CustomActionId, resolve_action};
 use crate::error::{InputError, InputResult};
@@ -65,6 +65,9 @@ struct ActionBinding {
     state: ActionTickState,
 }
 
+/// Carried presses expire after this many simulation ticks (§10 menu buffer).
+const PRESS_CARRY_TTL_TICKS: u64 = 8;
+
 /// Maps platform keys to actions with per-tick edge detection and buffering.
 pub struct Input {
     config: InputFacadeConfig,
@@ -72,9 +75,12 @@ pub struct Input {
     builtins: [ActionBinding; BuiltinAction::ALL.len()],
     custom: Vec<ActionBinding>,
     keys_down: BTreeSet<Key>,
-    press_carry: BTreeSet<Action>,
+    keys_latched: BTreeSet<Key>,
+    press_carry: BTreeMap<Action, u64>,
+    pending_overrides: BTreeMap<String, Vec<Key>>,
     movement_buffer: Option<Direction>,
     step_ticks_remaining: u32,
+    simulation_tick: u64,
 }
 
 impl Default for Input {
@@ -95,9 +101,12 @@ impl Input {
             }),
             custom: Vec::new(),
             keys_down: BTreeSet::new(),
-            press_carry: BTreeSet::new(),
+            keys_latched: BTreeSet::new(),
+            press_carry: BTreeMap::new(),
+            pending_overrides: BTreeMap::new(),
             movement_buffer: None,
             step_ticks_remaining: 0,
+            simulation_tick: 0,
         };
         input.apply_default_bindings();
         input
@@ -116,9 +125,13 @@ impl Input {
 
     /// Registers a plugin action and binds `default_keys`.
     pub fn register_action(&mut self, name: &str, default_keys: &[Key]) -> InputResult<Action> {
-        let id = self.registry.register(name, default_keys)?;
+        let keys = self
+            .pending_overrides
+            .remove(name)
+            .unwrap_or_else(|| default_keys.to_vec());
+        let id = self.registry.register(name)?;
         self.custom.push(ActionBinding {
-            keys: default_keys.to_vec(),
+            keys,
             state: ActionTickState::default(),
         });
         Ok(Action::Custom(id))
@@ -138,25 +151,25 @@ impl Input {
         for key in platform.keys_down() {
             self.keys_down.insert(key);
         }
+        self.keys_latched.extend(self.keys_down.iter().copied());
     }
 
     /// Recomputes per-tick edges; call once at the start of each simulation tick.
     pub fn begin_tick(&mut self) {
-        self.update_binding(&Action::Builtin(BuiltinAction::Up));
-        self.update_binding(&Action::Builtin(BuiltinAction::Down));
-        self.update_binding(&Action::Builtin(BuiltinAction::Left));
-        self.update_binding(&Action::Builtin(BuiltinAction::Right));
-        self.update_binding(&Action::Builtin(BuiltinAction::Confirm));
-        self.update_binding(&Action::Builtin(BuiltinAction::Cancel));
-        self.update_binding(&Action::Builtin(BuiltinAction::Menu));
-        self.update_binding(&Action::Builtin(BuiltinAction::Run));
-        self.update_binding(&Action::Builtin(BuiltinAction::Select));
+        self.simulation_tick = self.simulation_tick.saturating_add(1);
+        self.expire_press_carry();
+
+        let keys_latched = self.keys_latched.clone();
+        for &builtin in BuiltinAction::ALL {
+            self.update_binding(Action::Builtin(builtin), &keys_latched);
+        }
         for index in 0..self.custom.len() {
             let id = CustomActionId::new(index as u32);
-            self.update_binding(&Action::Custom(id));
+            self.update_binding(Action::Custom(id), &keys_latched);
         }
 
         self.capture_movement_buffer();
+        self.keys_latched.clone_from(&self.keys_down);
     }
 
     /// Whether `action` is held this tick.
@@ -171,7 +184,7 @@ impl Input {
 
     /// Whether `action` has a press waiting from an earlier tick (§10 menu buffer).
     pub fn pending(&self, action: Action) -> bool {
-        self.press_carry.contains(&action)
+        self.press_carry.contains_key(&action)
     }
 
     /// Press edge this tick or a carried press not yet [`consume`](Self::consume)d.
@@ -237,43 +250,52 @@ impl Input {
                 self.builtin_binding_mut(builtin).keys = keys;
             } else if let Some(id) = self.registry.id_by_name(name) {
                 self.custom[id.get() as usize].keys = keys;
+            } else if name.contains(':') {
+                if !is_action_name(name) {
+                    return Err(InputError::InvalidActionName(name.clone()));
+                }
+                self.pending_overrides.insert(name.clone(), keys);
             } else {
-                let id = self.registry.register(name, &keys)?;
-                self.custom.push(ActionBinding {
-                    keys,
-                    state: ActionTickState::default(),
-                });
-                let _ = id;
+                return Err(InputError::InvalidActionName(name.clone()));
             }
         }
         Ok(())
     }
 
-    fn update_binding(&mut self, action: &Action) {
-        let keys = self.binding(*action).keys.clone();
-        let raw_down = keys.iter().any(|key| self.keys_down.contains(key));
-        let binding = self.binding_mut(*action);
+    fn update_binding(&mut self, action: Action, keys_latched: &BTreeSet<Key>) {
+        let binding_keys = self.binding(action).keys.clone();
+        let down = binding_keys.iter().any(|key| self.keys_down.contains(key));
+        let latched = binding_keys.iter().any(|key| keys_latched.contains(key));
+        let binding = self.binding_mut(action);
         let prev = binding.state.prev_down;
-        binding.state.down = raw_down;
-        binding.state.pressed = raw_down && !prev;
-        binding.state.released = !raw_down && prev;
-        binding.state.held_ticks = if raw_down {
+        binding.state.down = down;
+        binding.state.pressed = latched && !prev;
+        binding.state.released = prev && !down;
+        binding.state.held_ticks = if down {
             binding.state.held_ticks.saturating_add(1)
         } else {
             0
         };
-        binding.state.prev_down = raw_down;
+        binding.state.prev_down = down;
         if binding.state.pressed {
-            self.press_carry.insert(*action);
+            self.press_carry.insert(action, self.simulation_tick);
         }
     }
 
+    fn expire_press_carry(&mut self) {
+        let tick = self.simulation_tick;
+        self.press_carry
+            .retain(|_, stored| tick.saturating_sub(*stored) <= PRESS_CARRY_TTL_TICKS);
+    }
+
     fn capture_movement_buffer(&mut self) {
-        if self.step_ticks_remaining > self.config.movement_buffer.window_ticks {
+        let window = self.config.movement_buffer.window_ticks;
+        if self.step_ticks_remaining == 0 || self.step_ticks_remaining > window {
+            self.movement_buffer = None;
             return;
         }
         for (action, direction) in MENU_DIRECTIONS {
-            if self.down(Action::Builtin(action)) {
+            if self.pressed(Action::Builtin(action)) {
                 self.movement_buffer = Some(direction);
             }
         }
@@ -317,10 +339,13 @@ const DEFAULT_BINDINGS: &[(BuiltinAction, &[Key])] = &[
     (BuiltinAction::Select, &[Key::Space]),
 ];
 
-fn parse_key_names(_action: &str, names: &[String]) -> InputResult<Vec<Key>> {
+fn parse_key_names(action: &str, names: &[String]) -> InputResult<Vec<Key>> {
     let mut keys = Vec::with_capacity(names.len());
     for name in names {
-        let key = Key::parse_name(name).ok_or_else(|| InputError::UnknownKeyName(name.clone()))?;
+        let key = Key::parse_name(name).ok_or_else(|| InputError::UnknownKeyName {
+            action: action.to_owned(),
+            key: name.clone(),
+        })?;
         keys.push(key);
     }
     Ok(keys)
@@ -403,11 +428,19 @@ mod tests {
                 ..NullFrame::idle()
             },
             NullFrame {
+                dt: step,
+                keys: vec![],
+                ..NullFrame::idle()
+            },
+            NullFrame {
                 dt: 1.0 / 60.0,
-                keys: vec![Key::Z],
+                keys: vec![],
                 ..NullFrame::idle()
             },
         ]);
+        block_on(platform.next_frame());
+        input.poll(&platform);
+
         block_on(platform.next_frame());
         input.poll(&platform);
 
@@ -469,6 +502,7 @@ mod tests {
         let mut input = Input::new(config);
         let mut platform = platform_with([
             NullFrame::with_keys([Key::Right]),
+            NullFrame::idle(),
             NullFrame::with_keys([Key::Right]),
         ]);
         input.set_movement_step_remaining(5);
@@ -476,10 +510,28 @@ mod tests {
         tick(&mut input, &platform);
         assert!(input.take_movement_direction().is_none());
 
+        block_on(platform.next_frame());
+        tick(&mut input, &platform);
+
         input.set_movement_step_remaining(2);
         block_on(platform.next_frame());
         tick(&mut input, &platform);
         assert_eq!(input.take_movement_direction(), Some(Direction::Right));
+    }
+
+    #[test]
+    fn movement_buffer_clears_when_idle() {
+        let mut input = Input::default();
+        let mut platform = platform_with([NullFrame::with_keys([Key::Up])]);
+        block_on(platform.next_frame());
+        tick(&mut input, &platform);
+        assert!(input.take_movement_direction().is_none());
+
+        block_on(platform.next_frame());
+        tick(&mut input, &platform);
+        block_on(platform.next_frame());
+        tick(&mut input, &platform);
+        assert!(input.take_movement_direction().is_none());
     }
 
     #[test]
@@ -498,6 +550,22 @@ mod tests {
     }
 
     #[test]
+    fn press_carry_expires_after_ttl() {
+        let mut input = Input::default();
+        let mut platform = platform_with([NullFrame::with_keys([Key::X])]);
+        block_on(platform.next_frame());
+        tick(&mut input, &platform);
+        assert!(input.pending(Action::Builtin(BuiltinAction::Cancel)));
+
+        platform = platform_with(std::iter::repeat_n(NullFrame::idle(), 20));
+        for _ in 0..20 {
+            block_on(platform.next_frame());
+            tick(&mut input, &platform);
+        }
+        assert!(!input.triggered(Action::Builtin(BuiltinAction::Cancel)));
+    }
+
+    #[test]
     fn manifest_overrides_defaults() {
         let mut manifest = ManifestInputConfig::default();
         manifest
@@ -509,5 +577,31 @@ mod tests {
         let mut input = input;
         tick(&mut input, &platform);
         assert!(input.pressed(Action::Builtin(BuiltinAction::Confirm)));
+    }
+
+    #[test]
+    fn manifest_plugin_override_defers_until_register() {
+        let mut manifest = ManifestInputConfig::default();
+        manifest
+            .bindings
+            .insert("resonance:toggle".to_owned(), vec!["t".to_owned()]);
+        let mut input =
+            Input::from_manifest(InputFacadeConfig::default(), &manifest).expect("valid");
+        let action = input
+            .register_action("resonance:toggle", &[Key::R])
+            .expect("register");
+        let mut platform = platform_with([NullFrame::with_keys([Key::T])]);
+        block_on(platform.next_frame());
+        tick(&mut input, &platform);
+        assert!(input.pressed(action));
+    }
+
+    #[test]
+    fn manifest_rejects_unknown_builtin_typo() {
+        let mut manifest = ManifestInputConfig::default();
+        manifest
+            .bindings
+            .insert("confrim".to_owned(), vec!["z".to_owned()]);
+        assert!(Input::from_manifest(InputFacadeConfig::default(), &manifest).is_err());
     }
 }

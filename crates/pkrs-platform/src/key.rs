@@ -233,16 +233,6 @@ impl Key {
             "f10" => Some(Key::F10),
             "f11" => Some(Key::F11),
             "f12" => Some(Key::F12),
-            "0" => Some(Key::Digit0),
-            "1" => Some(Key::Digit1),
-            "2" => Some(Key::Digit2),
-            "3" => Some(Key::Digit3),
-            "4" => Some(Key::Digit4),
-            "5" => Some(Key::Digit5),
-            "6" => Some(Key::Digit6),
-            "7" => Some(Key::Digit7),
-            "8" => Some(Key::Digit8),
-            "9" => Some(Key::Digit9),
             _ => None,
         }
     }

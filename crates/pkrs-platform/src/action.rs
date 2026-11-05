@@ -2,12 +2,13 @@
 
 use core::fmt;
 
-use pkrs_core::validate_id;
+use pkrs_core::manifest::is_action_name;
 
 use crate::error::{InputError, InputResult};
 
 /// Built-in actions every game reads instead of raw keys.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[repr(u8)]
 #[non_exhaustive]
 pub enum BuiltinAction {
     /// Step / menu cursor up.
@@ -76,17 +77,7 @@ impl BuiltinAction {
     }
 
     pub(crate) fn index(self) -> usize {
-        match self {
-            Self::Up => 0,
-            Self::Down => 1,
-            Self::Left => 2,
-            Self::Right => 3,
-            Self::Confirm => 4,
-            Self::Cancel => 5,
-            Self::Menu => 6,
-            Self::Run => 7,
-            Self::Select => 8,
-        }
+        self as u8 as usize
     }
 }
 
@@ -139,34 +130,28 @@ impl CustomActionId {
     }
 }
 
-/// Registry of custom action names and default keys.
+/// Registry of custom action names.
 #[derive(Clone, Debug, Default)]
-pub struct ActionRegistry {
+pub(crate) struct ActionRegistry {
     names: Vec<String>,
-    default_keys: Vec<Vec<crate::Key>>,
 }
 
 impl ActionRegistry {
-    /// Registers `name` with `default_keys`, returning its handle.
+    /// Registers `name`, returning its handle.
     ///
     /// Names follow the same rules as `pkrs.toml [input]` (`snake_case` or `plugin:action`).
-    pub fn register(
-        &mut self,
-        name: &str,
-        default_keys: &[crate::Key],
-    ) -> InputResult<CustomActionId> {
+    pub(crate) fn register(&mut self, name: &str) -> InputResult<CustomActionId> {
         validate_action_name(name)?;
         if self.names.iter().any(|existing| existing == name) {
             return Err(InputError::DuplicateAction(name.to_owned()));
         }
         let index = u32::try_from(self.names.len()).map_err(|_| InputError::RegistryFull)?;
         self.names.push(name.to_owned());
-        self.default_keys.push(default_keys.to_vec());
         Ok(CustomActionId::new(index))
     }
 
     /// Resolves a registered custom action by name.
-    pub fn id_by_name(&self, name: &str) -> Option<CustomActionId> {
+    pub(crate) fn id_by_name(&self, name: &str) -> Option<CustomActionId> {
         self.names
             .iter()
             .position(|n| n == name)
@@ -175,39 +160,23 @@ impl ActionRegistry {
 }
 
 /// Resolves `name` to a built-in or registered custom [`Action`].
-pub fn resolve_action(name: &str, registry: &ActionRegistry) -> Option<Action> {
+pub(crate) fn resolve_action(name: &str, registry: &ActionRegistry) -> Option<Action> {
     BuiltinAction::parse(name)
         .map(Action::Builtin)
         .or_else(|| registry.id_by_name(name).map(Action::Custom))
 }
 
 fn validate_action_name(name: &str) -> InputResult<()> {
-    match name.split_once(':') {
-        Some((plugin, action)) => {
-            if !is_plugin_id(plugin) {
-                return Err(InputError::InvalidActionName(name.to_owned()));
-            }
-            pkrs_core::validate_id(action)
-                .map_err(|_| InputError::InvalidActionName(name.to_owned()))?;
-        }
-        None => {
-            validate_id(name).map_err(|_| InputError::InvalidActionName(name.to_owned()))?;
-        }
+    if is_action_name(name) {
+        Ok(())
+    } else {
+        Err(InputError::InvalidActionName(name.to_owned()))
     }
-    Ok(())
-}
-
-fn is_plugin_id(id: &str) -> bool {
-    !id.is_empty()
-        && id
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Key;
 
     #[test]
     fn builtin_names_round_trip() {
@@ -219,9 +188,7 @@ mod tests {
     #[test]
     fn register_and_resolve_custom() {
         let mut registry = ActionRegistry::default();
-        let id = registry
-            .register("resonance:toggle", &[Key::R])
-            .expect("valid");
+        let id = registry.register("resonance:toggle").expect("valid");
         assert_eq!(
             resolve_action("resonance:toggle", &registry),
             Some(Action::Custom(id))
@@ -235,7 +202,7 @@ mod tests {
     #[test]
     fn duplicate_custom_is_rejected() {
         let mut registry = ActionRegistry::default();
-        registry.register("foo:bar", &[]).expect("first");
-        assert!(registry.register("foo:bar", &[]).is_err());
+        registry.register("foo:bar").expect("first");
+        assert!(registry.register("foo:bar").is_err());
     }
 }

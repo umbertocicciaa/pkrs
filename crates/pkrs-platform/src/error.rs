@@ -24,8 +24,13 @@ pub enum InputError {
     #[error("custom action registry is full")]
     RegistryFull,
     /// A manifest or config key name is unknown.
-    #[error("unknown key name `{0}`")]
-    UnknownKeyName(String),
+    #[error("unknown key name `{key}` for action `{action}`")]
+    UnknownKeyName {
+        /// Action table entry in `pkrs.toml`.
+        action: String,
+        /// Key string that could not be parsed.
+        key: String,
+    },
     /// A binding lists no keys.
     #[error("action `{0}` must list at least one key")]
     EmptyBinding(String),

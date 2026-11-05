@@ -5,7 +5,8 @@ use pkrs_platform::{
     DisplaySettings, FixedPaths, MacroquadPlatform, NullPlatform, Platform, PlatformConfig,
     WindowConfig,
 };
-use pkrs_runtime::{RuntimeLoopConfig, StubSimulationHost, block_on_loop, run_loop};
+use pkrs_render::{MacroquadRenderer, NullRenderer, Renderer, RendererConfig};
+use pkrs_runtime::{RuntimeHost, RuntimeLoopConfig, block_on_loop, run_loop};
 use tracing_subscriber::EnvFilter;
 
 /// Log filter used when `RUST_LOG` is not set.
@@ -51,7 +52,13 @@ fn run_headless(config: RuntimeLoopConfig) -> anyhow::Result<()> {
         Box::new(FixedPaths::under("pkrs")),
         PlatformConfig::default(),
     );
-    let mut host = StubSimulationHost;
+    let display = DisplaySettings::default();
+    let renderer = Renderer::new(
+        Box::new(NullRenderer::new()),
+        display,
+        RendererConfig::default(),
+    );
+    let mut host = RuntimeHost::new(renderer);
     let exit = block_on_loop(&mut platform, &mut host, &config);
     tracing::info!(
         ?exit,
@@ -62,7 +69,8 @@ fn run_headless(config: RuntimeLoopConfig) -> anyhow::Result<()> {
 }
 
 fn run_windowed(config: RuntimeLoopConfig) -> anyhow::Result<()> {
-    let mut window = WindowConfig::from_display("pkrs", &DisplaySettings::default());
+    let display = DisplaySettings::default();
+    let mut window = WindowConfig::from_display("pkrs", &display);
     window.vsync = config.vsync;
     MacroquadPlatform::run(&window, move |backend| async move {
         let mut platform = Platform::new(
@@ -70,7 +78,12 @@ fn run_windowed(config: RuntimeLoopConfig) -> anyhow::Result<()> {
             Box::new(FixedPaths::under("pkrs")),
             PlatformConfig::default(),
         );
-        let mut host = StubSimulationHost;
+        let renderer = Renderer::new(
+            Box::new(MacroquadRenderer::new()),
+            display,
+            RendererConfig::default(),
+        );
+        let mut host = RuntimeHost::new(renderer);
         let exit = run_loop(&mut platform, &mut host, &config).await;
         tracing::info!(
             ?exit,

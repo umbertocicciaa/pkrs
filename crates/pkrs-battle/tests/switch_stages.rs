@@ -1,5 +1,7 @@
 //! Switching clears per-slot stat stages (forced replace path).
 
+#![allow(clippy::expect_used, clippy::unwrap_used)]
+
 use pkrs_battle::{
     Battle, BattleAction, BattleConfig, BattleCreature, BattleEvent, BattleInput, BattlePhase,
     BattleResources, BattleSetup, BattleSideSetup, CreatureStats, MoveSlot, NullBattleHooks,

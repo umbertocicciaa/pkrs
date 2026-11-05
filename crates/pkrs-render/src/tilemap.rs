@@ -7,6 +7,7 @@
 use core::cmp::Ordering;
 use core::ops::Range;
 
+use crate::color::Color;
 use crate::draw::SpriteDraw;
 use crate::layer::Layer;
 use crate::rect::Rect;
@@ -127,6 +128,7 @@ pub fn tile_layer_draws(
                 src,
                 dst: Rect::new(dst_x as f32, dst_y as f32, src.width, src.height),
                 flip_x: t.flip_x,
+                tint: Color::WHITE,
                 layer,
             });
         }
@@ -248,6 +250,7 @@ mod tests {
                 src: Rect::new(0.0, 0.0, 16.0, 16.0),
                 dst: Rect::new(0.0, 0.0, 16.0, 16.0),
                 flip_x: false,
+                tint: Color::WHITE,
                 layer: Layer::Entities,
             },
         }

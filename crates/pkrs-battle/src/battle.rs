@@ -1034,18 +1034,17 @@ impl Battle {
                     SideId::Player => &mut self.player,
                     SideId::Opponent => &mut self.opponent,
                 };
-                let applied = if let Ok((creature, _)) =
-                    side.party_creature_and_stages(req.target.slot)
-                {
-                    crate::status::apply_status_to_creature(
-                        creature,
-                        &req.status,
-                        &rules,
-                        self.rng.as_game_rng(),
-                    )
-                } else {
-                    false
-                };
+                let applied =
+                    if let Ok((creature, _)) = side.party_creature_and_stages(req.target.slot) {
+                        crate::status::apply_status_to_creature(
+                            creature,
+                            &req.status,
+                            &rules,
+                            self.rng.as_game_rng(),
+                        )
+                    } else {
+                        false
+                    };
                 if applied || hook_changed {
                     out.push(BattleEvent::StatusApplied {
                         target_side: req.target.side,

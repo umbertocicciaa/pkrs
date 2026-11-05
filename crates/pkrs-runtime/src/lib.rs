@@ -7,6 +7,7 @@ mod game_host;
 mod main_loop;
 mod state;
 mod tick;
+pub mod wiring;
 
 pub use ctx::RuntimeCtx;
 pub use demo::AnimationDemoHost;
@@ -17,3 +18,4 @@ pub use main_loop::{
 };
 pub use state::{FadeTransition, GameState, StateStack, TitleState, Transition};
 pub use tick::{NullTickHooks, TickHooks, TickPhase, run_tick};
+pub use wiring::{AdapterSet, PlatformAdapter, RenderAdapter, RunMode};

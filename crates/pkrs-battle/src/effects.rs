@@ -4,9 +4,10 @@ use pkrs_core::GameRng;
 use pkrs_data::{BattleRules, EffectTarget, MoveEffect};
 
 use crate::event::BattleEvent;
+use crate::hooks::{BattleHookCtx, BattleHooks};
 use crate::model::{ActiveCreature, SideId};
 use crate::stat_stage::StatStages;
-use crate::status::apply_status_to_creature;
+use crate::status::try_apply_status;
 
 /// Applies non-damage effects after a successful hit.
 #[allow(clippy::too_many_arguments)]
@@ -24,9 +25,11 @@ pub fn apply_effects(
     target_stages: &mut StatStages,
     rules: &BattleRules,
     weather: &mut Option<(String, u8)>,
+    hooks: &mut dyn BattleHooks,
+    hook_ctx: &BattleHookCtx<'_>,
     rng: &mut dyn GameRng,
     out: &mut Vec<BattleEvent>,
-) {
+) -> crate::error::Result<()> {
     for effect in effects {
         match effect {
             MoveEffect::Damage => {}
@@ -34,16 +37,24 @@ pub fn apply_effects(
                 if target_fainted {
                     continue;
                 }
-                let roll = rng.gen_range_u32(100);
-                if roll < u32::from(*chance)
-                    && apply_status_to_creature(target_creature, status, rules)
-                {
-                    out.push(BattleEvent::StatusApplied {
-                        target_side,
-                        target_slot,
-                        status: status.clone(),
-                    });
+                if rules.status(status).is_none() {
+                    continue;
                 }
+                let roll = rng.gen_range_u32(100);
+                if roll >= u32::from(*chance) {
+                    continue;
+                }
+                let _ = try_apply_status(
+                    hooks,
+                    hook_ctx,
+                    target_side,
+                    target_slot,
+                    target_creature,
+                    status,
+                    rules,
+                    rng,
+                    out,
+                )?;
             }
             MoveEffect::StatStage {
                 stat,
@@ -112,10 +123,10 @@ pub fn apply_effects(
             MoveEffect::Weather { weather: id } => {
                 if let Some(def) = rules.weather(id) {
                     *weather = Some((id.clone(), def.default_turns));
+                    out.push(BattleEvent::WeatherSet {
+                        weather: id.clone(),
+                    });
                 }
-                out.push(BattleEvent::WeatherSet {
-                    weather: id.clone(),
-                });
             }
             MoveEffect::Protect => {
                 out.push(BattleEvent::Message {
@@ -129,6 +140,7 @@ pub fn apply_effects(
             }
         }
     }
+    Ok(())
 }
 
 fn heal_amount(creature: &mut ActiveCreature, percent: u8) -> u32 {
@@ -161,6 +173,8 @@ fn apply_damage_to(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hooks::BattleHookCtx;
+    use crate::phase::BattlePhase;
     use pkrs_core::Pcg64Rng;
     use pkrs_data::{BattleRules, MoveEffect, StatId};
 
@@ -186,6 +200,13 @@ mod tests {
         let mut out = Vec::new();
         let rules = BattleRules::gen3_defaults();
         let mut weather = None;
+        let mut hooks = crate::hooks::NullBattleHooks;
+        let ctx = BattleHookCtx {
+            phase: BattlePhase::ExecuteAction,
+            turn: 1,
+            side_size: 1,
+            events: &[],
+        };
         apply_effects(
             &[MoveEffect::StatStage {
                 stat: StatId::Attack,
@@ -205,9 +226,12 @@ mod tests {
             &mut target_stages,
             &rules,
             &mut weather,
+            &mut hooks,
+            &ctx,
             &mut rng,
             &mut out,
-        );
+        )
+        .expect("effects");
         assert_eq!(user_stages.attack, 1);
         assert_eq!(target_stages.attack, 0);
         assert!(matches!(
@@ -230,6 +254,13 @@ mod tests {
         let mut out = Vec::new();
         let rules = BattleRules::gen3_defaults();
         let mut weather = None;
+        let mut hooks = crate::hooks::NullBattleHooks;
+        let ctx = BattleHookCtx {
+            phase: BattlePhase::ExecuteAction,
+            turn: 1,
+            side_size: 1,
+            events: &[],
+        };
         apply_effects(
             &[MoveEffect::Heal { percent: 50 }],
             SideId::Player,
@@ -244,9 +275,12 @@ mod tests {
             &mut target_stages,
             &rules,
             &mut weather,
+            &mut hooks,
+            &ctx,
             &mut rng,
             &mut out,
-        );
+        )
+        .expect("effects");
         assert_eq!(user.current_hp, 100);
         assert_eq!(
             out[0],

@@ -108,6 +108,26 @@ pub enum BattleEvent {
         /// Weather id.
         weather: String,
     },
+    /// Field weather ended.
+    WeatherEnded,
+    /// A non-volatile status ended.
+    StatusCured {
+        /// Target side.
+        target_side: SideId,
+        /// Target slot.
+        target_slot: SlotIndex,
+        /// Status id.
+        status: String,
+    },
+    /// A volatile status ended.
+    VolatileEnded {
+        /// Target side.
+        target_side: SideId,
+        /// Target slot.
+        target_slot: SlotIndex,
+        /// Volatile id.
+        volatile: String,
+    },
     /// A creature fainted.
     Fainted {
         /// Side.

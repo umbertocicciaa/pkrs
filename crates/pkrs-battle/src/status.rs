@@ -1,11 +1,15 @@
 //! Status, weather, and end-of-turn residuals (§7.3).
 
-use pkrs_data::{BattleRules, StatusKind};
+use pkrs_core::GameRng;
+use pkrs_data::{
+    BattleRules, ResidualKind, StatusKind, residual_amount, status_blocked_by_types,
+    weather_chip_blocked,
+};
 
 use crate::Battle;
 use crate::error::Result;
 use crate::event::BattleEvent;
-use crate::hooks::BattleHooks;
+use crate::hooks::{BattleHookCtx, BattleHooks, HookResult, StatusApplyRequest};
 use crate::model::{ActiveCreature, MajorStatus, SideId, SlotIndex};
 
 /// Applies a status id to a creature using the rules catalog.
@@ -13,16 +17,20 @@ pub fn apply_status_to_creature(
     creature: &mut ActiveCreature,
     status_id: &str,
     rules: &BattleRules,
+    rng: &mut dyn GameRng,
 ) -> bool {
     let Some(def) = rules.status(status_id) else {
         return false;
     };
+    if status_blocked_by_types(def, &creature.template.types) {
+        return false;
+    }
     match def.kind {
         StatusKind::Major => {
             if creature.major_status.is_some() {
                 return false;
             }
-            let counter = if status_id == "sleep" { 2 } else { 0 };
+            let counter = sleep_turns_on_apply(def, rng);
             creature.major_status = Some(MajorStatus {
                 id: status_id.to_string(),
                 counter,
@@ -37,19 +45,56 @@ pub fn apply_status_to_creature(
     }
 }
 
-/// Returns `true` when the creature cannot act (sleep/freeze/full paralysis).
-pub fn blocks_move(creature: &ActiveCreature, rules: &BattleRules, para_roll: u32) -> bool {
-    let Some(major) = &creature.major_status else {
+fn sleep_turns_on_apply(def: &pkrs_data::StatusDef, rng: &mut dyn GameRng) -> u8 {
+    let Some((min, max)) = def.sleep_turns else {
+        return 0;
+    };
+    let span = u32::from(max.saturating_sub(min)) + 1;
+    min.saturating_add(rng.gen_range_u32(span) as u8)
+}
+
+/// Returns `true` when the creature cannot act this turn (events are appended to `out`).
+pub fn blocks_move_attempt(
+    creature: &mut ActiveCreature,
+    side: SideId,
+    slot: SlotIndex,
+    rules: &BattleRules,
+    rng: &mut dyn GameRng,
+    out: &mut Vec<BattleEvent>,
+) -> bool {
+    let Some(major) = creature.major_status.as_ref() else {
         return false;
     };
-    let Some(def) = rules.status(&major.id) else {
+    let status_id = major.id.clone();
+    let Some(def) = rules.status(&status_id) else {
         return false;
     };
+
     if def.blocks_move {
+        if status_id == "freeze" {
+            if let Some(chance) = def.thaw_chance {
+                if rng.gen_range_u32(100) < u32::from(chance) {
+                    creature.major_status = None;
+                    out.push(BattleEvent::StatusCured {
+                        target_side: side,
+                        target_slot: slot,
+                        status: status_id,
+                    });
+                    return false;
+                }
+            }
+        }
+        out.push(BattleEvent::Message {
+            key: "status:cant_move".into(),
+        });
         return true;
     }
+
     if let Some(chance) = def.full_paralysis_chance {
-        if para_roll < u32::from(chance) {
+        if rng.gen_range_u32(100) < u32::from(chance) {
+            out.push(BattleEvent::Message {
+                key: "status:cant_move".into(),
+            });
             return true;
         }
     }
@@ -68,14 +113,27 @@ pub fn process_end_of_turn(
     let weather = battle.weather_snapshot();
     if let Some((weather_id, _)) = &weather {
         if let Some(def) = rules.weather(weather_id) {
-            if let Some(percent) = def.chip_percent {
+            if let Some(denom) = def.chip_denom {
                 for side in [SideId::Player, SideId::Opponent] {
                     for slot in 0..battle.config().side_size {
-                        apply_chip(
+                        let Some(creature) = battle.creature(side, slot) else {
+                            continue;
+                        };
+                        if creature.fainted() {
+                            continue;
+                        }
+                        if weather_chip_blocked(def, &creature.template.types) {
+                            continue;
+                        }
+                        let amount = residual_amount(
+                            creature.template.stats.max_hp,
+                            ResidualKind::MaxHpFraction { denom },
+                        );
+                        apply_residual_damage(
                             battle,
                             side,
                             slot,
-                            percent,
+                            amount,
                             out,
                             &format!("weather:{weather_id}"),
                         )?;
@@ -87,43 +145,34 @@ pub fn process_end_of_turn(
 
     for side in [SideId::Player, SideId::Opponent] {
         for slot in 0..battle.config().side_size {
-            let residual = battle.creature(side, slot).and_then(|creature| {
+            let Some(creature) = battle.creature(side, slot) else {
+                continue;
+            };
+            if creature.fainted() {
+                continue;
+            }
+            let amount = battle.creature(side, slot).and_then(|creature| {
                 let major = creature.major_status.as_ref()?;
                 let def = rules.status(&major.id)?;
-                match def.residual? {
-                    pkrs_data::ResidualKind::MaxHpPercent { percent } => Some(
-                        creature
-                            .template
-                            .stats
-                            .max_hp
-                            .saturating_mul(u32::from(percent))
-                            / 100,
-                    ),
-                }
+                let residual = def.residual?;
+                Some(residual_amount(creature.template.stats.max_hp, residual))
             });
-            if let Some(amount) = residual {
-                if amount > 0 {
-                    let remaining = battle.apply_damage(side, slot, amount)?;
-                    out.push(BattleEvent::Damage {
-                        target_side: side,
-                        target_slot: slot,
-                        amount,
-                        remaining_hp: remaining,
-                    });
-                    if remaining == 0 {
-                        faint_if_needed(battle, side, slot, out);
-                    }
-                }
+            if let Some(amount) = amount {
+                apply_residual_damage(battle, side, slot, amount, out, "status:residual")?;
             }
         }
     }
 
-    battle.tick_weather();
+    let ended = battle.tick_weather();
+    if ended {
+        out.push(BattleEvent::WeatherEnded);
+    }
+
     for side in [SideId::Player, SideId::Opponent] {
         for slot in 0..battle.config().side_size {
             if let Some(creature) = battle.creature_mut(side, slot) {
-                tick_sleep(creature);
-                tick_volatiles(creature);
+                tick_sleep(creature, side, slot, out);
+                tick_volatiles(creature, side, slot, out);
             }
         }
     }
@@ -131,29 +180,26 @@ pub fn process_end_of_turn(
     Ok(())
 }
 
-fn apply_chip(
+fn apply_residual_damage(
     battle: &mut Battle,
     side: SideId,
     slot: SlotIndex,
-    percent: u8,
+    amount: u32,
     out: &mut Vec<BattleEvent>,
-    _key: &str,
+    source: &str,
 ) -> Result<()> {
+    if amount == 0 {
+        return Ok(());
+    }
     let Some(creature) = battle.creature(side, slot) else {
         return Ok(());
     };
     if creature.fainted() {
         return Ok(());
     }
-    let mut amount = creature
-        .template
-        .stats
-        .max_hp
-        .saturating_mul(u32::from(percent))
-        / 100;
-    if amount == 0 {
-        amount = 1;
-    }
+    out.push(BattleEvent::Message {
+        key: format!("residual:{source}"),
+    });
     let remaining = battle.apply_damage(side, slot, amount)?;
     out.push(BattleEvent::Damage {
         target_side: side,
@@ -177,25 +223,90 @@ fn faint_if_needed(battle: &Battle, side: SideId, slot: SlotIndex, out: &mut Vec
     }
 }
 
-fn tick_sleep(creature: &mut ActiveCreature) {
+fn tick_sleep(
+    creature: &mut ActiveCreature,
+    side: SideId,
+    slot: SlotIndex,
+    out: &mut Vec<BattleEvent>,
+) {
     let Some(major) = &mut creature.major_status else {
         return;
     };
-    if major.id != "sleep" || major.counter == 0 {
+    if major.counter == 0 {
         return;
     }
     major.counter = major.counter.saturating_sub(1);
     if major.counter == 0 {
+        let status = major.id.clone();
         creature.major_status = None;
+        out.push(BattleEvent::StatusCured {
+            target_side: side,
+            target_slot: slot,
+            status,
+        });
     }
 }
 
-fn tick_volatiles(creature: &mut ActiveCreature) {
-    creature.volatiles.retain(|_, turns| {
+fn tick_volatiles(
+    creature: &mut ActiveCreature,
+    side: SideId,
+    slot: SlotIndex,
+    out: &mut Vec<BattleEvent>,
+) {
+    let ids: Vec<String> = creature.volatiles.keys().cloned().collect();
+    for id in ids {
+        let Some(turns) = creature.volatiles.get_mut(&id) else {
+            continue;
+        };
         if *turns == 0 {
-            return true;
+            continue;
         }
         *turns = turns.saturating_sub(1);
-        *turns > 0
-    });
+        if *turns == 0 {
+            creature.volatiles.remove(&id);
+            out.push(BattleEvent::VolatileEnded {
+                target_side: side,
+                target_slot: slot,
+                volatile: id,
+            });
+        }
+    }
+}
+
+/// Attempts to apply a status with type immunity and hook veto.
+#[allow(clippy::too_many_arguments)]
+pub fn try_apply_status(
+    hooks: &mut dyn BattleHooks,
+    ctx: &BattleHookCtx<'_>,
+    target_side: SideId,
+    target_slot: SlotIndex,
+    target: &mut ActiveCreature,
+    status_id: &str,
+    rules: &BattleRules,
+    rng: &mut dyn GameRng,
+    out: &mut Vec<BattleEvent>,
+) -> Result<bool> {
+    let Some(def) = rules.status(status_id) else {
+        return Ok(false);
+    };
+    if status_blocked_by_types(def, &target.template.types) {
+        return Ok(false);
+    }
+    let req = StatusApplyRequest {
+        target_side,
+        target_slot,
+        status_id: status_id.to_string(),
+    };
+    if hooks.on_status_apply(ctx, &req)? == HookResult::Cancel {
+        return Ok(false);
+    }
+    if apply_status_to_creature(target, status_id, rules, rng) {
+        out.push(BattleEvent::StatusApplied {
+            target_side,
+            target_slot,
+            status: status_id.to_string(),
+        });
+        return Ok(true);
+    }
+    Ok(false)
 }

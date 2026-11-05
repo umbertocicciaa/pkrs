@@ -22,8 +22,6 @@ struct SideState {
     party: Vec<ActiveCreature>,
     active: Vec<Option<PartyIndex>>,
     slot_stages: Vec<StatStages>,
-    /// Plugin / script side state (§7.3).
-    side_state: std::collections::BTreeMap<String, String>,
 }
 
 impl SideState {
@@ -60,7 +58,6 @@ impl SideState {
             party,
             active,
             slot_stages: vec![StatStages::zero(); side_size as usize],
-            side_state: std::collections::BTreeMap::new(),
         })
     }
 
@@ -372,6 +369,8 @@ impl Battle {
                 out.push(BattleEvent::TurnEnded { turn: self.turn });
                 if let Some(outcome) = self.check_battle_end() {
                     self.finish(outcome, hooks, out)?;
+                } else if let Some((side, slot)) = self.next_replace_needed() {
+                    self.phase = BattlePhase::Replace { side, slot };
                 } else if self.side(SideId::Player).side_has_any_usable()
                     && self.side(SideId::Opponent).side_has_any_usable()
                 {
@@ -501,6 +500,20 @@ impl Battle {
             (target.template.types.clone(), target.template.stats.clone())
         };
 
+        let rules = &self.resources.rules;
+        let blocked = Self::status_blocks_move(
+            &mut self.player,
+            &mut self.opponent,
+            &mut self.rng,
+            rules,
+            user_side,
+            user_slot,
+            out,
+        )?;
+        if blocked {
+            return Ok(());
+        }
+
         out.push(BattleEvent::MoveUsed {
             user_side,
             user_slot,
@@ -508,19 +521,6 @@ impl Battle {
             target_side,
             target_slot,
         });
-
-        let para_roll = self.rng.as_game_rng().gen_range_u32(100);
-        let blocked = if let Some(user) = self.side(user_side).creature(user_slot) {
-            crate::status::blocks_move(user, &self.resources.rules, para_roll)
-        } else {
-            false
-        };
-        if blocked {
-            out.push(BattleEvent::Message {
-                key: "status:cant_move".into(),
-            });
-            return Ok(());
-        }
 
         let user_stages = self.side(user_side).stages_at(user_slot);
         let target_stages = self.side(target_side).stages_at(target_slot);
@@ -601,6 +601,12 @@ impl Battle {
         let (target_creature, target_stages_mut) =
             target_side_state.party_creature_and_stages(target_slot)?;
         let rules = &self.resources.rules;
+        let hook_ctx = BattleHookCtx {
+            phase: self.phase,
+            turn: self.turn,
+            side_size: self.config.side_size,
+            events: &[],
+        };
         apply_effects(
             &effects,
             user_side,
@@ -615,9 +621,11 @@ impl Battle {
             target_stages_mut,
             rules,
             &mut self.weather,
+            hooks,
+            &hook_ctx,
             self.rng.as_game_rng(),
             out,
-        );
+        )?;
 
         Ok(())
     }
@@ -720,27 +728,18 @@ impl Battle {
         self.weather.clone()
     }
 
-    /// Opaque key/value side state for plugins (§7.3).
-    pub fn set_side_state(
-        &mut self,
-        side: SideId,
-        key: impl Into<String>,
-        value: impl Into<String>,
-    ) {
-        self.side_mut(side)
-            .side_state
-            .insert(key.into(), value.into());
-    }
-
-    pub(crate) fn tick_weather(&mut self) {
-        if let Some((_, turns)) = &mut self.weather {
-            if *turns > 0 {
-                *turns = turns.saturating_sub(1);
-            }
-            if *turns == 0 {
-                self.weather = None;
-            }
+    pub(crate) fn tick_weather(&mut self) -> bool {
+        let Some((_, turns)) = &mut self.weather else {
+            return false;
+        };
+        if *turns > 0 {
+            *turns = turns.saturating_sub(1);
         }
+        if *turns == 0 {
+            self.weather = None;
+            return true;
+        }
+        false
     }
 
     pub(crate) fn creature(&self, side: SideId, slot: SlotIndex) -> Option<&ActiveCreature> {
@@ -771,5 +770,29 @@ impl Battle {
             SideId::Player => &mut self.player,
             SideId::Opponent => &mut self.opponent,
         }
+    }
+
+    fn status_blocks_move(
+        player: &mut SideState,
+        opponent: &mut SideState,
+        rng: &mut BattleRng,
+        rules: &BattleRules,
+        user_side: SideId,
+        user_slot: SlotIndex,
+        out: &mut Vec<BattleEvent>,
+    ) -> Result<bool> {
+        let side = match user_side {
+            SideId::Player => player,
+            SideId::Opponent => opponent,
+        };
+        let (creature, _) = side.party_creature_and_stages(user_slot)?;
+        Ok(crate::status::blocks_move_attempt(
+            creature,
+            user_side,
+            user_slot,
+            rules,
+            rng.as_game_rng(),
+            out,
+        ))
     }
 }

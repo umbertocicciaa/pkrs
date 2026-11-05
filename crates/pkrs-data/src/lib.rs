@@ -10,7 +10,10 @@ mod species;
 mod type_chart;
 
 pub use battle_pack::BattlePack;
-pub use battle_rules::{BattleRules, ResidualKind, StatusDef, StatusKind, WeatherDef};
+pub use battle_rules::{
+    BattleRules, ResidualKind, StatusDef, StatusKind, WeatherDef, residual_amount,
+    status_blocked_by_types, weather_chip_blocked,
+};
 pub use error::{DataError, Result};
 pub use move_def::{EffectTarget, MoveCategory, MoveDef, MoveEffect, StatId};
 pub use species::SpeciesDef;

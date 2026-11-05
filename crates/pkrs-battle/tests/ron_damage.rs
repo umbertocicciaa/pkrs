@@ -104,7 +104,7 @@ fn ron_loaded_ember_produces_damage_event() {
         setup,
         BattleConfig::default(),
         resources,
-        RngPolicy::Fixed { seed: 42 },
+        RngPolicy::Fixed { seed: 66 },
         &mut hooks,
     )
     .expect("new");
@@ -140,7 +140,11 @@ fn ron_loaded_ember_produces_damage_event() {
             _ => None,
         })
         .collect();
-    assert_eq!(ember_damage.first().copied(), Some(23), "pinned seed 42 ember vs grass");
+    assert_eq!(
+        ember_damage,
+        vec![23, 5],
+        "pinned seed 66 ember vs grass + burn residual (max_hp/8)"
+    );
     assert!(
         events
             .iter()

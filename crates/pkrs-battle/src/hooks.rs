@@ -27,6 +27,26 @@ pub struct ActionOrder {
     pub entries: Vec<(SideId, SlotIndex)>,
 }
 
+/// Result of a hook that may veto an action.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HookResult {
+    /// Proceed with the default behaviour.
+    Continue,
+    /// Skip the default behaviour (immunity, cancel, …).
+    Cancel,
+}
+
+/// Status application request passed to [`BattleHooks::on_status_apply`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StatusApplyRequest {
+    /// Target side.
+    pub target_side: SideId,
+    /// Target slot.
+    pub target_slot: SlotIndex,
+    /// Status content id.
+    pub status_id: String,
+}
+
 /// Hook surface invoked by the battle core (Lua / plugins implement via `pkrs-script`).
 pub trait BattleHooks {
     /// Called once when leaving [`BattlePhase::Start`].
@@ -61,6 +81,15 @@ pub trait BattleHooks {
     /// Called after the default damage pipeline; may adjust final damage.
     fn on_damage_calc(&mut self, _ctx: &BattleHookCtx<'_>, _dmg: &mut DamageCalc) -> Result<()> {
         Ok(())
+    }
+
+    /// Called before a status is applied; return [`HookResult::Cancel`] to block.
+    fn on_status_apply(
+        &mut self,
+        _ctx: &BattleHookCtx<'_>,
+        _req: &StatusApplyRequest,
+    ) -> Result<HookResult> {
+        Ok(HookResult::Continue)
     }
 
     /// Called in [`BattlePhase::EndOfTurn`].

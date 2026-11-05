@@ -12,6 +12,9 @@ pub enum WorldError {
     /// A map could not be imported.
     #[error("failed to import map `{0}`")]
     MapImport(String),
+    /// A map file could not be loaded or breaks the layer conventions.
+    #[error(transparent)]
+    Map(#[from] crate::importer::MapError),
     /// Error from `pkrs-data`.
     #[error(transparent)]
     Data(#[from] pkrs_data::DataError),

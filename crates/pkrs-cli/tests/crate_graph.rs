@@ -19,7 +19,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
         &["pkrs-core", "pkrs-platform", "pkrs-assets"],
     ),
     ("pkrs-audio", &["pkrs-assets"]),
-    ("pkrs-world", &["pkrs-data", "pkrs-assets"]),
+    ("pkrs-world", &["pkrs-core", "pkrs-data", "pkrs-assets"]),
     ("pkrs-battle", &["pkrs-core", "pkrs-data"]),
     ("pkrs-save", &["pkrs-core", "pkrs-data"]),
     ("pkrs-ui", &["pkrs-render", "pkrs-platform"]),

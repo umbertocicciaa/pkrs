@@ -1,12 +1,13 @@
 //! The pkrs game player (§0.5): wires every subsystem, owns the state stack and main loop.
 
 use anyhow::Context as _;
-use pkrs_platform::{
-    DisplaySettings, FixedPaths, MacroquadPlatform, NullPlatform, Platform, PlatformConfig,
-    WindowConfig,
-};
+use pkrs_platform::{DisplaySettings, FixedPaths, MacroquadPlatform, Platform, PlatformConfig};
 use pkrs_render::MacroquadRenderer;
-use pkrs_runtime::{AnimationDemoHost, RuntimeLoopConfig, block_on_loop, run_loop};
+use pkrs_runtime::wiring::{headless_platform, headless_renderer, window_config};
+use pkrs_runtime::{
+    AdapterSet, AnimationDemoHost, LoopExit, PlatformAdapter, RenderAdapter, RunMode,
+    RuntimeLoopConfig, block_on_loop, run_loop,
+};
 use tracing_subscriber::EnvFilter;
 
 /// Log filter used when `RUST_LOG` is not set.
@@ -38,34 +39,45 @@ fn main() -> anyhow::Result<()> {
         vsync: cli.vsync,
     };
 
-    if cli.headless {
-        run_headless(config)?;
-    } else {
-        run_windowed(config)?;
+    let adapters = AdapterSet::for_mode(RunMode::from_headless_flag(cli.headless));
+    match (adapters.platform, adapters.renderer) {
+        (PlatformAdapter::Null, RenderAdapter::Null) => run_headless(config),
+        (PlatformAdapter::Macroquad, RenderAdapter::Macroquad) => run_windowed(config),
+        (platform, renderer) => {
+            anyhow::bail!("unsupported adapter combination: {platform:?} + {renderer:?}")
+        }
     }
-    Ok(())
 }
 
+/// Runs with Null adapters only (§14.4 smoke test). Errors and early exits are fatal so CI
+/// sees a non-zero status.
 fn run_headless(config: RuntimeLoopConfig) -> anyhow::Result<()> {
-    let mut platform = Platform::new(
-        Box::new(NullPlatform::new()),
-        Box::new(FixedPaths::under("pkrs")),
-        PlatformConfig::default(),
-    );
-    let (mut host, _log) = AnimationDemoHost::headless().context("animation demo host")?;
+    let display = DisplaySettings::default();
+    let mut platform = headless_platform(PlatformConfig::default());
+    let (renderer, log) = headless_renderer(display);
+    let mut host = AnimationDemoHost::with_renderer(renderer).context("animation demo host")?;
     let exit = block_on_loop(&mut platform, &mut host, &config);
     tracing::info!(
         ?exit,
         frames = platform.frame_count(),
+        draws = log.draws().len(),
         "headless run finished"
     );
-    Ok(())
+    check_headless_exit(exit, &config)
+}
+
+/// A headless run with a tick limit must stop because of that limit (or a clean `Quit`).
+fn check_headless_exit(exit: LoopExit, config: &RuntimeLoopConfig) -> anyhow::Result<()> {
+    match exit {
+        LoopExit::TickLimit | LoopExit::Quit => Ok(()),
+        LoopExit::FrameLimit if config.max_frames.is_some() => Ok(()),
+        LoopExit::FrameLimit => anyhow::bail!("headless run stopped unexpectedly: {exit:?}"),
+    }
 }
 
 fn run_windowed(config: RuntimeLoopConfig) -> anyhow::Result<()> {
     let display = DisplaySettings::default();
-    let mut window = WindowConfig::from_display("pkrs", &display);
-    window.vsync = config.vsync;
+    let window = window_config("pkrs", &display, config.vsync);
     MacroquadPlatform::run(&window, move |backend| async move {
         let mut platform = Platform::new(
             Box::new(backend),
@@ -215,5 +227,16 @@ mod tests {
     #[test]
     fn cli_rejects_unknown_flag() {
         assert!(RuntimeCliOptions::parse_from(["--nope"]).is_err());
+    }
+
+    #[test]
+    fn headless_exit_accepts_tick_limit_and_quit() {
+        let config = RuntimeLoopConfig {
+            max_ticks: Some(600),
+            ..RuntimeLoopConfig::default()
+        };
+        assert!(check_headless_exit(LoopExit::TickLimit, &config).is_ok());
+        assert!(check_headless_exit(LoopExit::Quit, &config).is_ok());
+        assert!(check_headless_exit(LoopExit::FrameLimit, &config).is_err());
     }
 }

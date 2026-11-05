@@ -5,9 +5,11 @@ mod demo;
 mod fixed_step;
 mod game_host;
 mod main_loop;
+pub mod scene;
 pub mod scripts;
 mod state;
 mod tick;
+pub mod wiring;
 
 pub use ctx::RuntimeCtx;
 pub use demo::AnimationDemoHost;
@@ -16,5 +18,7 @@ pub use game_host::RuntimeHost;
 pub use main_loop::{
     LoopExit, RuntimeLoopConfig, SimulationHost, StubSimulationHost, block_on_loop, run_loop,
 };
+pub use scene::{MapScene, PLAYER_ENTITY, SceneEntity, SceneError, WorldTileGrid};
 pub use state::{FadeTransition, GameState, StateStack, TitleState, Transition};
 pub use tick::{NullTickHooks, TickHooks, TickPhase, run_tick};
+pub use wiring::{AdapterSet, PlatformAdapter, RenderAdapter, RunMode};

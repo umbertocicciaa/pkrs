@@ -1,17 +1,156 @@
-//! The `pkrs` command-line tool (§2.3): new, run, check, build, upgrade, plugin.
+//! The `pkrs` command-line tool (§2.3).
+//!
+//! Implemented: `pkrs new` (one-shot template) and `pkrs run`. `check`, `build`, `upgrade` and
+//! `plugin` arrive with their milestones (M5–M7).
+
+use std::path::PathBuf;
+use std::process::ExitCode;
 
 use anyhow::Context as _;
+use clap::{Parser, Subcommand, ValueEnum};
+use pkrs_cli::run::{self, RUNTIME_ENV, RunRequest};
+use pkrs_cli::template::{self, Template, TemplateVars};
 use tracing_subscriber::EnvFilter;
 
 /// Log filter used when `RUST_LOG` is not set.
 const DEFAULT_LOG_FILTER: &str = "info";
 
-fn main() -> anyhow::Result<()> {
-    init_tracing()?;
-    tracing::debug!("pkrs cli starting");
-    // Command parsing (new/run/check/build/upgrade/plugin) lands in a later task (§2.3).
-    println!("{}", version_line());
-    Ok(())
+#[derive(Debug, Parser)]
+#[command(name = "pkrs", version, about = "Make and run pkrs games")]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum TemplateArg {
+    /// One small map and the player; no battles.
+    OneShot,
+    /// Two maps, battles and a plugin (not available yet).
+    FullGame,
+}
+
+impl From<TemplateArg> for Template {
+    fn from(t: TemplateArg) -> Self {
+        match t {
+            TemplateArg::OneShot => Template::OneShot,
+            TemplateArg::FullGame => Template::FullGame,
+        }
+    }
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Create a new game project from an embedded template.
+    New {
+        /// Project name (also the folder name).
+        name: String,
+        /// Template to start from.
+        #[arg(long, value_enum, default_value = "one-shot")]
+        template: TemplateArg,
+        /// Create the project here instead of `./<name>`.
+        #[arg(long)]
+        path: Option<PathBuf>,
+    },
+    /// Run the project from loose files (dev saves go to `<project>/saves/`).
+    Run {
+        /// Start on this map instead of `[start].map`.
+        #[arg(long)]
+        map: Option<String>,
+        /// Start on this tile (`x,y`).
+        #[arg(long, value_parser = parse_warp_arg)]
+        warp: Option<(u32, u32)>,
+        /// Project folder (default: the nearest folder with a pkrs.toml).
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Use a release runtime (prebuilt runtimes arrive in M7; currently informational).
+        #[arg(long)]
+        release: bool,
+        /// Run without a window (CI).
+        #[arg(long)]
+        headless: bool,
+        /// Stop after N simulation ticks.
+        #[arg(long)]
+        ticks: Option<u64>,
+    },
+}
+
+fn parse_warp_arg(raw: &str) -> Result<(u32, u32), String> {
+    run::parse_warp(raw).map_err(|e| e.to_string())
+}
+
+fn main() -> ExitCode {
+    if let Err(err) = init_tracing() {
+        eprintln!("{err:#}");
+    }
+    match execute(Cli::parse()) {
+        Ok(code) => code,
+        Err(err) => {
+            eprintln!("error: {err:#}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn execute(cli: Cli) -> anyhow::Result<ExitCode> {
+    match cli.command {
+        Command::New {
+            name,
+            template,
+            path,
+        } => {
+            let vars = TemplateVars::for_project(&name)?;
+            let dest = path.unwrap_or_else(|| PathBuf::from(&name));
+            let files = template::scaffold(template.into(), &dest, &vars)?;
+            println!(
+                "Created {} ({} files) in {}",
+                vars,
+                files.len(),
+                dest.display()
+            );
+            println!("Next: cd {} && pkrs run", dest.display());
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Run {
+            map,
+            warp,
+            project,
+            release,
+            headless,
+            ticks,
+        } => {
+            let start = match project {
+                Some(p) => p,
+                None => std::env::current_dir().context("cannot read the current directory")?,
+            };
+            let project = run::find_project_root(&start)?;
+            let exe = std::env::current_exe().context("cannot locate the pkrs executable")?;
+            let runtime =
+                run::locate_runtime(std::env::var_os(RUNTIME_ENV).map(PathBuf::from), &exe)?;
+            if release {
+                tracing::info!(
+                    "--release: using the locally built runtime until prebuilt runtimes ship (M7)"
+                );
+            }
+            let args = run::runtime_args(&RunRequest {
+                project,
+                map,
+                warp,
+                headless,
+                ticks,
+            });
+            tracing::debug!(runtime = %runtime.display(), ?args, "launching runtime");
+            let status = std::process::Command::new(&runtime)
+                .args(&args)
+                .status()
+                .with_context(|| format!("cannot start {}", runtime.display()))?;
+            Ok(match status.code() {
+                Some(0) => ExitCode::SUCCESS,
+                Some(code) => ExitCode::from(u8::try_from(code).unwrap_or(1)),
+                None => ExitCode::FAILURE,
+            })
+        }
+    }
 }
 
 /// Installs a `tracing` subscriber that writes to stderr (§15.1).
@@ -28,20 +167,75 @@ fn init_tracing() -> anyhow::Result<()> {
         .context("failed to initialise logging")
 }
 
-/// The line printed by the CLI until real commands exist.
-fn version_line() -> String {
-    format!("pkrs {}", env!("CARGO_PKG_VERSION"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::CommandFactory;
 
     #[test]
-    fn version_line_names_the_tool() {
-        assert_eq!(
-            version_line(),
-            format!("pkrs {}", env!("CARGO_PKG_VERSION"))
+    fn cli_definition_is_consistent() {
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn parses_new_with_defaults() {
+        let cli = Cli::try_parse_from(["pkrs", "new", "demo"]).unwrap();
+        let Command::New {
+            name,
+            template,
+            path,
+        } = cli.command
+        else {
+            panic!("expected new")
+        };
+        assert_eq!(name, "demo");
+        assert_eq!(template, TemplateArg::OneShot);
+        assert!(path.is_none());
+        let cli = Cli::try_parse_from(["pkrs", "new", "x", "--template", "full-game"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::New {
+                template: TemplateArg::FullGame,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn parses_run_flags() {
+        let cli = Cli::try_parse_from([
+            "pkrs",
+            "run",
+            "--map",
+            "house",
+            "--warp",
+            "5,7",
+            "--release",
+            "--headless",
+            "--ticks",
+            "60",
+        ])
+        .unwrap();
+        let Command::Run {
+            map,
+            warp,
+            release,
+            headless,
+            ticks,
+            project,
+        } = cli.command
+        else {
+            panic!("expected run")
+        };
+        assert_eq!(map.as_deref(), Some("house"));
+        assert_eq!(warp, Some((5, 7)));
+        assert!(release && headless);
+        assert_eq!(ticks, Some(60));
+        assert!(project.is_none());
+        assert!(Cli::try_parse_from(["pkrs", "run", "--warp", "5"]).is_err());
+        assert!(
+            Cli::try_parse_from(["pkrs"]).is_err(),
+            "a subcommand is required"
         );
     }
 

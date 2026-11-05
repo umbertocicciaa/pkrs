@@ -23,6 +23,7 @@ pkrs-battle = { path = "crates/pkrs-battle" }
 pkrs-script = { path = "crates/pkrs-script" }
 pkrs-save = { path = "crates/pkrs-save" }
 pkrs-ui = { path = "crates/pkrs-ui" }
+pkrs-cli = { path = "crates/pkrs-cli" }
 
 # Not-wrapped third-party crates (§4.5).
 anyhow = "1"
@@ -43,6 +44,10 @@ macroquad = "0.4"
 directories = "6"
 # `zstd` (default) compiles C code; v1 maps use CSV/base64(+zlib/gzip) layer data only.
 tiled = { version = "0.16", default-features = false }
+
+# Binaries only (not wrapped, §4.5): CLI parsing and embedded templates.
+clap = { version = "4", features = ["derive"] }
+include_dir = "0.7"
 
 # Dev-only.
 serde_json = "1"

@@ -5,5 +5,5 @@
     power: 0,
     accuracy: 0,
     priority: 0,
-    effects: [(effect: "stat_stage", stat: "attack", stages: 1)],
+    effects: [(effect: "stat_stage", stat: "attack", stages: 1, target: "user")],
 )

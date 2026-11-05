@@ -12,6 +12,7 @@ pub trait IntoBattleSetup {
 }
 
 /// Helper for tests and fixtures until `pkrs-data` provides real conversions.
+#[allow(clippy::expect_used)]
 pub mod testkit {
     use std::collections::HashMap;
 
@@ -44,8 +45,7 @@ pub mod testkit {
     /// Default battle content for unit/integration tests.
     pub fn default_resources() -> BattleResources {
         let mut pack = BattlePack::new(default_type_chart());
-        let mv = tackle_move();
-        let _ = pack.moves.insert(mv.id.clone(), mv);
+        pack.insert_move(tackle_move()).expect("tackle");
         BattleResources::new(pack)
     }
 

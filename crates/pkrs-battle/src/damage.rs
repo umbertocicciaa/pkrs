@@ -46,7 +46,7 @@ pub struct DamageInputs<'a> {
 /// Mutable damage calculation trace (§7.4 `on_damage_calc`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct DamageCalc {
-    /// Value after each named stage (last element is final before min 1).
+    /// Value after each named stage (last element is final before min-1 clamp).
     pub trace: Vec<(DamageModifierStage, u32)>,
 }
 
@@ -75,51 +75,64 @@ impl DamageCalc {
         trace.push((DamageModifierStage::Stab, value));
 
         let type_mult = type_chart.combined_multiplier(inputs.move_type, inputs.target_types);
+        if type_mult == 0.0 {
+            trace.push((DamageModifierStage::TypeEffectiveness, 0));
+            return Self { trace };
+        }
         value = apply_multiplier(value, type_mult);
         trace.push((DamageModifierStage::TypeEffectiveness, value));
 
         let roll = rng.gen_range_u32(16) + 85;
         value = apply_multiplier(value, f64::from(roll) / 100.0);
-        trace.push((DamageModifierStage::Random, value.max(1)));
+        trace.push((DamageModifierStage::Random, value));
 
         Self { trace }
     }
 
-    /// Final damage (minimum 1).
+    /// Final damage (0 on immunity; otherwise minimum 1 when non-zero).
     pub fn final_damage(&self) -> u32 {
-        self.trace.last().map(|(_, v)| *v).unwrap_or(1).max(1)
+        let raw = self.trace.last().map(|(_, v)| *v).unwrap_or(0);
+        if raw == 0 { 0 } else { raw.max(1) }
     }
 }
 
 fn gen3_base_damage(level: u8, power: u16, offense: u32, defense: u32) -> u32 {
-    let level = u32::from(level);
-    let power = u32::from(power);
-    let offense = offense.max(1);
-    let defense = defense.max(1);
-    (2 * level / 5 + 2) * power * offense / defense / 50 + 2
+    let level = u64::from(level);
+    let power = u64::from(power);
+    let offense = u64::from(offense.max(1));
+    let defense = u64::from(defense.max(1));
+    let inner = (2 * level / 5 + 2)
+        .saturating_mul(power)
+        .saturating_mul(offense)
+        / defense
+        / 50
+        + 2;
+    u32::try_from(inner).unwrap_or(u32::MAX)
 }
 
 fn apply_multiplier(value: u32, mult: f64) -> u32 {
-    ((value as f64) * mult).floor().max(1.0) as u32
+    (f64::from(value) * mult).floor() as u32
 }
 
-/// Applies stat stages to offensive/defensive stats used in damage.
+/// Applies stat stages to offensive stats used in damage.
 pub fn effective_offense(base: u32, stages: &StatStages, category: MoveCategory) -> u32 {
-    let mult = match category {
-        MoveCategory::Physical => stages.attack_multiplier(),
-        MoveCategory::Special => stages.attack_multiplier(),
-        MoveCategory::Status => 1.0,
-    };
-    ((base as f64) * mult).floor().max(1.0) as u32
+    if matches!(category, MoveCategory::Status) {
+        return base.max(1);
+    }
+    scale_stat(base, stages.attack_multiplier())
 }
 
+/// Applies stat stages to defensive stats used in damage.
 pub fn effective_defense(base: u32, stages: &StatStages, category: MoveCategory) -> u32 {
-    let mult = match category {
-        MoveCategory::Physical => stages.defense_multiplier(),
-        MoveCategory::Special => stages.defense_multiplier(),
-        MoveCategory::Status => 1.0,
-    };
-    ((base as f64) * mult).floor().max(1.0) as u32
+    if matches!(category, MoveCategory::Status) {
+        return base.max(1);
+    }
+    scale_stat(base, stages.defense_multiplier())
+}
+
+fn scale_stat(base: u32, mult: f64) -> u32 {
+    let scaled = (f64::from(base.max(1)) * mult).floor();
+    u32::try_from(scaled as u64).unwrap_or(u32::MAX).max(1)
 }
 
 #[cfg(test)]
@@ -131,8 +144,12 @@ mod tests {
     fn chart() -> TypeChart {
         TypeChart::parse_ron(
             r#"(
-                types: ["normal", "fire", "water"],
-                chart: { ("fire", "water"): 0.5, ("water", "fire"): 2.0 },
+                types: ["normal", "fire", "water", "ghost"],
+                chart: {
+                    ("fire", "water"): 0.5,
+                    ("water", "fire"): 2.0,
+                    ("normal", "ghost"): 0.0,
+                },
             )"#,
             "types.ron",
         )
@@ -140,69 +157,83 @@ mod tests {
     }
 
     #[test]
-    fn reference_case_level_50_neutral() {
+    fn immunity_deals_zero_damage() {
+        let user_types = [String::from("normal")];
+        let target_types = [String::from("ghost")];
         let inputs = DamageInputs {
             level: 50,
-            power: 95,
+            power: 80,
             category: MoveCategory::Physical,
             offense: 100,
             defense: 100,
             move_type: "normal",
-            user_types: &["normal".to_string()],
-            target_types: &["normal".to_string()],
+            user_types: &user_types,
+            target_types: &target_types,
             critical: false,
         };
         let mut rng = Pcg64Rng::from_seed(0);
         let calc = DamageCalc::compute(inputs, &chart(), &mut rng);
-        let base = gen3_base_damage(50, 95, 100, 100);
-        assert_eq!(base, 43);
-        assert_eq!(calc.trace[0].1, 43);
+        assert_eq!(calc.trace[3].1, 0);
+        assert_eq!(calc.final_damage(), 0);
     }
 
     #[test]
-    fn stab_and_type_modifiers_apply() {
-        let user_types = [String::from("fire")];
-        let target_types = [String::from("water")];
-        let inputs = DamageInputs {
-            level: 50,
-            power: 40,
-            category: MoveCategory::Special,
-            offense: 90,
-            defense: 80,
-            move_type: "fire",
-            user_types: &user_types,
-            target_types: &target_types,
-            critical: false,
-        };
-        let mut rng = Pcg64Rng::from_seed(1);
-        let calc = DamageCalc::compute(inputs, &chart(), &mut rng);
-        let after_stab = calc.trace[2].1;
-        let after_type = calc.trace[3].1;
-        assert!(after_stab > calc.trace[1].1);
-        assert!(after_type < after_stab);
-    }
-
-    #[test]
-    fn pinned_random_roll_reproduces_hand_computed_final() {
-        let user_types = [String::from("normal")];
-        let target_types = [String::from("normal")];
-        let inputs = DamageInputs {
-            level: 5,
-            power: 35,
-            category: MoveCategory::Physical,
-            offense: 20,
-            defense: 8,
-            move_type: "normal",
-            user_types: &user_types,
-            target_types: &target_types,
-            critical: false,
-        };
-        let base = gen3_base_damage(5, 35, 20, 8);
-        assert_eq!(base, 9);
-        let mut rng = Pcg64Rng::from_seed(99);
-        let calc = DamageCalc::compute(inputs, &chart(), &mut rng);
-        assert_eq!(calc.trace[0].1, base);
-        let after_random = calc.trace[4].1;
-        assert_eq!(calc.final_damage(), after_random.max(1));
+    fn reference_table_with_pinned_random_roll() {
+        struct Row {
+            level: u8,
+            power: u16,
+            offense: u32,
+            defense: u32,
+            move_type: &'static str,
+            user_types: &'static [&'static str],
+            target_types: &'static [&'static str],
+            critical: bool,
+            seed: u64,
+            expected: u32,
+        }
+        let rows = [
+            Row {
+                level: 50,
+                power: 95,
+                offense: 100,
+                defense: 100,
+                move_type: "normal",
+                user_types: &["normal"],
+                target_types: &["normal"],
+                critical: false,
+                seed: 0,
+                expected: 56,
+            },
+            Row {
+                level: 5,
+                power: 35,
+                offense: 20,
+                defense: 8,
+                move_type: "normal",
+                user_types: &["normal"],
+                target_types: &["normal"],
+                critical: false,
+                seed: 99,
+                expected: 13,
+            },
+        ];
+        for row in rows {
+            let user: Vec<String> = row.user_types.iter().map(|s| (*s).to_string()).collect();
+            let target: Vec<String> = row.target_types.iter().map(|s| (*s).to_string()).collect();
+            let inputs = DamageInputs {
+                level: row.level,
+                power: row.power,
+                category: MoveCategory::Physical,
+                offense: row.offense,
+                defense: row.defense,
+                move_type: row.move_type,
+                user_types: &user,
+                target_types: &target,
+                critical: row.critical,
+            };
+            let mut rng = Pcg64Rng::from_seed(row.seed);
+            let calc = DamageCalc::compute(inputs, &chart(), &mut rng);
+            assert_eq!(calc.final_damage(), row.expected, "seed {}", row.seed);
+        }
     }
 }

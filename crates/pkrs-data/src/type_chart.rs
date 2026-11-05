@@ -1,6 +1,6 @@
 //! Type list and effectiveness matrix (`data/types.ron`, §7.3).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::Deserialize;
 
@@ -29,9 +29,6 @@ impl TypeChart {
 
     /// Multiplier when `move_type` hits a defender with `defender_type`.
     pub fn multiplier(&self, move_type: &str, defender_type: &str) -> f64 {
-        if move_type == defender_type {
-            return 1.0;
-        }
         self.effectiveness
             .get(&(move_type.to_string(), defender_type.to_string()))
             .copied()
@@ -55,7 +52,7 @@ impl TypeChart {
             file: file.into(),
             message: e.to_string(),
         })?;
-        raw.into_chart()
+        raw.into_chart(file)
     }
 }
 
@@ -66,21 +63,41 @@ struct RawTypeChart {
 }
 
 impl RawTypeChart {
-    fn into_chart(self) -> Result<TypeChart> {
+    fn into_chart(self, file: &str) -> Result<TypeChart> {
+        let mut seen = HashSet::new();
+        for t in &self.types {
+            if !seen.insert(t.clone()) {
+                return Err(DataError::Parse {
+                    file: file.into(),
+                    message: format!("duplicate type `{t}`"),
+                });
+            }
+        }
         for (atk, def) in self.chart.keys() {
             if !self.types.contains(atk) {
                 return Err(DataError::Parse {
-                    file: "types.ron".into(),
+                    file: file.into(),
                     message: format!("chart references unknown attacking type `{atk}`"),
                 });
             }
             if !self.types.contains(def) {
                 return Err(DataError::Parse {
-                    file: "types.ron".into(),
+                    file: file.into(),
                     message: format!("chart references unknown defending type `{def}`"),
                 });
             }
         }
+        for ((atk, def), &mult) in &self.chart {
+            if !mult.is_finite() || mult < 0.0 {
+                return Err(DataError::Parse {
+                    file: file.into(),
+                    message: format!(
+                        "chart entry ({atk}, {def}) must be a finite value >= 0 (got {mult})"
+                    ),
+                });
+            }
+        }
+        // TODO(M6): cross-reference move/species type ids against `types`.
         Ok(TypeChart {
             types: self.types,
             effectiveness: self.chart,
@@ -96,14 +113,33 @@ mod tests {
     fn chart_resolves_immunity_and_weakness() {
         let chart = TypeChart::parse_ron(
             r#"(
-                types: ["normal", "fire", "water"],
-                chart: { ("fire", "water"): 0.5, ("water", "fire"): 2.0, ("normal", "fire"): 1.0 },
+                types: ["normal", "fire", "water", "ghost"],
+                chart: {
+                    ("fire", "water"): 0.5,
+                    ("water", "fire"): 2.0,
+                    ("normal", "ghost"): 0.0,
+                    ("fire", "fire"): 0.5,
+                },
             )"#,
             "types.ron",
         )
         .expect("parse");
         assert!((chart.multiplier("fire", "water") - 0.5).abs() < f64::EPSILON);
         assert!((chart.multiplier("water", "fire") - 2.0).abs() < f64::EPSILON);
-        assert!((chart.multiplier("normal", "water") - 1.0).abs() < f64::EPSILON);
+        assert!((chart.multiplier("normal", "ghost") - 0.0).abs() < f64::EPSILON);
+        assert!((chart.multiplier("fire", "fire") - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn rejects_invalid_multiplier() {
+        let err = TypeChart::parse_ron(
+            r#"(
+                types: ["a", "b"],
+                chart: { ("a", "b"): -1.0 },
+            )"#,
+            "bad.ron",
+        )
+        .expect_err("parse");
+        assert!(err.to_string().contains("bad.ron"));
     }
 }

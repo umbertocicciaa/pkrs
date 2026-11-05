@@ -1,6 +1,7 @@
 //! Bundled battle content (types, moves, species) for tests and loaders.
 
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 
 use crate::error::{DataError, Result};
 use crate::move_def::MoveDef;
@@ -30,24 +31,30 @@ impl BattlePack {
 
     /// Inserts a move (errors on duplicate id).
     pub fn insert_move(&mut self, mv: MoveDef) -> Result<()> {
-        if self.moves.insert(mv.id.clone(), mv).is_some() {
-            return Err(DataError::Parse {
-                file: "battle_pack".into(),
-                message: "duplicate move id".into(),
-            });
+        match self.moves.entry(mv.id.clone()) {
+            Entry::Occupied(_) => Err(DataError::Duplicate {
+                kind: "move".into(),
+                id: mv.id,
+            }),
+            Entry::Vacant(v) => {
+                v.insert(mv);
+                Ok(())
+            }
         }
-        Ok(())
     }
 
     /// Inserts a species.
     pub fn insert_species(&mut self, sp: SpeciesDef) -> Result<()> {
-        if self.species.insert(sp.id.clone(), sp).is_some() {
-            return Err(DataError::Parse {
-                file: "battle_pack".into(),
-                message: "duplicate species id".into(),
-            });
+        match self.species.entry(sp.id.clone()) {
+            Entry::Occupied(_) => Err(DataError::Duplicate {
+                kind: "species".into(),
+                id: sp.id,
+            }),
+            Entry::Vacant(v) => {
+                v.insert(sp);
+                Ok(())
+            }
         }
-        Ok(())
     }
 
     /// Looks up a move by id.

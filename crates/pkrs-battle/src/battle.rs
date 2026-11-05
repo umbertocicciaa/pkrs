@@ -61,12 +61,32 @@ impl SideState {
         })
     }
 
-    fn stages_mut(&mut self, slot: SlotIndex) -> Option<&mut StatStages> {
-        self.slot_stages.get_mut(slot as usize)
+    fn party_creature_and_stages(
+        &mut self,
+        slot: SlotIndex,
+    ) -> Result<(&mut ActiveCreature, &mut StatStages)> {
+        let party_idx = self
+            .active
+            .get(slot as usize)
+            .copied()
+            .flatten()
+            .ok_or_else(|| BattleError::InvalidAction("empty slot".into()))?;
+        let creature = self
+            .party
+            .get_mut(party_idx as usize)
+            .ok_or_else(|| BattleError::InvalidAction("party index out of range".into()))?;
+        let stages = self
+            .slot_stages
+            .get_mut(slot as usize)
+            .ok_or_else(|| BattleError::InvalidAction("slot stages missing".into()))?;
+        Ok((creature, stages))
     }
 
-    fn stages(&self, slot: SlotIndex) -> Option<&StatStages> {
-        self.slot_stages.get(slot as usize)
+    fn stages_at(&self, slot: SlotIndex) -> StatStages {
+        self.slot_stages
+            .get(slot as usize)
+            .copied()
+            .unwrap_or_default()
     }
 
     fn creature(&self, slot: SlotIndex) -> Option<&ActiveCreature> {
@@ -483,16 +503,8 @@ impl Battle {
             target_slot,
         });
 
-        let user_stages = self
-            .side(user_side)
-            .stages(user_slot)
-            .cloned()
-            .unwrap_or_default();
-        let target_stages = self
-            .side(target_side)
-            .stages(target_slot)
-            .cloned()
-            .unwrap_or_default();
+        let user_stages = self.side(user_side).stages_at(user_slot);
+        let target_stages = self.side(target_side).stages_at(target_slot);
 
         let mut acc = roll_accuracy(
             move_def.accuracy,
@@ -513,67 +525,72 @@ impl Battle {
         let offense = effective_offense(user_stats.attack, &user_stages, move_def.category);
         let defense = effective_defense(target_stats.defense, &target_stages, move_def.category);
 
-        let inputs = DamageInputs {
-            level: user_level,
-            power: move_def.power,
-            category: move_def.category,
-            offense,
-            defense,
-            move_type: &move_def.type_id,
-            user_types: &user_types,
-            target_types: &target_types,
-            critical: false,
-        };
-
-        let mut calc = DamageCalc::compute(
-            inputs,
-            &self.resources.pack.type_chart,
-            self.rng.as_game_rng(),
-        );
-        hooks.on_damage_calc(&self.hook_ctx(out), &mut calc)?;
-        let amount = calc.final_damage();
-
+        let critical = self.rng.as_game_rng().gen_range_u32(16) == 0;
+        let mut amount = 0u32;
         if move_def.category != MoveCategory::Status {
-            let remaining = self.apply_damage(target_side, target_slot, amount)?;
-            out.push(BattleEvent::Damage {
-                target_side,
-                target_slot,
-                amount,
-                remaining_hp: remaining,
-            });
-            if remaining == 0 {
-                if let Some(party_index) = self.side(target_side).party_index(target_slot) {
-                    out.push(BattleEvent::Fainted {
-                        side: target_side,
-                        slot: target_slot,
-                        party_index,
-                    });
+            let inputs = DamageInputs {
+                level: user_level,
+                power: move_def.power,
+                category: move_def.category,
+                offense,
+                defense,
+                move_type: &move_def.type_id,
+                user_types: &user_types,
+                target_types: &target_types,
+                critical,
+            };
+
+            let mut calc = DamageCalc::compute(
+                inputs,
+                &self.resources.pack.type_chart,
+                self.rng.as_game_rng(),
+            );
+            hooks.on_damage_calc(&self.hook_ctx(out), &mut calc)?;
+            amount = calc.final_damage();
+            if amount > 0 {
+                let remaining = self.apply_damage(target_side, target_slot, amount)?;
+                out.push(BattleEvent::Damage {
+                    target_side,
+                    target_slot,
+                    amount,
+                    remaining_hp: remaining,
+                });
+                if remaining == 0 {
+                    if let Some(party_index) = self.side(target_side).party_index(target_slot) {
+                        out.push(BattleEvent::Fainted {
+                            side: target_side,
+                            slot: target_slot,
+                            party_index,
+                        });
+                    }
                 }
             }
         }
 
-        let user_side_id = user_side;
-        let user_slot_id = user_slot;
-        let target_side_id = target_side;
-        let target_slot_id = target_slot;
+        let target_fainted = self
+            .side(target_side)
+            .creature(target_slot)
+            .is_some_and(|c| c.fainted());
+
         let effects = move_def.effects.clone();
-        let (user_side_state, target_side_state) = match user_side_id {
+        let (user_side_state, target_side_state) = match user_side {
             SideId::Player => (&mut self.player, &mut self.opponent),
             SideId::Opponent => (&mut self.opponent, &mut self.player),
         };
-        let user_stages_mut = user_side_state
-            .stages_mut(user_slot_id)
-            .ok_or_else(|| BattleError::InvalidAction("user slot missing".into()))?;
-        let target_stages_mut = target_side_state
-            .stages_mut(target_slot_id)
-            .ok_or_else(|| BattleError::InvalidAction("target slot missing".into()))?;
+        let (user_creature, user_stages_mut) =
+            user_side_state.party_creature_and_stages(user_slot)?;
+        let (target_creature, target_stages_mut) =
+            target_side_state.party_creature_and_stages(target_slot)?;
         apply_effects(
             &effects,
-            user_side_id,
-            user_slot_id,
-            target_side_id,
-            target_slot_id,
+            user_side,
+            user_slot,
+            target_side,
+            target_slot,
             amount,
+            target_fainted,
+            user_creature,
+            target_creature,
             user_stages_mut,
             target_stages_mut,
             self.rng.as_game_rng(),
@@ -618,6 +635,7 @@ impl Battle {
             }
         }
         side_state.active[slot as usize] = Some(to_party);
+        side_state.slot_stages[slot as usize] = StatStages::zero();
         Ok(())
     }
 

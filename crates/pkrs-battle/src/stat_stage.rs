@@ -9,6 +9,10 @@ pub struct StatStages {
     pub defense: i8,
     /// Speed stage.
     pub speed: i8,
+    /// Accuracy stage (Gen 3 acc/eva table).
+    pub accuracy: i8,
+    /// Evasion stage.
+    pub evasion: i8,
 }
 
 impl StatStages {
@@ -18,6 +22,8 @@ impl StatStages {
             attack: 0,
             defense: 0,
             speed: 0,
+            accuracy: 0,
+            evasion: 0,
         }
     }
 
@@ -27,17 +33,29 @@ impl StatStages {
             pkrs_data::StatId::Attack => &mut self.attack,
             pkrs_data::StatId::Defense => &mut self.defense,
             pkrs_data::StatId::Speed => &mut self.speed,
+            pkrs_data::StatId::Accuracy => &mut self.accuracy,
+            pkrs_data::StatId::Evasion => &mut self.evasion,
         };
         *slot = (*slot + delta).clamp(-6, 6);
     }
 
-    /// Gen-3-style multiplier for a stage value.
+    /// Gen-3-style multiplier for attack/defense/speed stages (2/2 table).
     pub fn multiplier(stage: i8) -> f64 {
         let stage = stage.clamp(-6, 6);
         if stage >= 0 {
             (2 + stage) as f64 / 2.0
         } else {
             2.0 / (2 - stage) as f64
+        }
+    }
+
+    /// Gen-3 accuracy / evasion stage multiplier (3/3 table).
+    pub fn acc_eva_multiplier(stage: i8) -> f64 {
+        let stage = stage.clamp(-6, 6);
+        if stage >= 0 {
+            (3 + stage) as f64 / 3.0
+        } else {
+            3.0 / (3 - stage) as f64
         }
     }
 
@@ -55,6 +73,17 @@ impl StatStages {
     pub fn speed_multiplier(&self) -> f64 {
         Self::multiplier(self.speed)
     }
+
+    /// Current stage for `stat`.
+    pub fn stage_value(&self, stat: pkrs_data::StatId) -> i8 {
+        match stat {
+            pkrs_data::StatId::Attack => self.attack,
+            pkrs_data::StatId::Defense => self.defense,
+            pkrs_data::StatId::Speed => self.speed,
+            pkrs_data::StatId::Accuracy => self.accuracy,
+            pkrs_data::StatId::Evasion => self.evasion,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -68,6 +97,12 @@ mod tests {
         assert!((StatStages::multiplier(1) - 1.5).abs() < f64::EPSILON);
         assert!((StatStages::multiplier(-1) - 2.0 / 3.0).abs() < 1e-6);
         assert!((StatStages::multiplier(6) - 4.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn acc_eva_multiplier_uses_three_thirds_table() {
+        assert!((StatStages::acc_eva_multiplier(0) - 1.0).abs() < f64::EPSILON);
+        assert!((StatStages::acc_eva_multiplier(3) - 2.0).abs() < f64::EPSILON);
     }
 
     #[test]

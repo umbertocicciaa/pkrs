@@ -26,6 +26,25 @@ pub enum StatId {
     Defense,
     /// Speed stage.
     Speed,
+    /// Accuracy stage.
+    Accuracy,
+    /// Evasion stage.
+    Evasion,
+}
+
+/// Who receives a stat-stage or status effect.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum EffectTarget {
+    /// The move user (default for self-boosts like Growth).
+    #[default]
+    User,
+    /// The move target.
+    Target,
+}
+
+fn default_hundred() -> u8 {
+    100
 }
 
 /// Built-in move effect primitives (data-driven, §7.3).
@@ -47,6 +66,12 @@ pub enum MoveEffect {
         stat: StatId,
         /// Delta stages (-6..=6 clamped at apply time).
         stages: i8,
+        /// Who receives the stage change.
+        #[serde(default)]
+        target: EffectTarget,
+        /// Chance out of 100 (secondary drops like Acid).
+        #[serde(default = "default_hundred")]
+        chance: u8,
     },
     /// Heals a fraction of max HP.
     Heal {

@@ -109,6 +109,11 @@ fn side_size_two_accepts_two_actions_per_side() {
             ],
         },
     );
-    battle.step(input, &mut hooks).expect("turn");
-    assert!(battle.turn() >= 1);
+    let events = battle.step(input, &mut hooks).expect("turn");
+    let move_uses = events
+        .iter()
+        .filter(|e| matches!(e, BattleEvent::MoveUsed { .. }))
+        .count();
+    assert_eq!(move_uses, 4);
+    assert_eq!(battle.turn(), 2);
 }

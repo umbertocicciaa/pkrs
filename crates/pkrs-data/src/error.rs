@@ -25,6 +25,14 @@ pub enum DataError {
         /// The missing id.
         id: String,
     },
+    /// Duplicate id in a content bundle.
+    #[error("duplicate {kind} `{id}`")]
+    Duplicate {
+        /// Kind of record (move, species, …).
+        kind: String,
+        /// Duplicate id.
+        id: String,
+    },
     /// Error from `pkrs-core`.
     #[error(transparent)]
     Core(#[from] pkrs_core::CoreError),

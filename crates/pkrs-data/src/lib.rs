@@ -10,7 +10,7 @@ mod type_chart;
 
 pub use battle_pack::BattlePack;
 pub use error::{DataError, Result};
-pub use move_def::{MoveCategory, MoveDef, MoveEffect, StatId};
+pub use move_def::{EffectTarget, MoveCategory, MoveDef, MoveEffect, StatId};
 pub use species::SpeciesDef;
 pub use type_chart::TypeChart;
 

@@ -129,6 +129,18 @@ fn ron_loaded_ember_produces_damage_event() {
         },
     );
     let events = battle.step(turn, &mut hooks).expect("turn");
+    let ember_damage: Vec<u32> = events
+        .iter()
+        .filter_map(|e| match e {
+            BattleEvent::Damage {
+                target_side: SideId::Opponent,
+                amount,
+                ..
+            } => Some(*amount),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ember_damage, vec![23], "pinned seed 42 ember vs grass");
     assert!(
         events
             .iter()

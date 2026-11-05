@@ -15,7 +15,7 @@ pub struct AccuracyCalc {
     pub hits: bool,
 }
 
-/// Rolls whether a move hits (Gen-3-style stage modifiers on acc/evasion).
+/// Rolls whether a move hits (Gen-3 acc/eva stages).
 pub fn roll_accuracy(
     move_accuracy: u8,
     attacker: &StatStages,
@@ -29,8 +29,8 @@ pub fn roll_accuracy(
             hits: true,
         };
     }
-    let acc_mult = StatStages::multiplier(attacker.attack);
-    let eva_mult = StatStages::multiplier(defender.defense);
+    let acc_mult = StatStages::acc_eva_multiplier(attacker.accuracy);
+    let eva_mult = StatStages::acc_eva_multiplier(defender.evasion);
     let effective = (f64::from(move_accuracy) * acc_mult / eva_mult).clamp(1.0, 100.0);
     let roll = rng.gen_range_u32(100) + 1;
     let hits = f64::from(roll) <= effective;
@@ -54,9 +54,19 @@ mod tests {
     }
 
     #[test]
-    fn full_accuracy_usually_hits() {
+    fn accuracy_100_hits_at_zero_stages() {
         let mut rng = Pcg64Rng::from_seed(1);
         let calc = roll_accuracy(100, &StatStages::zero(), &StatStages::zero(), &mut rng);
         assert!(calc.hits);
+        assert!((calc.effective - 100.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn attack_stage_does_not_affect_accuracy() {
+        let mut atk = StatStages::zero();
+        atk.apply(pkrs_data::StatId::Attack, 6);
+        let mut rng = Pcg64Rng::from_seed(2);
+        let calc = roll_accuracy(30, &atk, &StatStages::zero(), &mut rng);
+        assert!((calc.effective - 30.0).abs() < f64::EPSILON);
     }
 }

@@ -15,6 +15,7 @@ mod hooks;
 mod model;
 mod order;
 mod phase;
+mod replay;
 mod resources;
 mod rng;
 mod stat_stage;
@@ -39,6 +40,7 @@ pub use model::{
     CreatureStats, MoveSlot, PartyIndex, SideId, SlotIndex,
 };
 pub use phase::BattlePhase;
+pub use replay::{BattleReplayRecord, config_hash, record_battle, replay_with_null_hooks};
 pub use resources::BattleResources;
 pub use rng::{BattleRng, RngPolicy};
 pub use stat_stage::StatStages;

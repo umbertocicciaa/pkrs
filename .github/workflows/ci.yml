@@ -57,6 +57,43 @@ jobs:
       - name: cargo build
         run: cargo build --workspace --locked
 
+  # §14.4 smoke test: the runtime runs headless (Null adapters, no GPU) for 600 ticks and
+  # must exit 0. Any error or panic yields a non-zero status and fails the job.
+  smoke:
+    name: smoke (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libx11-dev libxi-dev libxcursor-dev libxrandr-dev \
+            libgl1-mesa-dev libasound2-dev libudev-dev xvfb
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build runtime
+        run: cargo build -p pkrs-runtime --locked
+
+      - name: Headless smoke run (Linux, under xvfb)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a ./target/debug/pkrs-runtime --headless --ticks 600
+
+      - name: Headless smoke run
+        if: runner.os != 'Linux'
+        shell: bash
+        run: ./target/debug/pkrs-runtime --headless --ticks 600
+
   deny:
     name: cargo-deny
     runs-on: ubuntu-latest

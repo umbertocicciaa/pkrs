@@ -10,8 +10,8 @@ use crate::error::{BattleError, Result};
 use crate::event::BattleEvent;
 use crate::hooks::{
     ActionMenu, ActionOrder, BattleHookCtx, BattleHooks, BattleValue, BattleView, CreatureView,
-    CustomAction, DamageTaken, FaintEvent, HookCommand, HookResult, MoveRequest, MoveResult,
-    MoveView, SideView, SlotRef, StatusApply, SwitchIn, SwitchOut,
+    CurrentMove, CustomAction, DamageTaken, FaintEvent, HookCommand, HookResult, MoveRequest,
+    MoveResult, MoveView, SideView, SlotRef, StatusApply, SwitchIn, SwitchOut,
 };
 use crate::model::{
     ActiveCreature, BattleConfig, BattleOutcome, BattleResult, BattleSetup, BattleSideSetup,
@@ -194,6 +194,8 @@ pub struct Battle {
     pending_outcome: Option<BattleOutcome>,
     /// Events produced outside `step` (e.g. by `on_action_menu`), emitted by the next `step`.
     deferred: Vec<BattleEvent>,
+    /// Move being executed (exposed to hooks through [`BattleView::current_move`]).
+    current_move: Option<CurrentMove>,
 }
 
 impl Battle {
@@ -224,6 +226,7 @@ impl Battle {
             opponent_actions: Vec::new(),
             pending_outcome: None,
             deferred: Vec::new(),
+            current_move: None,
         })
     }
 
@@ -267,6 +270,7 @@ impl Battle {
                 self.player.view(SideId::Player),
                 self.opponent.view(SideId::Opponent),
             ],
+            current_move: self.current_move.clone(),
         }
     }
 
@@ -676,6 +680,19 @@ impl Battle {
         hooks: &mut dyn BattleHooks,
         out: &mut Vec<BattleEvent>,
     ) -> Result<()> {
+        let result = self.execute_fight_inner(user, move_slot, target, hooks, out);
+        self.current_move = None;
+        result
+    }
+
+    fn execute_fight_inner(
+        &mut self,
+        user: SlotRef,
+        move_slot: u8,
+        target: SlotRef,
+        hooks: &mut dyn BattleHooks,
+        out: &mut Vec<BattleEvent>,
+    ) -> Result<()> {
         let original_id = self
             .move_id_at(user, move_slot)
             .ok_or_else(|| BattleError::InvalidAction("invalid move slot".into()))?;
@@ -746,6 +763,12 @@ impl Battle {
             move_id: move_id.clone(),
             target_side: target.side,
             target_slot: target.slot,
+        });
+        self.current_move = Some(CurrentMove {
+            user,
+            target,
+            move_slot,
+            move_id: move_id.clone(),
         });
 
         let user_stages = self.side(user.side).stages_at(user.slot);

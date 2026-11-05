@@ -161,6 +161,19 @@ impl SideView {
     }
 }
 
+/// The move being executed while move hooks run (`on_accuracy`, `on_damage_calc`, …).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CurrentMove {
+    /// User.
+    pub user: SlotRef,
+    /// Target.
+    pub target: SlotRef,
+    /// Move slot on the user.
+    pub move_slot: u8,
+    /// Move id.
+    pub move_id: String,
+}
+
 /// Read-only snapshot of the battle (§7.4 `BattleHookCtx`, §7.5 AI view).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BattleView {
@@ -172,6 +185,8 @@ pub struct BattleView {
     pub side_size: u8,
     /// `[player, opponent]`.
     pub sides: [SideView; 2],
+    /// The move being executed, from `on_accuracy` to `on_after_move` (`None` otherwise).
+    pub current_move: Option<CurrentMove>,
 }
 
 impl BattleView {
@@ -317,6 +332,18 @@ impl<'a> BattleHookCtx<'a> {
     /// Queues a [`BattleEvent::Message`] with `key`.
     pub fn message(&mut self, key: impl Into<String>) {
         self.commands.push(HookCommand::Message(key.into()));
+    }
+
+    /// Number of state changes requested so far (see [`rollback`](Self::rollback)).
+    #[must_use]
+    pub fn checkpoint(&self) -> usize {
+        self.commands.len()
+    }
+
+    /// Drops the state changes requested after `checkpoint`. Script adapters use this so a
+    /// handler that fails part-way leaves no trace (§9.6). RNG draws are not undone.
+    pub fn rollback(&mut self, checkpoint: usize) {
+        self.commands.truncate(checkpoint);
     }
 
     pub(crate) fn into_commands(self) -> Vec<HookCommand> {

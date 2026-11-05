@@ -7,10 +7,16 @@ rust-version.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+default = ["tiled"]
+tiled = ["dep:tiled"]
+
 [dependencies]
+pkrs-core.workspace = true
 pkrs-data.workspace = true
 pkrs-assets.workspace = true
 thiserror.workspace = true
+tiled = { workspace = true, optional = true }
 
 [lints]
 workspace = true

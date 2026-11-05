@@ -1,0 +1,26 @@
+# Project manifest (docs/design.md §2.2). `engine.version` is pinned to the pkrs CLI that
+# created this project; `pkrs upgrade` is the only command that changes it.
+
+[game]
+name    = "{{name}}"
+id      = "{{id}}"
+version = "0.1.0"
+authors = []
+
+[engine]
+version = "{{engine_version}}"
+api     = 1
+
+[display]
+width  = 240
+height = 160
+scale  = 3
+
+[start]
+map      = "start"
+position = [5, 7]
+facing   = "down"
+
+[features]
+battles = false   # a one-shot story needs no battle data
+party   = false

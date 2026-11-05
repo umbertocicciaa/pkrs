@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<map version="1.10" tiledversion="1.10.2" orientation="orthogonal" renderorder="right-down" width="6" height="4" tilewidth="16" tileheight="16" infinite="0" nextlayerid="8" nextobjectid="10">
+ <properties>
+  <property name="bgm" value="town_theme"/>
+ </properties>
+ <tileset firstgid="1" source="../tilesets/town.tsx"/>
+ <layer id="1" name="ground" width="6" height="4">
+  <data encoding="csv">
+1,1,1,1,1,1,
+1,2,2,1,4,4,
+1,1,1,1,4,4,
+5,5,1,1,1,1
+</data>
+ </layer>
+ <layer id="2" name="ground2" width="6" height="4">
+  <data encoding="csv">
+0,0,0,0,0,0,
+0,0,0,0,0,0,
+0,0,0,0,0,0,
+0,0,0,6,0,0
+</data>
+ </layer>
+ <layer id="3" name="collision" width="6" height="4">
+  <data encoding="csv">
+3,0,0,0,0,0,
+0,0,0,0,0,0,
+0,0,6,0,0,0,
+0,0,0,0,0,0
+</data>
+ </layer>
+ <layer id="4" name="overhead" width="6" height="4">
+  <data encoding="csv">
+0,0,0,0,0,8,
+0,0,0,0,0,0,
+0,0,0,0,0,0,
+0,0,0,0,0,0
+</data>
+ </layer>
+ <objectgroup id="5" name="objects">
+  <object id="1" name="house_door" type="warp" x="80" y="0" width="16" height="16">
+   <properties>
+    <property name="facing" value="up"/>
+    <property name="to_map" value="house"/>
+    <property name="to_x" type="int" value="3"/>
+    <property name="to_y" type="int" value="6"/>
+    <property name="transition" value="door"/>
+   </properties>
+  </object>
+  <object id="2" name="old_keeper" type="npc" x="32" y="48" width="16" height="16">
+   <properties>
+    <property name="facing" value="left"/>
+    <property name="script" value="maps/town.lua:old_keeper"/>
+    <property name="sprite" value="sprites/keeper.png"/>
+   </properties>
+  </object>
+  <object id="3" name="rival_intro" type="trigger" x="0" y="16" width="16" height="32">
+   <properties>
+    <property name="on_enter" value="cutscenes/rival_intro"/>
+    <property name="once" type="bool" value="true"/>
+   </properties>
+  </object>
+  <object id="4" name="welcome_sign" type="sign" x="48" y="0" width="16" height="16">
+   <properties>
+    <property name="text" value="text:town.sign"/>
+   </properties>
+  </object>
+  <object id="5" name="potion_ball" type="item" x="64" y="48" width="16" height="16">
+   <properties>
+    <property name="count" type="int" value="2"/>
+    <property name="item" value="potion"/>
+    <property name="uid" value="town_potion"/>
+   </properties>
+  </object>
+  <object id="6" name="default" type="spawn" x="40" y="40">
+   <point/>
+  </object>
+ </objectgroup>
+ <objectgroup id="6" name="encounters">
+  <object id="7" x="16" y="16" width="32" height="16">
+   <properties>
+    <property name="rate" type="int" value="20"/>
+    <property name="table" value="town_grass"/>
+   </properties>
+  </object>
+ </objectgroup>
+</map>

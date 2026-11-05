@@ -3,6 +3,7 @@
 use pkrs_data::StatId;
 
 use crate::action::BattleAction;
+use crate::hooks::BattleValue;
 use crate::model::{BattleOutcome, PartyIndex, SideId, SlotIndex};
 
 /// One record in the battle event log (UI / replay consumes these in order).
@@ -145,5 +146,81 @@ pub enum BattleEvent {
     BattleEnded {
         /// Final outcome.
         outcome: BattleOutcome,
+    },
+    /// A hook cancelled a move in `on_before_move` (flinch, sleep, ...).
+    MoveCancelled {
+        /// User side.
+        user_side: SideId,
+        /// User slot.
+        user_slot: SlotIndex,
+        /// Move that was not used.
+        move_id: String,
+        /// Message key from the hook, if any.
+        reason: Option<String>,
+    },
+    /// A hook prevented damage in `on_damage_taken`.
+    DamagePrevented {
+        /// Target side.
+        target_side: SideId,
+        /// Target slot.
+        target_slot: SlotIndex,
+        /// Message key from the hook, if any.
+        reason: Option<String>,
+    },
+    /// A hook blocked a status in `on_status_apply` (immunity).
+    StatusBlocked {
+        /// Target side.
+        target_side: SideId,
+        /// Target slot.
+        target_slot: SlotIndex,
+        /// Status that was not applied.
+        status: String,
+        /// Message key from the hook, if any.
+        reason: Option<String>,
+    },
+    /// A hook cancelled a voluntary switch (trapping).
+    SwitchCancelled {
+        /// Side.
+        side: SideId,
+        /// Slot that stays in.
+        slot: SlotIndex,
+        /// Message key from the hook, if any.
+        reason: Option<String>,
+    },
+    /// A custom (plugin) action was executed.
+    CustomActionUsed {
+        /// Acting side.
+        side: SideId,
+        /// Acting slot.
+        slot: SlotIndex,
+        /// Action id.
+        id: String,
+        /// `false` if no hook implemented the action.
+        handled: bool,
+    },
+    /// A hook set (`Some`) or cleared (`None`) a volatile on an active creature.
+    VolatileChanged {
+        /// Side.
+        side: SideId,
+        /// Slot.
+        slot: SlotIndex,
+        /// Volatile key.
+        key: String,
+        /// New value.
+        value: Option<BattleValue>,
+    },
+    /// A hook set or cleared side state.
+    SideStateChanged {
+        /// Side.
+        side: SideId,
+        /// State key.
+        key: String,
+        /// New value.
+        value: Option<BattleValue>,
+    },
+    /// A hook ran (dev builds / `BattleConfig::trace_hooks`, section 7.4).
+    HookTrace {
+        /// Hook name (`on_damage_calc`, ...).
+        hook: String,
     },
 }

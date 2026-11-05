@@ -96,6 +96,12 @@ impl RenderBackend for NullRenderer {
         Ok(TextureHandle(id))
     }
 
+    fn create_texture_from_image(&mut self, encoded: &[u8]) -> Result<(TextureHandle, u32, u32)> {
+        let (width, height) = png_size(encoded)?;
+        let handle = self.create_texture(width, height, &[])?;
+        Ok((handle, width, height))
+    }
+
     fn draw_sprite(&mut self, draw: &SpriteDraw) {
         self.log.0.borrow_mut().push(RecordedDraw {
             layer: draw.layer,
@@ -110,11 +116,41 @@ impl RenderBackend for NullRenderer {
     fn end_frame(&mut self) {}
 }
 
+/// Reads the width and height from a PNG header without decoding pixels.
+pub(crate) fn png_size(bytes: &[u8]) -> Result<(u32, u32)> {
+    const SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+    let bad = || crate::RenderError::Backend("not a PNG image".into());
+    if bytes.len() < 24 || &bytes[..8] != SIGNATURE || &bytes[12..16] != b"IHDR" {
+        return Err(bad());
+    }
+    let read = |at: usize| -> Result<u32> {
+        let raw: [u8; 4] = bytes[at..at + 4].try_into().map_err(|_| bad())?;
+        Ok(u32::from_be_bytes(raw))
+    };
+    let (w, h) = (read(16)?, read(20)?);
+    if w == 0 || h == 0 {
+        return Err(bad());
+    }
+    Ok((w, h))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::color::Color;
     use crate::rect::Rect;
+
+    #[test]
+    fn png_header_gives_the_size() {
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+        png.extend_from_slice(&64u32.to_be_bytes());
+        png.extend_from_slice(&32u32.to_be_bytes());
+        let mut backend = NullRenderer::new();
+        let (_, w, h) = backend.create_texture_from_image(&png).unwrap();
+        assert_eq!((w, h), (64, 32));
+        assert!(backend.create_texture_from_image(b"GIF89a").is_err());
+        assert!(backend.create_texture_from_image(&png[..20]).is_err());
+    }
 
     #[test]
     fn records_draws_in_submission_order() {

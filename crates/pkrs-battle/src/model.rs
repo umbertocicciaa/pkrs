@@ -30,11 +30,28 @@ pub type PartyIndex = u8;
 pub struct BattleConfig {
     /// Active slots per side (1 = singles, 2 = doubles plugin).
     pub side_size: u8,
+    /// Emit [`BattleEvent::HookTrace`](crate::BattleEvent::HookTrace) before every hook call
+    /// (§7.4). Defaults to on when the `hook-trace` feature is enabled (dev builds).
+    pub trace_hooks: bool,
 }
 
 impl Default for BattleConfig {
     fn default() -> Self {
-        Self { side_size: 1 }
+        Self {
+            side_size: 1,
+            trace_hooks: cfg!(feature = "hook-trace"),
+        }
+    }
+}
+
+impl BattleConfig {
+    /// Default config with `side_size` active slots per side.
+    #[must_use]
+    pub fn with_side_size(side_size: u8) -> Self {
+        Self {
+            side_size,
+            ..Self::default()
+        }
     }
 }
 
@@ -175,4 +192,8 @@ pub struct BattleResult {
     pub outcome: BattleOutcome,
     /// Number of full turns completed.
     pub turns: u32,
+    /// Experience awarded (set by `on_battle_end` hooks; 0 by default).
+    pub exp: u32,
+    /// Money awarded (set by `on_battle_end` hooks; 0 by default).
+    pub money: u32,
 }

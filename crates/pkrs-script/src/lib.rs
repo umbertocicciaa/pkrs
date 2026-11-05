@@ -7,14 +7,20 @@
 //!   sandbox: whitelisted libraries, per-owner `_ENV`, restricted `require`, engine-RNG
 //!   `math.random`, instruction budget, memory limit, and errors with `file:line` + traceback
 //!   routed to `tracing` (target `script`).
+//! - **Battle hooks:** [`LuaBattleHooks`] implements `pkrs_battle::BattleHooks` by dispatching
+//!   to handlers registered with `battle.on(...)`; `battle.start_wild` / `start_trainer` yield
+//!   a [`WaitRequest::Battle`] from a task ([`ScriptHost::start_task`]).
 
 mod error;
 mod host;
 mod lua;
 
 pub use error::{Result, ScriptError, split_location};
-pub use host::{MemoryScripts, ScriptFiles, ScriptHost, ScriptLimits, ScriptOwner, ScriptValue};
-pub use lua::LuaScriptHost;
+pub use host::{
+    BattleRequest, MemoryScripts, ScriptFiles, ScriptHost, ScriptLimits, ScriptOwner, ScriptValue,
+    TaskId, TaskStatus, WaitRequest, battle_result_value,
+};
+pub use lua::{DEFAULT_MAX_FAILURES, HOOK_NAMES, LuaBattleHooks, LuaScriptHost};
 
 #[cfg(test)]
 mod tests {

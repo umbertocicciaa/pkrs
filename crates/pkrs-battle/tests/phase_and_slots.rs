@@ -66,7 +66,7 @@ fn side_size_two_accepts_two_actions_per_side() {
             leading: vec![Some(0), Some(1)],
         },
     };
-    let config = BattleConfig { side_size: 2 };
+    let config = BattleConfig::with_side_size(2);
     let mut hooks = NullBattleHooks;
     let mut battle = Battle::new(
         setup,

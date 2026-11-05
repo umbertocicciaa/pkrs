@@ -3,18 +3,27 @@
 //! This folder is the only place in the workspace that names `mlua` types. Lua 5.4 is vendored
 //! (`mlua` features `lua54` + `vendored`), so no system Lua is needed on any OS (§0.4).
 
+pub(crate) mod battle;
 mod convert;
 mod sandbox;
+
+pub use battle::{DEFAULT_MAX_FAILURES, HOOK_NAMES, LuaBattleHooks};
 
 use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use mlua::{ChunkMode, HookTriggers, Lua, LuaOptions, MultiValue, StdLib, Table, Value, VmState};
+use mlua::{
+    ChunkMode, HookTriggers, Lua, LuaOptions, MultiValue, StdLib, Table, Thread, ThreadStatus,
+    Value, VmState,
+};
 use pkrs_core::GameRng;
 
 use crate::error::{Result, ScriptError, split_location};
-use crate::host::{ScriptFiles, ScriptHost, ScriptLimits, ScriptOwner, ScriptValue};
+use crate::host::{
+    BattleRequest, ScriptFiles, ScriptHost, ScriptLimits, ScriptOwner, ScriptValue, TaskId,
+    TaskStatus, WaitRequest,
+};
 
 /// Instructions between two budget checks.
 const HOOK_STRIDE: u32 = 1_000;
@@ -33,6 +42,8 @@ pub struct LuaScriptHost {
     budget: Rc<Budget>,
     guard: mlua::Function,
     envs: BTreeMap<ScriptOwner, Table>,
+    tasks: BTreeMap<TaskId, Thread>,
+    next_task: TaskId,
 }
 
 impl LuaScriptHost {
@@ -50,6 +61,7 @@ impl LuaScriptHost {
         }
         lua.set_app_data(sandbox::Files(files));
         lua.set_app_data(sandbox::Rng(rng));
+        lua.set_app_data(battle::Registry::default());
 
         let budget = Rc::new(Budget {
             limit: limits.instruction_budget,
@@ -93,6 +105,8 @@ impl LuaScriptHost {
             budget,
             guard,
             envs: BTreeMap::new(),
+            tasks: BTreeMap::new(),
+            next_task: 1,
         })
     }
 
@@ -111,21 +125,32 @@ impl LuaScriptHost {
         Ok(env)
     }
 
-    /// Runs `f` as one protected top-level call: fresh instruction budget, errors mapped to
-    /// [`ScriptError`] and logged to `tracing` (target `script`) with location and traceback.
-    fn protected<R>(&self, chunk: &str, f: impl FnOnce(&Lua) -> mlua::Result<R>) -> Result<R> {
+    /// Runs `f` as one protected top-level call with a fresh instruction budget; errors are
+    /// mapped to [`ScriptError`] but not logged (see [`protected`](Self::protected)).
+    pub(crate) fn call_protected<R>(
+        &self,
+        chunk: &str,
+        f: impl FnOnce(&Lua) -> mlua::Result<R>,
+    ) -> Result<R> {
         self.budget.used.set(0);
         self.budget.tripped.set(false);
         let result = f(&self.lua);
         let tripped = self.budget.tripped.replace(false);
         result.map_err(|err| {
-            let err = if tripped {
+            if tripped {
                 ScriptError::InstructionBudget {
                     budget: self.limits.instruction_budget,
                 }
             } else {
                 map_error(err, chunk, self.limits)
-            };
+            }
+        })
+    }
+
+    /// [`call_protected`](Self::call_protected), logging failures to `tracing` (target
+    /// `script`) with location and traceback.
+    fn protected<R>(&self, chunk: &str, f: impl FnOnce(&Lua) -> mlua::Result<R>) -> Result<R> {
+        self.call_protected(chunk, f).map_err(|err| {
             match err.location() {
                 Some((file, line)) => tracing::error!(
                     target: "script",
@@ -138,6 +163,38 @@ impl LuaScriptHost {
             }
             err
         })
+    }
+
+    /// Battle hooks dispatching to the handlers registered with `battle.on` (§7.4).
+    #[must_use]
+    pub fn battle_hooks(&self) -> LuaBattleHooks<'_> {
+        LuaBattleHooks::new(self)
+    }
+
+    /// Number of live tasks (yielded and waiting).
+    #[must_use]
+    pub fn task_count(&self) -> usize {
+        self.tasks.len()
+    }
+
+    fn run_task(&mut self, id: TaskId, thread: Thread, args: MultiValue) -> Result<TaskStatus> {
+        let resumed = self.protected("task", |_| thread.resume::<MultiValue>(args));
+        let values = match resumed {
+            Ok(v) => v,
+            Err(err) => {
+                self.tasks.remove(&id);
+                return Err(err);
+            }
+        };
+        let first = values.into_iter().next().unwrap_or(Value::Nil);
+        if thread.status() == ThreadStatus::Resumable {
+            let request = wait_request(&first)?;
+            self.tasks.insert(id, thread);
+            Ok(TaskStatus::Waiting(request))
+        } else {
+            self.tasks.remove(&id);
+            Ok(TaskStatus::Finished(convert::from_lua(&first)?))
+        }
     }
 
     fn function(&mut self, owner: &ScriptOwner, name: &str) -> Result<Option<mlua::Function>> {
@@ -215,6 +272,78 @@ impl ScriptHost for LuaScriptHost {
     fn memory_used(&self) -> usize {
         self.lua.used_memory()
     }
+
+    fn start_task(
+        &mut self,
+        owner: &ScriptOwner,
+        name: &str,
+        args: &[ScriptValue],
+    ) -> Result<(TaskId, TaskStatus)> {
+        let Some(function) = self.function(owner, name)? else {
+            return Err(ScriptError::NoSuchFunction {
+                owner: owner.to_string(),
+                name: name.to_owned(),
+            });
+        };
+        let thread = self.lua.create_thread(function).map_err(engine)?;
+        let args = args
+            .iter()
+            .map(|a| convert::to_lua(&self.lua, a))
+            .collect::<mlua::Result<MultiValue>>()
+            .map_err(engine)?;
+        let id = self.next_task;
+        self.next_task = self.next_task.wrapping_add(1).max(1);
+        let status = self.run_task(id, thread, args)?;
+        Ok((id, status))
+    }
+
+    fn resume_task(&mut self, task: TaskId, answer: ScriptValue) -> Result<TaskStatus> {
+        let thread = self
+            .tasks
+            .remove(&task)
+            .ok_or_else(|| ScriptError::Engine(format!("no waiting task with id {task}")))?;
+        let answer = convert::to_lua(&self.lua, &answer).map_err(engine)?;
+        self.run_task(task, thread, MultiValue::from_vec(vec![answer]))
+    }
+}
+
+/// Reads what a yielded task waits for; `battle.start_*` yields a `{ wait = "battle" }` table.
+fn wait_request(value: &Value) -> Result<WaitRequest> {
+    let conv = |e: mlua::Error| ScriptError::Conversion(e.to_string());
+    if let Value::Table(t) = value {
+        if t.raw_get::<Option<String>>("wait")
+            .map_err(conv)?
+            .as_deref()
+            == Some("battle")
+        {
+            let kind: String = t.raw_get("kind").map_err(conv)?;
+            let request = match kind.as_str() {
+                "wild" => {
+                    let species: String = t.raw_get("species").map_err(conv)?;
+                    let level: i64 = t.raw_get("level").map_err(conv)?;
+                    let level = u8::try_from(level)
+                        .ok()
+                        .filter(|l| (1..=100).contains(l))
+                        .ok_or_else(|| {
+                            ScriptError::Conversion(format!(
+                                "battle.start_wild: level must be 1-100 (got {level})"
+                            ))
+                        })?;
+                    BattleRequest::Wild { species, level }
+                }
+                "trainer" => BattleRequest::Trainer {
+                    id: t.raw_get("id").map_err(conv)?,
+                },
+                other => {
+                    return Err(ScriptError::Conversion(format!(
+                        "unknown battle request kind `{other}`"
+                    )));
+                }
+            };
+            return Ok(WaitRequest::Battle(request));
+        }
+    }
+    Ok(WaitRequest::Other(convert::from_lua(value)?))
 }
 
 fn engine(err: mlua::Error) -> ScriptError {

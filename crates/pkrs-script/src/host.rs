@@ -182,6 +182,69 @@ impl ScriptFiles for MemoryScripts {
     }
 }
 
+/// Handle of a running script task (a coroutine, §9.3).
+pub type TaskId = u32;
+
+/// A battle a script asked for with `battle.start_wild` / `battle.start_trainer` (§9.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BattleRequest {
+    /// `battle.start_wild(species, level)`.
+    Wild {
+        /// Species id.
+        species: String,
+        /// Level 1–100.
+        level: u8,
+    },
+    /// `battle.start_trainer(id)`.
+    Trainer {
+        /// Trainer id.
+        id: String,
+    },
+}
+
+/// What a yielded task waits for. The engine resumes it with the answer.
+#[derive(Clone, Debug, PartialEq)]
+pub enum WaitRequest {
+    /// A battle; resume with [`battle_result_value`].
+    Battle(BattleRequest),
+    /// Any other wait condition (dialogue closed, N ticks, …), as yielded by the script.
+    Other(ScriptValue),
+}
+
+/// State of a task after it ran.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TaskStatus {
+    /// Suspended until the engine satisfies the request.
+    Waiting(WaitRequest),
+    /// Returned (its first return value); the task is gone.
+    Finished(ScriptValue),
+}
+
+/// How a finished battle is handed back to the script that started it:
+/// `{ outcome = "win" | "loss" | "fled", fled_side = "player"|"opponent", turns, exp, money }`.
+#[must_use]
+pub fn battle_result_value(result: &pkrs_battle::BattleResult) -> ScriptValue {
+    use pkrs_battle::{BattleOutcome, SideId};
+    let mut map = BTreeMap::new();
+    let outcome = match result.outcome {
+        BattleOutcome::PlayerWin => "win",
+        BattleOutcome::OpponentWin => "loss",
+        BattleOutcome::Fled { side } => {
+            let side = match side {
+                SideId::Player => "player",
+                SideId::Opponent => "opponent",
+            };
+            map.insert("fled_side".to_string(), ScriptValue::from(side));
+            "fled"
+        }
+    };
+    map.insert("outcome".into(), ScriptValue::from(outcome));
+    map.insert("turns".into(), ScriptValue::Int(i64::from(result.turns)));
+    map.insert("exp".into(), ScriptValue::Int(i64::from(result.exp)));
+    map.insert("money".into(), ScriptValue::Int(i64::from(result.money)));
+    ScriptValue::Map(map)
+}
+
 /// Engine-owned scripting port (§4.5). `LuaScriptHost` is the v1 adapter.
 ///
 /// Every method is a protected boundary: script errors, runaway loops and memory exhaustion come
@@ -214,6 +277,18 @@ pub trait ScriptHost {
 
     /// Bytes currently allocated by the scripting state.
     fn memory_used(&self) -> usize;
+
+    /// Starts `owner`'s global function `name` as a task and runs it until it yields or
+    /// returns. A task that errors is aborted and the error returned (§9.6).
+    fn start_task(
+        &mut self,
+        owner: &ScriptOwner,
+        name: &str,
+        args: &[ScriptValue],
+    ) -> Result<(TaskId, TaskStatus)>;
+
+    /// Resumes a waiting task with `answer` (e.g. [`battle_result_value`]).
+    fn resume_task(&mut self, task: TaskId, answer: ScriptValue) -> Result<TaskStatus>;
 }
 
 #[cfg(test)]

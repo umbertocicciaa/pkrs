@@ -141,6 +141,7 @@ pub(super) fn build_env(
     env.raw_set("collectgarbage", collectgarbage_fn(lua)?)?;
     env.raw_set("load", load_fn(lua, &env)?)?;
     env.raw_set("require", require_fn(lua, owner, &env)?)?;
+    super::battle::install(lua, &env, owner)?;
     Ok(env)
 }
 

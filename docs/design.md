@@ -646,6 +646,8 @@ pub trait BattleHooks {
 
 Full Rust docs for `BattleHooks`, contexts and payload types are generated into `docs/rust-api/` alongside `docs/lua-api/`.
 
+**Implementation notes (`pkrs_battle::hooks`, M4).** Every hook takes `&mut BattleHookCtx`, which holds a read-only `BattleView` snapshot (sides, active creatures, stages, volatiles, side state), the event log so far, the policy-aware battle RNG (`ctx.random(n)`), and a command buffer (`set_volatile` / `clear_volatile` / `set_side_state` / `message`). Commands are applied right after the hook returns and logged as `VolatileChanged` / `SideStateChanged` / `Message` events, so replays capture them. Cancellable hooks return the non-generic `HookResult::{Continue, Cancel { reason }}`, and payloads are mutated in place. Cancellations are logged as `MoveCancelled`, `DamagePrevented`, `StatusBlocked` and `SwitchCancelled`. Hook-modified move slots or targets that are invalid fall back to the original choice. `DamageCalc::push_modifier(name, mult)` / `set_final(v)` back the Lua `dmg.modifiers:push(...)`. `on_switch_in`/`on_switch_out` can only cancel **voluntary** switches (now accepted during `SelectActions`); forced replacements after a faint always happen. `Battle::action_menu(slot, hooks)` runs `on_action_menu` over the built-in `fight`/`bag`/`party`/`run` entries. `BattleAction::Custom` runs `on_custom_action`, and the implementing handler sets `handled`. `BattleEvent::HookTrace { hook }` is emitted before each call when `BattleConfig::trace_hooks` is set; that flag defaults to on with the `hook-trace` cargo feature (dev builds), and stripping the traces leaves the untraced stream unchanged. A queued action is dropped when its creature fainted or was replaced before acting.
+
 ### 7.5 Trainer AI & custom profiles
 
 - **Built-in tiers:** `random`, `basic` (type-aware), `smart` (type + stat matchups, switching heuristics) — implemented in Rust for speed and determinism.
@@ -673,6 +675,7 @@ AiProfile(
 - **Lua AI:** when `script` is set, the engine calls `choose_action(view) -> Action` in a sandboxed coroutine with a **read-only battle view** (same information a human would have in that format — configurable per profile for "cheating" boss fights).
 - **Plugin AI:** plugins register new profiles (`ai.register_profile("gauntlet:boss", fn)`) or replace behaviour for existing ids.
 - **Hard challenges:** profiles combine weights, item usage rules, and full Lua for multi-turn planning (e.g. champion sets). All AI decisions go through the same action input path as the player so replays stay valid.
+- **Implementation notes (`pkrs_battle::TrainerAi`, M4).** The AI implements `BattleAi` over an `AiView` (the hooks' `BattleView` plus move data); `ai_side_input` turns its choices into ordinary `SideInput`s. `random` picks a usable move and target uniformly. `basic` scores power × STAB × effectiveness and uses status moves only as a last resort. `smart` scores expected damage (the Gen-3 formula with stages, average roll, no crit) as a fraction of the target's HP. It always takes a KO (higher priority first), and switches out of a *walled* matchup (best hit ≤ 15% of the foe's HP) to a bench creature whose matchup (offense − `predict` × threat) is clearly better, with probability `weights.switch`. Weights are converted to integer permille. `allow_items` uses the trainer's `items` list (first item, own HP ≤ `heal_below_percent`, default 25). Ties and probabilities roll on a **separate AI stream** per side (`RngPolicy::ai_seed`), never on the battle stream, so replaying the recorded inputs without any AI reproduces the battle exactly. `AiProfile` / `Trainer` live in `pkrs-data`; besides data-file profiles, a trainer may reference the built-in ids `random`, `basic` and `smart`.
 
 ---
 
@@ -744,6 +747,14 @@ All Lua APIs live in namespaced global tables, created per API level:
 | `time` | `ticks()`, `wait(n)` (coroutine only) |
 
 **Rust-only:** rendering internals, collision resolution, file I/O, save serialization, asset decoding, the main loop and the battle step engine. Lua influences these through declared hooks, never by direct access.
+
+**Battle module implementation notes (`pkrs_script::LuaBattleHooks`, M4).**
+- **Registration and arguments.** `battle.on(name, fn, { priority = n })` accepts the §7.4 hook names. Handlers receive `ctx` followed by the arguments in the §7.4 table. Creatures are tables `{ side = "player"|"opponent", slot, is_player, party_index, species, name, level, hp, max_hp, types, stats }`; moves are `{ id, type, category, power, accuracy, priority }`.
+- **Return values.** `nil` means unchanged; a returned value replaces the payload; `{ cancel = true, message = … }` cancels and stops the chain. `on_damage_calc` gets `dmg = { base, value, critical, immune, modifiers }`, where `dmg.modifiers:push(name, mult)` and `dmg.final = n` map to `DamageCalc`.
+- **The `ctx` API.** `ctx:random(n)` returns 1..=n from the battle stream. `ctx.message`, `ctx.play_fx` (logged as `fx:<id>`), `ctx.volatile` / `set_volatile` / `clear_volatile`, `ctx.side_state` / `set_side_state`, `ctx.creature(side, slot)` and `ctx.active_creatures()` are also available; all work with `.` or `:`. Volatile and side-state values are **copies**, so write them back with `set_volatile`. Only booleans, integers, strings and tables of those are stored, keeping replays exact.
+- **Custom actions.** A custom action counts as handled when a handler returns `true` or changes battle state.
+- **Failures.** A failing handler's `ctx` changes are rolled back and its value passes through; after 3 consecutive failures (configurable) it is disabled.
+- **Starting battles.** `battle.start_wild(species, level)` / `battle.start_trainer(id)` must run inside a task (`ScriptHost::start_task`). They yield `WaitRequest::Battle(…)`, and the engine resumes the task with `{ outcome = "win"|"loss"|"fled", turns, exp, money }`.
 
 ### 9.2 Events (overworld)
 Engine events Lua can subscribe to: `game_start`, `map_enter`, `map_exit`, `step`, `interact(npc|sign|tile)`, `trigger_enter`, `battle_end`, `menu_open`, `save_before`, `load_after`, `tick` (discouraged, but available).

@@ -1,11 +1,12 @@
 //! Move effect primitive execution (§7.3).
 
 use pkrs_core::GameRng;
-use pkrs_data::{EffectTarget, MoveEffect};
+use pkrs_data::{BattleRules, EffectTarget, MoveEffect};
 
 use crate::event::BattleEvent;
 use crate::model::{ActiveCreature, SideId};
 use crate::stat_stage::StatStages;
+use crate::status::apply_status_to_creature;
 
 /// Applies non-damage effects after a successful hit.
 #[allow(clippy::too_many_arguments)]
@@ -18,9 +19,11 @@ pub fn apply_effects(
     damage_dealt: u32,
     target_fainted: bool,
     user_creature: &mut ActiveCreature,
-    _target_creature: &mut ActiveCreature,
+    target_creature: &mut ActiveCreature,
     user_stages: &mut StatStages,
     target_stages: &mut StatStages,
+    rules: &BattleRules,
+    weather: &mut Option<(String, u8)>,
     rng: &mut dyn GameRng,
     out: &mut Vec<BattleEvent>,
 ) {
@@ -32,7 +35,9 @@ pub fn apply_effects(
                     continue;
                 }
                 let roll = rng.gen_range_u32(100);
-                if roll < u32::from(*chance) {
+                if roll < u32::from(*chance)
+                    && apply_status_to_creature(target_creature, status, rules)
+                {
                     out.push(BattleEvent::StatusApplied {
                         target_side,
                         target_slot,
@@ -104,9 +109,12 @@ pub fn apply_effects(
                     key: format!("multi_hit:{extra}"),
                 });
             }
-            MoveEffect::Weather { weather } => {
+            MoveEffect::Weather { weather: id } => {
+                if let Some(def) = rules.weather(id) {
+                    *weather = Some((id.clone(), def.default_turns));
+                }
                 out.push(BattleEvent::WeatherSet {
-                    weather: weather.clone(),
+                    weather: id.clone(),
                 });
             }
             MoveEffect::Protect => {
@@ -154,7 +162,7 @@ fn apply_damage_to(
 mod tests {
     use super::*;
     use pkrs_core::Pcg64Rng;
-    use pkrs_data::{MoveEffect, StatId};
+    use pkrs_data::{BattleRules, MoveEffect, StatId};
 
     fn creature(hp: u32) -> ActiveCreature {
         use crate::model::{BattleCreature, CreatureStats};
@@ -176,6 +184,8 @@ mod tests {
         let mut target_stages = StatStages::zero();
         let mut rng = Pcg64Rng::from_seed(0);
         let mut out = Vec::new();
+        let rules = BattleRules::gen3_defaults();
+        let mut weather = None;
         apply_effects(
             &[MoveEffect::StatStage {
                 stat: StatId::Attack,
@@ -193,6 +203,8 @@ mod tests {
             &mut target,
             &mut user_stages,
             &mut target_stages,
+            &rules,
+            &mut weather,
             &mut rng,
             &mut out,
         );
@@ -216,6 +228,8 @@ mod tests {
         let mut target_stages = StatStages::zero();
         let mut rng = Pcg64Rng::from_seed(0);
         let mut out = Vec::new();
+        let rules = BattleRules::gen3_defaults();
+        let mut weather = None;
         apply_effects(
             &[MoveEffect::Heal { percent: 50 }],
             SideId::Player,
@@ -228,6 +242,8 @@ mod tests {
             &mut target,
             &mut user_stages,
             &mut target_stages,
+            &rules,
+            &mut weather,
             &mut rng,
             &mut out,
         );

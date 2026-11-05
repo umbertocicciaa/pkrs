@@ -109,11 +109,24 @@ pub struct BattleCreature {
     pub moves: [Option<MoveSlot>; 4],
 }
 
-/// Runtime creature with mutable HP.
+/// Runtime creature with mutable HP and status.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ActiveCreature {
     pub template: BattleCreature,
     pub current_hp: u32,
+    /// At most one major status.
+    pub major_status: Option<MajorStatus>,
+    /// Volatile statuses with turns remaining (`0` = indefinite until cleared).
+    pub volatiles: std::collections::BTreeMap<String, u8>,
+}
+
+/// Major status with optional turn counter (sleep).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct MajorStatus {
+    /// Status content id.
+    pub id: String,
+    /// Turns remaining for sleep-like statuses.
+    pub counter: u8,
 }
 
 impl ActiveCreature {
@@ -122,6 +135,8 @@ impl ActiveCreature {
         Self {
             template,
             current_hp,
+            major_status: None,
+            volatiles: std::collections::BTreeMap::new(),
         }
     }
 

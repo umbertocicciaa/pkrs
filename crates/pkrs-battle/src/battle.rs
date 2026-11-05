@@ -16,12 +16,14 @@ use crate::phase::BattlePhase;
 use crate::resources::BattleResources;
 use crate::rng::{BattleRng, RngPolicy};
 use crate::stat_stage::StatStages;
-use pkrs_data::MoveCategory;
+use pkrs_data::{BattleRules, MoveCategory};
 
 struct SideState {
     party: Vec<ActiveCreature>,
     active: Vec<Option<PartyIndex>>,
     slot_stages: Vec<StatStages>,
+    /// Plugin / script side state (§7.3).
+    side_state: std::collections::BTreeMap<String, String>,
 }
 
 impl SideState {
@@ -58,6 +60,7 @@ impl SideState {
             party,
             active,
             slot_stages: vec![StatStages::zero(); side_size as usize],
+            side_state: std::collections::BTreeMap::new(),
         })
     }
 
@@ -134,6 +137,8 @@ pub struct Battle {
     player_actions: Vec<(SlotIndex, BattleAction)>,
     opponent_actions: Vec<(SlotIndex, BattleAction)>,
     pending_outcome: Option<BattleOutcome>,
+    /// Active weather id and turns remaining.
+    weather: Option<(String, u8)>,
 }
 
 impl Battle {
@@ -162,6 +167,7 @@ impl Battle {
             player_actions: Vec::new(),
             opponent_actions: Vec::new(),
             pending_outcome: None,
+            weather: None,
         })
     }
 
@@ -239,7 +245,7 @@ impl Battle {
         Ok(out)
     }
 
-    fn hook_ctx<'a>(&self, events: &'a [BattleEvent]) -> BattleHookCtx<'a> {
+    pub(crate) fn hook_ctx<'a>(&self, events: &'a [BattleEvent]) -> BattleHookCtx<'a> {
         BattleHookCtx {
             phase: self.phase,
             turn: self.turn,
@@ -362,7 +368,7 @@ impl Battle {
                 }
             }
             BattlePhase::EndOfTurn => {
-                hooks.on_end_of_turn(&self.hook_ctx(out))?;
+                crate::status::process_end_of_turn(self, hooks, out)?;
                 out.push(BattleEvent::TurnEnded { turn: self.turn });
                 if let Some(outcome) = self.check_battle_end() {
                     self.finish(outcome, hooks, out)?;
@@ -503,6 +509,19 @@ impl Battle {
             target_slot,
         });
 
+        let para_roll = self.rng.as_game_rng().gen_range_u32(100);
+        let blocked = if let Some(user) = self.side(user_side).creature(user_slot) {
+            crate::status::blocks_move(user, &self.resources.rules, para_roll)
+        } else {
+            false
+        };
+        if blocked {
+            out.push(BattleEvent::Message {
+                key: "status:cant_move".into(),
+            });
+            return Ok(());
+        }
+
         let user_stages = self.side(user_side).stages_at(user_slot);
         let target_stages = self.side(target_side).stages_at(target_slot);
 
@@ -581,6 +600,7 @@ impl Battle {
             user_side_state.party_creature_and_stages(user_slot)?;
         let (target_creature, target_stages_mut) =
             target_side_state.party_creature_and_stages(target_slot)?;
+        let rules = &self.resources.rules;
         apply_effects(
             &effects,
             user_side,
@@ -593,6 +613,8 @@ impl Battle {
             target_creature,
             user_stages_mut,
             target_stages_mut,
+            rules,
+            &mut self.weather,
             self.rng.as_game_rng(),
             out,
         );
@@ -600,7 +622,12 @@ impl Battle {
         Ok(())
     }
 
-    fn apply_damage(&mut self, side: SideId, slot: SlotIndex, amount: u32) -> Result<u32> {
+    pub(crate) fn apply_damage(
+        &mut self,
+        side: SideId,
+        slot: SlotIndex,
+        amount: u32,
+    ) -> Result<u32> {
         let creature = self
             .side_mut(side)
             .creature_mut(slot)
@@ -678,6 +705,58 @@ impl Battle {
         self.result = Some(result);
         self.phase = BattlePhase::End;
         Ok(())
+    }
+
+    /// Current configuration.
+    pub(crate) fn config(&self) -> &BattleConfig {
+        &self.config
+    }
+
+    pub(crate) fn rules(&self) -> &BattleRules {
+        &self.resources.rules
+    }
+
+    pub(crate) fn weather_snapshot(&self) -> Option<(String, u8)> {
+        self.weather.clone()
+    }
+
+    /// Opaque key/value side state for plugins (§7.3).
+    pub fn set_side_state(
+        &mut self,
+        side: SideId,
+        key: impl Into<String>,
+        value: impl Into<String>,
+    ) {
+        self.side_mut(side)
+            .side_state
+            .insert(key.into(), value.into());
+    }
+
+    pub(crate) fn tick_weather(&mut self) {
+        if let Some((_, turns)) = &mut self.weather {
+            if *turns > 0 {
+                *turns = turns.saturating_sub(1);
+            }
+            if *turns == 0 {
+                self.weather = None;
+            }
+        }
+    }
+
+    pub(crate) fn creature(&self, side: SideId, slot: SlotIndex) -> Option<&ActiveCreature> {
+        self.side(side).creature(slot)
+    }
+
+    pub(crate) fn creature_mut(
+        &mut self,
+        side: SideId,
+        slot: SlotIndex,
+    ) -> Option<&mut ActiveCreature> {
+        self.side_mut(side).creature_mut(slot)
+    }
+
+    pub(crate) fn party_index(&self, side: SideId, slot: SlotIndex) -> Option<PartyIndex> {
+        self.side(side).party_index(slot)
     }
 
     fn side(&self, side: SideId) -> &SideState {

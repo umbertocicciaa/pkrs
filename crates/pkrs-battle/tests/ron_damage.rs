@@ -140,7 +140,7 @@ fn ron_loaded_ember_produces_damage_event() {
             _ => None,
         })
         .collect();
-    assert_eq!(ember_damage, vec![23], "pinned seed 42 ember vs grass");
+    assert_eq!(ember_damage.first().copied(), Some(23), "pinned seed 42 ember vs grass");
     assert!(
         events
             .iter()

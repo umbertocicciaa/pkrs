@@ -232,6 +232,8 @@ cancel      = ["x", "backspace"]
 
 Templates are embedded in the CLI binary with `include_dir`, so `pkrs new` works offline.
 
+**Implementation notes (M2).** Templates live in `crates/pkrs-cli/templates/<name>/`. Text files (`.toml`, `.md`, `.lua`, `.txt`, `_gitignore`) get `{{name}}`, `{{id}}` (`com.example.<slug>`) and `{{engine_version}}` (the CLI's own version) substituted, and `_gitignore` is written as `.gitignore` (it ignores `saves/` and `dist/`). The v1 `one-shot` template is one 20×14 map with original CC0 art, a player sprite and `LICENSES.md`; the full story content ships with M8, and `full-game` is rejected until then. `pkrs run` finds the nearest `pkrs.toml` upwards, launches `$PKRS_RUNTIME` or the `pkrs-runtime` next to the `pkrs` executable (downloads are M7), and forwards `--project <dir> [--map <id>] [--warp x,y] [--headless] [--ticks N]`. The runtime checks `engine.version` and `engine.api`, mounts the folder through `FolderVfs`, loads `maps/<map>.tmx`, and writes dev saves under `<project>/saves/`. Until grid movement lands (§6.3), the runtime moves the player one tile per held direction, respecting collision.
+
 ### 2.5 Engine version pinning & upgrades
 - `engine.version` is a semver requirement. `pkrs run`/`build` pick the newest installed or downloadable runtime that satisfies it.
 - While pkrs is `0.x`, minor bumps may break things. From 1.0, normal semver applies.
@@ -370,7 +372,7 @@ flowchart TD
   ui[pkrs-ui] --> render & platform
   script[pkrs-script] --> core & world & battle & data & save & ui & audio
   runtime[pkrs-runtime] --> core & assets & script & render & audio & ui & save & world & platform
-  cli[pkrs-cli] --> data & assets & world & script
+  cli[pkrs-cli] --> core & data & assets & world & script
 ```
 
 Key boundaries:
@@ -440,7 +442,7 @@ flowchart LR
 | `ron` | codec functions in `pkrs-data` / `pkrs-save`; sprite animation descriptors in `pkrs-render` | `RonCodec`; `parse_animation_descriptor` | typed structs, `pkrs_save::Value`; `SpriteSheetAnimation` | `pkrs-data`, `pkrs-save`, `pkrs-render` |
 | `texture_packer` | `AtlasPacker` | `TexturePackerAdapter` | `pkrs build` pipeline | `pkrs-cli` |
 
-**Not wrapped (allowed directly), and why:** `serde` (derive framework; it *is* the abstraction), `serde_path_to_error` (serde helper that only adds the failing field path to errors; never in public APIs), `thiserror` (compile-time only), `tracing` (already a logging facade), `anyhow`, `miette`, `include_dir` (binaries only, never in library APIs), `insta` (dev-only). Adding a new crate to this list requires a note in this section.
+**Not wrapped (allowed directly), and why:** `serde` (derive framework; it *is* the abstraction), `serde_path_to_error` (serde helper that only adds the failing field path to errors; never in public APIs), `thiserror` (compile-time only), `tracing` (already a logging facade), `anyhow`, `miette`, `include_dir` (binaries only, never in library APIs), `clap` (CLI argument parsing in the `pkrs` binary only), `insta` (dev-only). Adding a new crate to this list requires a note in this section.
 
 **Rules:**
 1. **No vendor type in any public signature** of a pkrs library crate. Facades and ports use engine types only.

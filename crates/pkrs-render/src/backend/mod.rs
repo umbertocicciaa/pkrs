@@ -32,6 +32,10 @@ pub trait RenderBackend {
     /// Uploads an RGBA8 texture (`rgba.len()` must be `width * height * 4`).
     fn create_texture(&mut self, width: u32, height: u32, rgba: &[u8]) -> Result<TextureHandle>;
 
+    /// Decodes an encoded image (PNG) and uploads it; returns the handle and its size in pixels.
+    /// Malformed images are an error, never a panic.
+    fn create_texture_from_image(&mut self, encoded: &[u8]) -> Result<(TextureHandle, u32, u32)>;
+
     /// Draws one sprite into the internal target (call in layer order).
     fn draw_sprite(&mut self, draw: &SpriteDraw);
 

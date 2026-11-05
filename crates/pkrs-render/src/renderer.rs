@@ -132,6 +132,14 @@ impl Renderer {
         self.backend.end_frame();
     }
 
+    /// Decodes and uploads an encoded image (PNG); returns the handle and its size.
+    pub fn load_texture(
+        &mut self,
+        encoded: &[u8],
+    ) -> crate::Result<(crate::texture::TextureHandle, u32, u32)> {
+        self.backend.create_texture_from_image(encoded)
+    }
+
     /// Uploads an RGBA8 sprite sheet through the backend.
     pub fn create_texture(
         &mut self,

@@ -15,21 +15,25 @@
 //! `.pak`, §13).
 //!
 //! No vendor type appears in any public signature. Gamepad support (`GilrsGamepad`)
-//! and action mapping (the `Input` facade) come later.
+//! is planned; keyboard actions are handled by the [`Input`] facade (§10).
 
+mod action;
 mod backend;
 mod error;
+mod input;
 mod key;
 mod paths;
 mod platform;
 mod window;
 
+pub use action::{Action, BuiltinAction, CustomActionId};
 #[cfg(feature = "directories")]
 pub use backend::DirectoriesPaths;
 #[cfg(feature = "macroquad")]
 pub use backend::MacroquadPlatform;
 pub use backend::{FrameFuture, NullFrame, NullPlatform, PlatformBackend, block_on};
-pub use error::{PlatformError, Result};
+pub use error::{InputError, InputResult, PlatformError, Result};
+pub use input::{Input, InputFacadeConfig, MenuRepeatConfig, MovementBufferConfig};
 pub use key::Key;
 pub use paths::{FixedPaths, UserPaths};
 pub use platform::{DEFAULT_MAX_FRAME_TIME, Platform, PlatformConfig, PlatformEvent};

@@ -1,7 +1,7 @@
 //! Raw keyboard keys in engine vocabulary (§4.5 Rule 1: no vendor key codes).
 //!
 //! These are *physical* keys. Game code reads actions, never keys (§10); the
-//! `Input` facade maps keys to actions.
+//! [`Input`](crate::Input) facade maps keys to actions.
 
 /// A physical keyboard key known to the engine.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -175,6 +175,115 @@ impl Key {
         Key::F11,
         Key::F12,
     ];
+
+    /// Parses a manifest / config key name (`w`, `left_shift`, `enter`, …).
+    pub fn parse_name(raw: &str) -> Option<Self> {
+        let name = raw.trim();
+        if name.len() == 1 {
+            let c = name.as_bytes()[0];
+            if c.is_ascii_lowercase() {
+                return single_letter(c);
+            }
+            if c.is_ascii_digit() {
+                return single_digit(c);
+            }
+        }
+        match name {
+            "up" => Some(Key::Up),
+            "down" => Some(Key::Down),
+            "left" => Some(Key::Left),
+            "right" => Some(Key::Right),
+            "space" => Some(Key::Space),
+            "enter" | "return" => Some(Key::Enter),
+            "escape" | "esc" => Some(Key::Escape),
+            "backspace" => Some(Key::Backspace),
+            "tab" => Some(Key::Tab),
+            "insert" => Some(Key::Insert),
+            "delete" => Some(Key::Delete),
+            "home" => Some(Key::Home),
+            "end" => Some(Key::End),
+            "pageup" | "page_up" => Some(Key::PageUp),
+            "pagedown" | "page_down" => Some(Key::PageDown),
+            "left_shift" | "shift" => Some(Key::LeftShift),
+            "right_shift" => Some(Key::RightShift),
+            "left_control" | "left_ctrl" | "control" | "ctrl" => Some(Key::LeftControl),
+            "right_control" | "right_ctrl" => Some(Key::RightControl),
+            "left_alt" | "alt" => Some(Key::LeftAlt),
+            "right_alt" => Some(Key::RightAlt),
+            "backquote" | "grave" => Some(Key::Backquote),
+            "minus" => Some(Key::Minus),
+            "equal" => Some(Key::Equal),
+            "comma" => Some(Key::Comma),
+            "period" => Some(Key::Period),
+            "slash" => Some(Key::Slash),
+            "semicolon" => Some(Key::Semicolon),
+            "apostrophe" | "quote" => Some(Key::Apostrophe),
+            "left_bracket" => Some(Key::LeftBracket),
+            "right_bracket" => Some(Key::RightBracket),
+            "backslash" => Some(Key::Backslash),
+            "f1" => Some(Key::F1),
+            "f2" => Some(Key::F2),
+            "f3" => Some(Key::F3),
+            "f4" => Some(Key::F4),
+            "f5" => Some(Key::F5),
+            "f6" => Some(Key::F6),
+            "f7" => Some(Key::F7),
+            "f8" => Some(Key::F8),
+            "f9" => Some(Key::F9),
+            "f10" => Some(Key::F10),
+            "f11" => Some(Key::F11),
+            "f12" => Some(Key::F12),
+            _ => None,
+        }
+    }
+}
+
+fn single_letter(c: u8) -> Option<Key> {
+    Some(match c {
+        b'a' => Key::A,
+        b'b' => Key::B,
+        b'c' => Key::C,
+        b'd' => Key::D,
+        b'e' => Key::E,
+        b'f' => Key::F,
+        b'g' => Key::G,
+        b'h' => Key::H,
+        b'i' => Key::I,
+        b'j' => Key::J,
+        b'k' => Key::K,
+        b'l' => Key::L,
+        b'm' => Key::M,
+        b'n' => Key::N,
+        b'o' => Key::O,
+        b'p' => Key::P,
+        b'q' => Key::Q,
+        b'r' => Key::R,
+        b's' => Key::S,
+        b't' => Key::T,
+        b'u' => Key::U,
+        b'v' => Key::V,
+        b'w' => Key::W,
+        b'x' => Key::X,
+        b'y' => Key::Y,
+        b'z' => Key::Z,
+        _ => return None,
+    })
+}
+
+fn single_digit(c: u8) -> Option<Key> {
+    Some(match c {
+        b'0' => Key::Digit0,
+        b'1' => Key::Digit1,
+        b'2' => Key::Digit2,
+        b'3' => Key::Digit3,
+        b'4' => Key::Digit4,
+        b'5' => Key::Digit5,
+        b'6' => Key::Digit6,
+        b'7' => Key::Digit7,
+        b'8' => Key::Digit8,
+        b'9' => Key::Digit9,
+        _ => return None,
+    })
 }
 
 #[cfg(test)]

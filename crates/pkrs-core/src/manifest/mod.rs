@@ -495,7 +495,7 @@ fn check_script_path(path: &str) -> Result<(), String> {
 }
 
 /// Plugin ids: like content ids, but `-` is allowed (`day-night`).
-pub(crate) fn is_plugin_id(id: &str) -> bool {
+pub fn is_plugin_id(id: &str) -> bool {
     let mut chars = id.chars();
     chars.next().is_some_and(|c| c.is_ascii_lowercase())
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
@@ -513,7 +513,7 @@ fn is_language_tag(tag: &str) -> bool {
 }
 
 /// Action names: `snake_case` or `plugin_id:snake_case`.
-fn is_action_name(name: &str) -> bool {
+pub fn is_action_name(name: &str) -> bool {
     match name.split_once(':') {
         Some((plugin, action)) => is_plugin_id(plugin) && validate_id(action).is_ok(),
         None => validate_id(name).is_ok(),

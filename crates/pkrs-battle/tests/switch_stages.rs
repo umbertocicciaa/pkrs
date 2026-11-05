@@ -80,7 +80,9 @@ fn replace_switch_resets_slot_stat_stages() {
                 types: vec!["normal".into()],
                 nickname: "b".into(),
                 level: 5,
-                stats: CreatureStats::new(40, 20, 10, 5),
+                // Enough HP to survive the faster foe's hit and act (fainted creatures drop
+                // their queued action).
+                stats: CreatureStats::new(400, 20, 10, 5),
                 moves: [
                     Some(MoveSlot {
                         id: "growth".into(),

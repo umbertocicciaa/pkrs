@@ -25,7 +25,12 @@ pub use convert::{IntoBattleSetup, testkit as battle_testkit};
 pub use damage::{DamageCalc, DamageModifierStage};
 pub use error::{BattleError, Result};
 pub use event::BattleEvent;
-pub use hooks::{ActionOrder, BattleHookCtx, BattleHooks, NullBattleHooks, RecordingBattleHooks};
+pub use hooks::{
+    ActionMenu, ActionOrder, BattleHookCtx, BattleHooks, BattleValue, BattleView, CreatureView,
+    CustomAction, DamageTaken, FaintEvent, HookResult, MenuOption, MoveRequest, MoveResult,
+    MoveView, NullBattleHooks, RecordingBattleHooks, SideView, SlotRef, StatusApply, SwitchIn,
+    SwitchOut,
+};
 pub use model::{
     BattleConfig, BattleCreature, BattleOutcome, BattleResult, BattleSetup, BattleSideSetup,
     CreatureStats, MoveSlot, PartyIndex, SideId, SlotIndex,

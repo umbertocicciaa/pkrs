@@ -1,4 +1,6 @@
-//! Battle state machine (§7.1–§7.2).
+//! Battle state machine (§7.1–§7.2) with the §7.4 hook points.
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::accuracy::roll_accuracy;
 use crate::action::{BattleAction, BattleInput, SideInput};
@@ -6,7 +8,11 @@ use crate::damage::{DamageCalc, DamageInputs, effective_defense, effective_offen
 use crate::effects::apply_effects;
 use crate::error::{BattleError, Result};
 use crate::event::BattleEvent;
-use crate::hooks::{ActionOrder, BattleHookCtx, BattleHooks};
+use crate::hooks::{
+    ActionMenu, ActionOrder, BattleHookCtx, BattleHooks, BattleValue, BattleView, CreatureView,
+    CustomAction, DamageTaken, FaintEvent, HookCommand, HookResult, MoveRequest, MoveResult,
+    MoveView, SideView, SlotRef, StatusApply, SwitchIn, SwitchOut,
+};
 use crate::model::{
     ActiveCreature, BattleConfig, BattleOutcome, BattleResult, BattleSetup, BattleSideSetup,
     PartyIndex, SideId, SlotIndex,
@@ -16,12 +22,17 @@ use crate::phase::BattlePhase;
 use crate::resources::BattleResources;
 use crate::rng::{BattleRng, RngPolicy};
 use crate::stat_stage::StatStages;
-use pkrs_data::MoveCategory;
+use pkrs_data::{MoveCategory, MoveEffect};
+
+type ValueMap = BTreeMap<String, BattleValue>;
 
 struct SideState {
+    name: String,
     party: Vec<ActiveCreature>,
     active: Vec<Option<PartyIndex>>,
     slot_stages: Vec<StatStages>,
+    slot_volatiles: Vec<ValueMap>,
+    state: ValueMap,
 }
 
 impl SideState {
@@ -55,9 +66,12 @@ impl SideState {
             }
         }
         Ok(Self {
+            name: setup.name,
             party,
             active,
             slot_stages: vec![StatStages::zero(); side_size as usize],
+            slot_volatiles: vec![ValueMap::new(); side_size as usize],
+            state: ValueMap::new(),
         })
     }
 
@@ -106,8 +120,7 @@ impl SideState {
     }
 
     fn has_usable_bench(&self) -> bool {
-        let active_set: std::collections::BTreeSet<_> =
-            self.active.iter().filter_map(|i| *i).collect();
+        let active_set: BTreeSet<_> = self.active.iter().filter_map(|i| *i).collect();
         self.party
             .iter()
             .enumerate()
@@ -116,6 +129,49 @@ impl SideState {
 
     fn side_has_any_usable(&self) -> bool {
         self.party.iter().any(|c| !c.fainted())
+    }
+
+    fn view(&self, side: SideId) -> SideView {
+        let party = self
+            .party
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let idx = i as PartyIndex;
+                let slot = self.active.iter().position(|a| *a == Some(idx));
+                let t = &c.template;
+                CreatureView {
+                    party_index: idx,
+                    species_id: t.species_id.clone(),
+                    nickname: t.nickname.clone(),
+                    types: t.types.clone(),
+                    level: t.level,
+                    hp: c.current_hp,
+                    stats: t.stats.clone(),
+                    stages: slot.map_or_else(StatStages::zero, |s| self.slot_stages[s]),
+                    moves: t.moves.clone().map(|m| {
+                        m.map(|m| MoveView {
+                            id: m.id,
+                            pp: m.pp,
+                            max_pp: m.max_pp,
+                            priority: m.priority,
+                            power: m.power,
+                        })
+                    }),
+                    volatiles: slot
+                        .and_then(|s| self.slot_volatiles.get(s).cloned())
+                        .unwrap_or_default(),
+                    active: slot.is_some(),
+                }
+            })
+            .collect();
+        SideView {
+            side,
+            name: self.name.clone(),
+            active: self.active.clone(),
+            party,
+            state: self.state.clone(),
+        }
     }
 }
 
@@ -127,6 +183,8 @@ pub struct Battle {
     player: SideState,
     opponent: SideState,
     queue: Vec<QueuedAction>,
+    /// Party index acting from each queued slot when the order was locked.
+    queue_actors: Vec<Option<PartyIndex>>,
     queue_index: usize,
     result: Option<BattleResult>,
     rng: BattleRng,
@@ -134,6 +192,8 @@ pub struct Battle {
     player_actions: Vec<(SlotIndex, BattleAction)>,
     opponent_actions: Vec<(SlotIndex, BattleAction)>,
     pending_outcome: Option<BattleOutcome>,
+    /// Events produced outside `step` (e.g. by `on_action_menu`), emitted by the next `step`.
+    deferred: Vec<BattleEvent>,
 }
 
 impl Battle {
@@ -155,6 +215,7 @@ impl Battle {
             player,
             opponent,
             queue: Vec::new(),
+            queue_actors: Vec::new(),
             queue_index: 0,
             result: None,
             rng: BattleRng::new(rng_policy),
@@ -162,6 +223,7 @@ impl Battle {
             player_actions: Vec::new(),
             opponent_actions: Vec::new(),
             pending_outcome: None,
+            deferred: Vec::new(),
         })
     }
 
@@ -175,14 +237,60 @@ impl Battle {
         self.turn
     }
 
+    /// Battle configuration.
+    pub fn config(&self) -> BattleConfig {
+        self.config
+    }
+
     /// Final result after [`BattlePhase::End`].
     pub fn result(&self) -> Option<&BattleResult> {
         self.result.as_ref()
     }
 
-    /// Battle RNG (damage rolls in later issues).
+    /// Battle RNG.
     pub fn rng(&mut self) -> &mut BattleRng {
         &mut self.rng
+    }
+
+    /// Content the battle resolves moves against.
+    pub fn resources(&self) -> &BattleResources {
+        &self.resources
+    }
+
+    /// Read-only snapshot of the field (hooks, AI, UI).
+    pub fn view(&self) -> BattleView {
+        BattleView {
+            phase: self.phase,
+            turn: self.turn,
+            side_size: self.config.side_size,
+            sides: [
+                self.player.view(SideId::Player),
+                self.opponent.view(SideId::Opponent),
+            ],
+        }
+    }
+
+    /// The action menu for `slot` (`fight`, `bag`, `party`, `run` plus hook entries, §7.4
+    /// `on_action_menu`). Events produced by the hook are emitted by the next [`step`](Self::step).
+    pub fn action_menu(
+        &mut self,
+        slot: SlotRef,
+        hooks: &mut dyn BattleHooks,
+    ) -> Result<ActionMenu> {
+        if self.side(slot.side).creature(slot.slot).is_none() {
+            return Err(BattleError::InvalidAction(format!(
+                "no active creature on {:?} slot {}",
+                slot.side, slot.slot
+            )));
+        }
+        let mut menu = ActionMenu::builtin(slot);
+        let mut out = std::mem::take(&mut self.deferred);
+        let result = self.run_hook(&mut out, "on_action_menu", |ctx| {
+            hooks.on_action_menu(ctx, &mut menu)
+        });
+        self.deferred = out;
+        result?;
+        Ok(menu)
     }
 
     /// Advances the state machine, returning new log entries.
@@ -191,7 +299,7 @@ impl Battle {
         input: BattleInput,
         hooks: &mut dyn BattleHooks,
     ) -> Result<Vec<BattleEvent>> {
-        let mut out = Vec::new();
+        let mut out = std::mem::take(&mut self.deferred);
         loop {
             match self.phase {
                 BattlePhase::End => break,
@@ -216,12 +324,7 @@ impl Battle {
                             "replace requires Switch action".into(),
                         ));
                     };
-                    self.apply_switch(side, slot, *to_party, true)?;
-                    out.push(BattleEvent::Switched {
-                        side,
-                        slot,
-                        to_party: *to_party,
-                    });
+                    self.perform_switch(side, slot, *to_party, true, hooks, &mut out)?;
                     self.phase = BattlePhase::FaintCheck;
                     continue;
                 }
@@ -239,12 +342,76 @@ impl Battle {
         Ok(out)
     }
 
-    fn hook_ctx<'a>(&self, events: &'a [BattleEvent]) -> BattleHookCtx<'a> {
-        BattleHookCtx {
-            phase: self.phase,
-            turn: self.turn,
-            side_size: self.config.side_size,
-            events,
+    /// Runs one hook: optional trace event, then the hook with a fresh context, then the
+    /// state changes it requested (§7.4).
+    fn run_hook<R>(
+        &mut self,
+        out: &mut Vec<BattleEvent>,
+        name: &'static str,
+        f: impl FnOnce(&mut BattleHookCtx<'_>) -> Result<R>,
+    ) -> Result<R> {
+        if self.config.trace_hooks {
+            out.push(BattleEvent::HookTrace { hook: name.into() });
+        }
+        let view = self.view();
+        let (result, commands) = {
+            let mut ctx = BattleHookCtx::new(&view, out, self.rng.as_game_rng());
+            let result = f(&mut ctx);
+            (result, ctx.into_commands())
+        };
+        let value = result?;
+        self.apply_commands(commands, out);
+        Ok(value)
+    }
+
+    fn apply_commands(&mut self, commands: Vec<HookCommand>, out: &mut Vec<BattleEvent>) {
+        for cmd in commands {
+            match cmd {
+                HookCommand::SetVolatile(slot, key, value) => {
+                    let side = self.side_mut(slot.side);
+                    if side.creature(slot.slot).is_none() {
+                        continue;
+                    }
+                    let Some(map) = side.slot_volatiles.get_mut(usize::from(slot.slot)) else {
+                        continue;
+                    };
+                    match &value {
+                        Some(v) => {
+                            map.insert(key.clone(), v.clone());
+                        }
+                        None => {
+                            if map.remove(&key).is_none() {
+                                continue;
+                            }
+                        }
+                    }
+                    out.push(BattleEvent::VolatileChanged {
+                        side: slot.side,
+                        slot: slot.slot,
+                        key,
+                        value,
+                    });
+                }
+                HookCommand::SetSideState(side_id, key, value) => {
+                    let side = self.side_mut(side_id);
+                    match &value {
+                        Some(v) => {
+                            side.state.insert(key.clone(), v.clone());
+                        }
+                        None => {
+                            if side.state.remove(&key).is_none() {
+                                continue;
+                            }
+                        }
+                    }
+                    out.push(BattleEvent::SideStateChanged {
+                        side: side_id,
+                        key,
+                        value,
+                    });
+                }
+                HookCommand::Message(key) => out.push(BattleEvent::Message { key }),
+            }
         }
     }
 
@@ -269,6 +436,7 @@ impl Battle {
             )));
         }
         let side_state = self.side(side);
+        let mut switch_targets = BTreeSet::new();
         for (slot, action) in input.slots.iter().enumerate() {
             let slot = u8::try_from(slot)
                 .map_err(|_| BattleError::InvalidAction("slot index overflow".into()))?;
@@ -277,10 +445,22 @@ impl Battle {
                     "no active creature on {side:?} slot {slot}"
                 )));
             }
-            if matches!(action, BattleAction::Switch { .. }) {
-                return Err(BattleError::InvalidAction(
-                    "switch actions are only valid during Replace".into(),
-                ));
+            if let BattleAction::Switch { to_party } = action {
+                let target = side_state
+                    .party
+                    .get(usize::from(*to_party))
+                    .ok_or_else(|| BattleError::InvalidAction("party index out of range".into()))?;
+                if target.fainted() {
+                    return Err(BattleError::InvalidAction(
+                        "cannot switch to fainted creature".into(),
+                    ));
+                }
+                if side_state.active.contains(&Some(*to_party)) || !switch_targets.insert(*to_party)
+                {
+                    return Err(BattleError::InvalidAction(
+                        "creature already active or chosen twice".into(),
+                    ));
+                }
             }
         }
         match side {
@@ -307,15 +487,15 @@ impl Battle {
     ) -> Result<()> {
         match self.phase {
             BattlePhase::Start => {
-                hooks.on_battle_start(&self.hook_ctx(out))?;
+                self.run_hook(out, "on_battle_start", |ctx| hooks.on_battle_start(ctx))?;
                 out.push(BattleEvent::BattleStarted);
                 self.turn = 1;
                 out.push(BattleEvent::TurnStarted { turn: self.turn });
-                hooks.on_turn_start(&self.hook_ctx(out))?;
+                self.run_hook(out, "on_turn_start", |ctx| hooks.on_turn_start(ctx))?;
                 self.phase = BattlePhase::SelectActions;
             }
             BattlePhase::PreTurn => {
-                hooks.on_pre_turn(&self.hook_ctx(out))?;
+                self.run_hook(out, "on_pre_turn", |ctx| hooks.on_pre_turn(ctx))?;
                 self.phase = BattlePhase::ResolveOrder;
             }
             BattlePhase::ResolveOrder => {
@@ -329,7 +509,9 @@ impl Battle {
                 let mut order = ActionOrder {
                     entries: self.queue.iter().map(|q| (q.side, q.slot)).collect(),
                 };
-                hooks.on_action_order(&self.hook_ctx(out), &mut order)?;
+                self.run_hook(out, "on_action_order", |ctx| {
+                    hooks.on_action_order(ctx, &mut order)
+                })?;
                 out.push(BattleEvent::OrderResolved {
                     order: order.entries.clone(),
                 });
@@ -342,6 +524,11 @@ impl Battle {
                             .unwrap_or(usize::MAX)
                     });
                 }
+                self.queue_actors = self
+                    .queue
+                    .iter()
+                    .map(|q| self.side(q.side).party_index(q.slot))
+                    .collect();
                 self.queue_index = 0;
                 self.phase = BattlePhase::ExecuteAction;
                 self.run_current_action(hooks, out)?;
@@ -362,7 +549,7 @@ impl Battle {
                 }
             }
             BattlePhase::EndOfTurn => {
-                hooks.on_end_of_turn(&self.hook_ctx(out))?;
+                self.run_hook(out, "on_end_of_turn", |ctx| hooks.on_end_of_turn(ctx))?;
                 out.push(BattleEvent::TurnEnded { turn: self.turn });
                 if let Some(outcome) = self.check_battle_end() {
                     self.finish(outcome, hooks, out)?;
@@ -371,10 +558,11 @@ impl Battle {
                 {
                     self.turn = self.turn.saturating_add(1);
                     out.push(BattleEvent::TurnStarted { turn: self.turn });
-                    hooks.on_turn_start(&self.hook_ctx(out))?;
+                    self.run_hook(out, "on_turn_start", |ctx| hooks.on_turn_start(ctx))?;
                     self.player_actions.clear();
                     self.opponent_actions.clear();
                     self.queue.clear();
+                    self.queue_actors.clear();
                     self.queue_index = 0;
                     self.pending_outcome = None;
                     self.phase = BattlePhase::SelectActions;
@@ -392,6 +580,15 @@ impl Battle {
         Ok(())
     }
 
+    /// `true` if the creature that chose the queued action is still in its slot and able to act.
+    fn actor_can_act(&self, index: usize, action: &QueuedAction) -> bool {
+        let locked = self.queue_actors.get(index).copied().flatten();
+        let side = self.side(action.side);
+        locked.is_some()
+            && side.party_index(action.slot) == locked
+            && side.creature(action.slot).is_some_and(|c| !c.fainted())
+    }
+
     fn run_current_action(
         &mut self,
         hooks: &mut dyn BattleHooks,
@@ -402,6 +599,12 @@ impl Battle {
             return Ok(());
         }
         let action = self.queue[self.queue_index].clone();
+        if !self.actor_can_act(self.queue_index, &action) {
+            // Fainted (or replaced) before its turn came: the action is dropped.
+            self.queue_index = self.queue_index.saturating_add(1);
+            self.phase = BattlePhase::FaintCheck;
+            return Ok(());
+        }
         out.push(BattleEvent::ActionCommitted {
             side: action.side,
             slot: action.slot,
@@ -418,30 +621,35 @@ impl Battle {
                 target_side,
                 target_slot,
             } => self.execute_fight(
-                action.side,
-                action.slot,
+                SlotRef::new(action.side, action.slot),
                 move_slot,
-                target_side,
-                target_slot,
+                SlotRef::new(target_side, target_slot),
                 hooks,
                 out,
             )?,
             BattleAction::Switch { to_party } => {
-                self.apply_switch(action.side, action.slot, to_party, false)?;
-                out.push(BattleEvent::Switched {
-                    side: action.side,
-                    slot: action.slot,
-                    to_party,
-                });
+                self.perform_switch(action.side, action.slot, to_party, false, hooks, out)?;
             }
             BattleAction::Item { item_id, .. } => {
                 out.push(BattleEvent::Message {
                     key: format!("item_used:{item_id}"),
                 });
             }
-            BattleAction::Custom { id, .. } => {
-                out.push(BattleEvent::Message {
-                    key: format!("custom:{id}"),
+            BattleAction::Custom { id, payload } => {
+                let mut custom = CustomAction {
+                    actor: SlotRef::new(action.side, action.slot),
+                    id,
+                    payload,
+                    handled: false,
+                };
+                self.run_hook(out, "on_custom_action", |ctx| {
+                    hooks.on_custom_action(ctx, &mut custom)
+                })?;
+                out.push(BattleEvent::CustomActionUsed {
+                    side: action.side,
+                    slot: action.slot,
+                    id: custom.id,
+                    handled: custom.handled,
                 });
             }
         }
@@ -450,33 +658,70 @@ impl Battle {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
+    fn move_id_at(&self, user: SlotRef, move_slot: u8) -> Option<String> {
+        self.side(user.side)
+            .creature(user.slot)?
+            .template
+            .moves
+            .get(usize::from(move_slot))?
+            .as_ref()
+            .map(|m| m.id.clone())
+    }
+
     fn execute_fight(
         &mut self,
-        user_side: SideId,
-        user_slot: SlotIndex,
+        user: SlotRef,
         move_slot: u8,
-        target_side: SideId,
-        target_slot: SlotIndex,
+        target: SlotRef,
         hooks: &mut dyn BattleHooks,
         out: &mut Vec<BattleEvent>,
     ) -> Result<()> {
-        let (move_id, user_level, user_types, user_stats) = {
-            let user = self
-                .side(user_side)
-                .creature(user_slot)
+        let original_id = self
+            .move_id_at(user, move_slot)
+            .ok_or_else(|| BattleError::InvalidAction("invalid move slot".into()))?;
+        let mut req = MoveRequest {
+            user,
+            move_slot,
+            move_id: original_id.clone(),
+            target,
+        };
+        let verdict = self.run_hook(out, "on_before_move", |ctx| {
+            hooks.on_before_move(ctx, &mut req)
+        })?;
+        if let HookResult::Cancel { reason } = verdict {
+            out.push(BattleEvent::MoveCancelled {
+                user_side: user.side,
+                user_slot: user.slot,
+                move_id: original_id,
+                reason,
+            });
+            return Ok(());
+        }
+        // Hooks may retarget or swap the move; invalid changes fall back to the original.
+        let (move_slot, target) = match self.move_id_at(user, req.move_slot) {
+            Some(_)
+                if self
+                    .side(req.target.side)
+                    .creature(req.target.slot)
+                    .is_some() =>
+            {
+                (req.move_slot, req.target)
+            }
+            _ => (move_slot, target),
+        };
+        let move_id = self
+            .move_id_at(user, move_slot)
+            .ok_or_else(|| BattleError::InvalidAction("invalid move slot".into()))?;
+
+        let (user_level, user_types, user_stats) = {
+            let u = self
+                .side(user.side)
+                .creature(user.slot)
                 .ok_or_else(|| BattleError::InvalidAction("user not active".into()))?;
-            let mv = user
-                .template
-                .moves
-                .get(move_slot as usize)
-                .and_then(|m| m.as_ref())
-                .ok_or_else(|| BattleError::InvalidAction("invalid move slot".into()))?;
             (
-                mv.id.clone(),
-                user.template.level,
-                user.template.types.clone(),
-                user.template.stats.clone(),
+                u.template.level,
+                u.template.types.clone(),
+                u.template.stats.clone(),
             )
         };
 
@@ -488,23 +733,23 @@ impl Battle {
             .clone();
 
         let (target_types, target_stats) = {
-            let target = self
-                .side(target_side)
-                .creature(target_slot)
+            let t = self
+                .side(target.side)
+                .creature(target.slot)
                 .ok_or_else(|| BattleError::InvalidAction("invalid target".into()))?;
-            (target.template.types.clone(), target.template.stats.clone())
+            (t.template.types.clone(), t.template.stats.clone())
         };
 
         out.push(BattleEvent::MoveUsed {
-            user_side,
-            user_slot,
+            user_side: user.side,
+            user_slot: user.slot,
             move_id: move_id.clone(),
-            target_side,
-            target_slot,
+            target_side: target.side,
+            target_slot: target.slot,
         });
 
-        let user_stages = self.side(user_side).stages_at(user_slot);
-        let target_stages = self.side(target_side).stages_at(target_slot);
+        let user_stages = self.side(user.side).stages_at(user.slot);
+        let target_stages = self.side(target.side).stages_at(target.slot);
 
         let mut acc = roll_accuracy(
             move_def.accuracy,
@@ -512,14 +757,24 @@ impl Battle {
             &target_stages,
             self.rng.as_game_rng(),
         );
-        hooks.on_accuracy(&self.hook_ctx(out), &mut acc)?;
+        self.run_hook(out, "on_accuracy", |ctx| hooks.on_accuracy(ctx, &mut acc))?;
         if !acc.hits {
             out.push(BattleEvent::Missed {
-                target_side,
-                target_slot,
-                move_id,
+                target_side: target.side,
+                target_slot: target.slot,
+                move_id: move_id.clone(),
             });
-            return Ok(());
+            let result = MoveResult {
+                user,
+                target,
+                move_id,
+                hit: false,
+                damage: 0,
+                target_fainted: false,
+            };
+            return self.run_hook(out, "on_after_move", |ctx| {
+                hooks.on_after_move(ctx, &result)
+            });
         }
 
         let offense = effective_offense(user_stats.attack, &user_stages, move_def.category);
@@ -545,58 +800,182 @@ impl Battle {
                 &self.resources.pack.type_chart,
                 self.rng.as_game_rng(),
             );
-            hooks.on_damage_calc(&self.hook_ctx(out), &mut calc)?;
-            amount = calc.final_damage();
-            if amount > 0 {
-                let remaining = self.apply_damage(target_side, target_slot, amount)?;
-                out.push(BattleEvent::Damage {
-                    target_side,
-                    target_slot,
-                    amount,
-                    remaining_hp: remaining,
-                });
-                if remaining == 0 {
-                    if let Some(party_index) = self.side(target_side).party_index(target_slot) {
-                        out.push(BattleEvent::Fainted {
-                            side: target_side,
-                            slot: target_slot,
-                            party_index,
-                        });
-                    }
-                }
+            self.run_hook(out, "on_damage_calc", |ctx| {
+                hooks.on_damage_calc(ctx, &mut calc)
+            })?;
+            let calculated = calc.final_damage();
+            if calculated > 0 {
+                amount = self.deal_damage(
+                    DamageTaken {
+                        target,
+                        source: Some(user),
+                        move_id: Some(move_id.clone()),
+                        amount: calculated,
+                    },
+                    hooks,
+                    out,
+                )?;
             }
         }
 
         let target_fainted = self
-            .side(target_side)
-            .creature(target_slot)
+            .side(target.side)
+            .creature(target.slot)
             .is_some_and(|c| c.fainted());
 
-        let effects = move_def.effects.clone();
-        let (user_side_state, target_side_state) = match user_side {
-            SideId::Player => (&mut self.player, &mut self.opponent),
-            SideId::Opponent => (&mut self.opponent, &mut self.player),
-        };
-        let (user_creature, user_stages_mut) =
-            user_side_state.party_creature_and_stages(user_slot)?;
-        let (target_creature, target_stages_mut) =
-            target_side_state.party_creature_and_stages(target_slot)?;
-        apply_effects(
-            &effects,
-            user_side,
-            user_slot,
-            target_side,
-            target_slot,
-            amount,
-            target_fainted,
-            user_creature,
-            target_creature,
-            user_stages_mut,
-            target_stages_mut,
-            self.rng.as_game_rng(),
-            out,
-        );
+        for effect in &move_def.effects {
+            if let MoveEffect::ApplyStatus { status, chance } = effect {
+                if target_fainted {
+                    continue;
+                }
+                let roll = self.rng.as_game_rng().gen_range_u32(100);
+                if roll < u32::from(*chance) {
+                    self.apply_status(
+                        StatusApply {
+                            target,
+                            source: Some(user),
+                            status: status.clone(),
+                        },
+                        hooks,
+                        out,
+                    )?;
+                }
+                continue;
+            }
+            let (user_side_state, target_side_state) = match user.side {
+                SideId::Player => (&mut self.player, &mut self.opponent),
+                SideId::Opponent => (&mut self.opponent, &mut self.player),
+            };
+            // Self-targeting moves resolve both sides against the user's side.
+            if user.side == target.side {
+                let (user_creature, user_stages_mut) =
+                    user_side_state.party_creature_and_stages(user.slot)?;
+                let mut target_copy = user_creature.clone();
+                let mut target_stages_copy = *user_stages_mut;
+                apply_effects(
+                    std::slice::from_ref(effect),
+                    user.side,
+                    user.slot,
+                    target.side,
+                    target.slot,
+                    amount,
+                    target_fainted,
+                    user_creature,
+                    &mut target_copy,
+                    user_stages_mut,
+                    &mut target_stages_copy,
+                    self.rng.as_game_rng(),
+                    out,
+                );
+                continue;
+            }
+            let (user_creature, user_stages_mut) =
+                user_side_state.party_creature_and_stages(user.slot)?;
+            let (target_creature, target_stages_mut) =
+                target_side_state.party_creature_and_stages(target.slot)?;
+            apply_effects(
+                std::slice::from_ref(effect),
+                user.side,
+                user.slot,
+                target.side,
+                target.slot,
+                amount,
+                target_fainted,
+                user_creature,
+                target_creature,
+                user_stages_mut,
+                target_stages_mut,
+                self.rng.as_game_rng(),
+                out,
+            );
+        }
 
+        let result = MoveResult {
+            user,
+            target,
+            move_id,
+            hit: true,
+            damage: amount,
+            target_fainted,
+        };
+        self.run_hook(out, "on_after_move", |ctx| {
+            hooks.on_after_move(ctx, &result)
+        })
+    }
+
+    /// `on_damage_taken`, then HP loss, `Damage`, and `Fainted` + `on_faint` if it drops to 0.
+    /// Returns the damage actually dealt.
+    fn deal_damage(
+        &mut self,
+        mut hit: DamageTaken,
+        hooks: &mut dyn BattleHooks,
+        out: &mut Vec<BattleEvent>,
+    ) -> Result<u32> {
+        let verdict = self.run_hook(out, "on_damage_taken", |ctx| {
+            hooks.on_damage_taken(ctx, &mut hit)
+        })?;
+        let target = hit.target;
+        if let HookResult::Cancel { reason } = verdict {
+            out.push(BattleEvent::DamagePrevented {
+                target_side: target.side,
+                target_slot: target.slot,
+                reason,
+            });
+            return Ok(0);
+        }
+        if hit.amount == 0 {
+            return Ok(0);
+        }
+        let remaining = self.apply_damage(target.side, target.slot, hit.amount)?;
+        out.push(BattleEvent::Damage {
+            target_side: target.side,
+            target_slot: target.slot,
+            amount: hit.amount,
+            remaining_hp: remaining,
+        });
+        if remaining == 0 {
+            if let Some(party_index) = self.side(target.side).party_index(target.slot) {
+                out.push(BattleEvent::Fainted {
+                    side: target.side,
+                    slot: target.slot,
+                    party_index,
+                });
+                let faint = FaintEvent {
+                    slot: target,
+                    party_index,
+                };
+                self.run_hook(out, "on_faint", |ctx| hooks.on_faint(ctx, &faint))?;
+            }
+        }
+        Ok(hit.amount)
+    }
+
+    fn apply_status(
+        &mut self,
+        mut req: StatusApply,
+        hooks: &mut dyn BattleHooks,
+        out: &mut Vec<BattleEvent>,
+    ) -> Result<()> {
+        let original = req.status.clone();
+        let verdict = self.run_hook(out, "on_status_apply", |ctx| {
+            hooks.on_status_apply(ctx, &mut req)
+        })?;
+        match verdict {
+            HookResult::Cancel { reason } => out.push(BattleEvent::StatusBlocked {
+                target_side: req.target.side,
+                target_slot: req.target.slot,
+                status: original,
+                reason,
+            }),
+            HookResult::Continue if !req.status.is_empty() => {
+                out.push(BattleEvent::StatusApplied {
+                    target_side: req.target.side,
+                    target_slot: req.target.slot,
+                    status: req.status,
+                });
+            }
+            HookResult::Continue => {}
+        }
         Ok(())
     }
 
@@ -609,33 +988,70 @@ impl Battle {
         Ok(creature.current_hp)
     }
 
-    fn apply_switch(
+    /// `on_switch_out` → `on_switch_in` → switch → `Switched`. Hooks can cancel voluntary
+    /// switches (trapping); forced replacements after a faint always happen.
+    fn perform_switch(
         &mut self,
         side: SideId,
         slot: SlotIndex,
         to_party: PartyIndex,
         forced: bool,
+        hooks: &mut dyn BattleHooks,
+        out: &mut Vec<BattleEvent>,
     ) -> Result<()> {
-        let side_state = self.side_mut(side);
-        if usize::from(to_party) >= side_state.party.len() {
-            return Err(BattleError::InvalidAction(
-                "party index out of range".into(),
-            ));
+        self.validate_switch(side, to_party, forced)?;
+        let slot_ref = SlotRef::new(side, slot);
+        let mut sw_out = SwitchOut {
+            slot: slot_ref,
+            party_index: self.side(side).party_index(slot),
+            replacement: to_party,
+            forced,
+        };
+        let verdict = self.run_hook(out, "on_switch_out", |ctx| {
+            hooks.on_switch_out(ctx, &mut sw_out)
+        })?;
+        if let (HookResult::Cancel { reason }, false) = (verdict, forced) {
+            out.push(BattleEvent::SwitchCancelled { side, slot, reason });
+            return Ok(());
         }
-        if side_state.party[to_party as usize].fainted() {
+        let mut sw_in = SwitchIn {
+            slot: slot_ref,
+            party_index: to_party,
+            forced,
+        };
+        let verdict = self.run_hook(out, "on_switch_in", |ctx| {
+            hooks.on_switch_in(ctx, &mut sw_in)
+        })?;
+        if let (HookResult::Cancel { reason }, false) = (verdict, forced) {
+            out.push(BattleEvent::SwitchCancelled { side, slot, reason });
+            return Ok(());
+        }
+        let side_state = self.side_mut(side);
+        side_state.active[slot as usize] = Some(to_party);
+        side_state.slot_stages[slot as usize] = StatStages::zero();
+        side_state.slot_volatiles[slot as usize].clear();
+        out.push(BattleEvent::Switched {
+            side,
+            slot,
+            to_party,
+        });
+        Ok(())
+    }
+
+    fn validate_switch(&self, side: SideId, to_party: PartyIndex, forced: bool) -> Result<()> {
+        let side_state = self.side(side);
+        let target = side_state
+            .party
+            .get(usize::from(to_party))
+            .ok_or_else(|| BattleError::InvalidAction("party index out of range".into()))?;
+        if target.fainted() {
             return Err(BattleError::InvalidAction(
                 "cannot switch to fainted creature".into(),
             ));
         }
-        if !forced {
-            let active: std::collections::BTreeSet<_> =
-                side_state.active.iter().filter_map(|i| *i).collect();
-            if active.contains(&to_party) {
-                return Err(BattleError::InvalidAction("creature already active".into()));
-            }
+        if !forced && side_state.active.contains(&Some(to_party)) {
+            return Err(BattleError::InvalidAction("creature already active".into()));
         }
-        side_state.active[slot as usize] = Some(to_party);
-        side_state.slot_stages[slot as usize] = StatStages::zero();
         Ok(())
     }
 
@@ -672,8 +1088,12 @@ impl Battle {
         let mut result = BattleResult {
             outcome,
             turns: self.turn,
+            exp: 0,
+            money: 0,
         };
-        hooks.on_battle_end(&self.hook_ctx(out), &mut result)?;
+        self.run_hook(out, "on_battle_end", |ctx| {
+            hooks.on_battle_end(ctx, &mut result)
+        })?;
         out.push(BattleEvent::BattleEnded { outcome });
         self.result = Some(result);
         self.phase = BattlePhase::End;

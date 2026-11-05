@@ -470,6 +470,7 @@ name = "pkrs-runtime"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "pkrs-assets",
  "pkrs-audio",
  "pkrs-core",
  "pkrs-platform",
@@ -478,6 +479,7 @@ dependencies = [
  "pkrs-script",
  "pkrs-ui",
  "pkrs-world",
+ "thiserror",
  "tracing",
  "tracing-subscriber",
 ]

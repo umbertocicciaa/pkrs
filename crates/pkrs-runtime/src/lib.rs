@@ -6,6 +6,7 @@ mod fixed_step;
 mod game_host;
 mod main_loop;
 pub mod scene;
+pub mod scripts;
 mod state;
 mod tick;
 pub mod wiring;

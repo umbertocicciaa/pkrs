@@ -139,6 +139,7 @@ mod tests {
             src: pkrs_render::Rect::new(0.0, 0.0, 8.0, 8.0),
             dst: pkrs_render::Rect::new(0.0, 0.0, 8.0, 8.0),
             flip_x: false,
+            tint: pkrs_render::Color::WHITE,
             layer: pkrs_render::Layer::Entities,
         });
         renderer.end_frame();

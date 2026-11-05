@@ -66,6 +66,7 @@ impl AnimationDemoHost {
             src,
             dst: Rect::new(112.0, 72.0, 16.0, 16.0),
             flip_x: self.flip_x,
+            tint: pkrs_render::Color::WHITE,
             layer: Layer::Entities,
         });
         self.renderer.end_frame();

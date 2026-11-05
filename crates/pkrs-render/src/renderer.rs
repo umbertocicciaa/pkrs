@@ -174,6 +174,7 @@ mod tests {
             src: Rect::new(0.0, 0.0, 8.0, 8.0),
             dst: Rect::new(0.0, 0.0, 8.0, 8.0),
             flip_x: false,
+            tint: Color::WHITE,
             layer: Layer::Ui,
         });
         renderer.draw_sprite(SpriteDraw {
@@ -181,6 +182,7 @@ mod tests {
             src: Rect::new(0.0, 0.0, 8.0, 8.0),
             dst: Rect::new(0.0, 0.0, 8.0, 8.0),
             flip_x: false,
+            tint: Color::WHITE,
             layer: Layer::Ground,
         });
         renderer.end_frame();

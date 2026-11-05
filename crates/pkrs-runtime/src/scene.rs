@@ -8,8 +8,8 @@
 
 use pkrs_core::GridPos;
 use pkrs_render::{
-    CameraBounds, CameraController, CameraTarget, EntitySprite, Layer, Rect, Renderer, SpriteDraw,
-    TextureHandle, TileGrid, TileInstance, TileSheet, snap,
+    CameraBounds, CameraController, CameraTarget, Color, EntitySprite, Layer, Rect, Renderer,
+    SpriteDraw, TextureHandle, TileGrid, TileInstance, TileSheet, snap,
 };
 use pkrs_world::{Map, MapTileset, TileLayer, VisualLayerKind};
 
@@ -234,6 +234,7 @@ impl MapScene {
                         src: e.src,
                         dst: Rect::new(dst_x as f32, dst_y as f32, e.src.width, e.src.height),
                         flip_x: e.flip_x,
+                        tint: Color::WHITE,
                         layer: Layer::Entities,
                     },
                 }

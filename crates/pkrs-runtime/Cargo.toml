@@ -12,6 +12,7 @@ name = "pkrs-runtime"
 path = "src/main.rs"
 
 [dependencies]
+pkrs-core.workspace = true
 pkrs-platform.workspace = true
 pkrs-script.workspace = true
 pkrs-render.workspace = true

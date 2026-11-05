@@ -18,4 +18,22 @@ pub enum RenderError {
     /// Error from `pkrs-assets`.
     #[error(transparent)]
     Assets(#[from] pkrs_assets::AssetsError),
+    /// RON syntax or schema mismatch in an animation descriptor.
+    #[error("animation descriptor parse error: {detail}")]
+    AnimationParse {
+        /// Parser detail.
+        detail: String,
+    },
+    /// Semantically invalid animation descriptor content.
+    #[error("invalid animation descriptor: {detail}")]
+    AnimationInvalid {
+        /// Validation detail.
+        detail: String,
+    },
+    /// Named clip missing from a sheet.
+    #[error("animation clip not found: {name}")]
+    AnimationClipNotFound {
+        /// Requested clip id.
+        name: String,
+    },
 }

@@ -11,7 +11,7 @@ mod error;
 mod layer;
 mod rect;
 mod renderer;
-mod text;
+pub mod text;
 mod texture;
 mod tilemap;
 mod viewport;

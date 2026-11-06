@@ -1,9 +1,13 @@
 //! Game state stack (§4.1): modal screens, deferred transitions, opaque rendering.
 
+mod choice_state;
+mod dialogue;
 mod fade;
 mod stack;
 mod title;
 
+pub use choice_state::ChoiceState;
+pub use dialogue::DialogueState;
 pub use fade::FadeTransition;
 pub use stack::StateStack;
 pub use title::TitleState;

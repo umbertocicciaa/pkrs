@@ -20,6 +20,8 @@ pub use main_loop::{
     LoopExit, RuntimeLoopConfig, SimulationHost, StubSimulationHost, block_on_loop, run_loop,
 };
 pub use scene::{MapScene, PLAYER_ENTITY, SceneEntity, SceneError, WorldTileGrid};
-pub use state::{FadeTransition, GameState, StateStack, TitleState, Transition};
+pub use state::{
+    ChoiceState, DialogueState, FadeTransition, GameState, StateStack, TitleState, Transition,
+};
 pub use tick::{NullTickHooks, TickHooks, TickPhase, run_tick};
 pub use wiring::{AdapterSet, PlatformAdapter, RenderAdapter, RunMode};

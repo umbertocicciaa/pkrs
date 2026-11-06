@@ -4,7 +4,7 @@ mod bmfont;
 mod font;
 mod layout;
 mod ron_map;
-mod util;
+pub mod util;
 
 pub use bmfont::parse_bmfont_text;
 pub use font::BitmapFont;

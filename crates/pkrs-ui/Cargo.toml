@@ -12,5 +12,8 @@ pkrs-render.workspace = true
 pkrs-platform.workspace = true
 thiserror.workspace = true
 
+[dev-dependencies]
+pkrs-render = { path = "../pkrs-render" }
+
 [lints]
 workspace = true

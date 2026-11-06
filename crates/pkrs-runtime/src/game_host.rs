@@ -19,7 +19,7 @@ impl RuntimeHost {
     /// Stack with title state and the given renderer (headless or windowed).
     #[must_use]
     pub fn new(renderer: Renderer) -> Self {
-        let mut ctx = RuntimeCtx;
+        let mut ctx = RuntimeCtx::default();
         let mut stack = StateStack::new();
         stack.push(&mut ctx, Box::new(TitleState));
         Self {
@@ -43,6 +43,11 @@ impl RuntimeHost {
     #[must_use]
     pub fn stack(&self) -> &StateStack {
         &self.stack
+    }
+
+    /// Mutable renderer (e.g. tests building UI states).
+    pub fn renderer_mut(&mut self) -> &mut Renderer {
+        &mut self.renderer
     }
 
     /// Whether [`Transition::Quit`] was applied.
@@ -75,9 +80,13 @@ impl TickHooks for RuntimeHost {
 }
 
 impl SimulationHost for RuntimeHost {
-    fn poll_input(&mut self, _platform: &Platform) {}
+    fn poll_input(&mut self, platform: &Platform) {
+        self.ctx.input.poll(platform);
+    }
 
-    fn begin_tick(&mut self) {}
+    fn begin_tick(&mut self) {
+        self.ctx.input.begin_tick();
+    }
 
     fn simulation_tick(&mut self, dt: f64) {
         run_tick(self, dt);

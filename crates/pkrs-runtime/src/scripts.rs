@@ -1,7 +1,7 @@
 //! [`ScriptFiles`] over the assets VFS (§9.6, §13): scripts are read through the same
 //! [`Vfs`] as every other project file, never from the OS directly.
 
-use pkrs_assets::{Vfs, VfsPath};
+use pkrs_assets::{EntryKind, Vfs, VfsPath};
 use pkrs_script::{ScriptError, ScriptFiles};
 
 /// Serves project scripts (`scripts/…`, `plugins/<id>/…`) from a [`Vfs`].
@@ -33,6 +33,22 @@ impl<V: Vfs> ScriptFiles for VfsScriptFiles<V> {
     fn exists(&self, path: &str) -> bool {
         VfsPath::new(path).is_ok_and(|p| self.vfs.exists(&p))
     }
+
+    fn list_dirs(&self, dir: &str) -> Vec<String> {
+        let Ok(dir) = VfsPath::new(dir) else {
+            return Vec::new();
+        };
+        let mut names: Vec<String> = self
+            .vfs
+            .list(&dir)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|entry| entry.kind == EntryKind::Dir)
+            .filter_map(|entry| entry.path.file_name().map(str::to_owned))
+            .collect();
+        names.sort();
+        names
+    }
 }
 
 #[cfg(test)]
@@ -60,5 +76,19 @@ mod tests {
             files.read_script("../outside.lua"),
             Err(ScriptError::Load { .. })
         ));
+    }
+
+    #[test]
+    fn lists_plugin_folders() {
+        let vfs = MemoryVfs::new()
+            .with("plugins/zeta/plugin.toml", "")
+            .unwrap()
+            .with("plugins/alpha/init.lua", "")
+            .unwrap()
+            .with("plugins/notes.txt", "")
+            .unwrap();
+        let files = VfsScriptFiles::new(vfs);
+        assert_eq!(files.list_dirs("plugins"), ["alpha", "zeta"]);
+        assert!(files.list_dirs("missing").is_empty());
     }
 }

@@ -3,11 +3,12 @@
 use std::path::PathBuf;
 
 use anyhow::Context as _;
-use pkrs_core::GridPos;
+use pkrs_core::{GameRng, GridPos, Pcg64Rng};
 use pkrs_platform::{
     DisplaySettings, FixedPaths, MacroquadPlatform, NullPlatform, Platform, PlatformConfig,
 };
 use pkrs_render::{MacroquadRenderer, Renderer, RendererConfig};
+use pkrs_runtime::plugins::start_project_scripts;
 use pkrs_runtime::project::{Project, ProjectHost, ProjectOptions};
 use pkrs_runtime::wiring::{headless_platform, headless_renderer, window_config};
 use pkrs_runtime::{
@@ -65,6 +66,9 @@ fn main() -> anyhow::Result<()> {
 fn run_project_headless(opts: &ProjectOptions, config: RuntimeLoopConfig) -> anyhow::Result<()> {
     let project = Project::open(opts)
         .with_context(|| format!("cannot open project `{}`", opts.dir.display()))?;
+    // Kept alive for the whole run; the loop does not drive scripts yet.
+    let (_scripts, _plugins) =
+        start_project_scripts(&project, script_rng()).context("cannot load plugins")?;
     let (renderer, _log) = headless_renderer(project.display());
     let mut host = ProjectHost::new(&project, renderer).context("cannot start the project")?;
     let mut platform = Platform::new(
@@ -89,6 +93,13 @@ fn run_project_windowed(opts: &ProjectOptions, config: RuntimeLoopConfig) -> any
             Box::new(project.paths.clone()),
             PlatformConfig::default(),
         );
+        let _scripts = match start_project_scripts(&project, script_rng()) {
+            Ok((scripts, _plugins)) => scripts,
+            Err(err) => {
+                tracing::error!(%err, "cannot load plugins");
+                return;
+            }
+        };
         let renderer = Renderer::new(
             Box::new(MacroquadRenderer::new()),
             display,
@@ -105,6 +116,14 @@ fn run_project_windowed(opts: &ProjectOptions, config: RuntimeLoopConfig) -> any
         tracing::info!(?exit, "project run finished");
     });
     Ok(())
+}
+
+/// Engine RNG behind the scripts' `math.random`, seeded from the clock.
+fn script_rng() -> Box<dyn GameRng> {
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as u64);
+    Box::new(Pcg64Rng::from_seed(seed))
 }
 
 /// Runs with Null adapters only (§14.4 smoke test). Errors and early exits are fatal so CI

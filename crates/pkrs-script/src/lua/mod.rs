@@ -5,6 +5,7 @@
 
 pub(crate) mod battle;
 mod convert;
+mod plugin;
 mod sandbox;
 mod time;
 

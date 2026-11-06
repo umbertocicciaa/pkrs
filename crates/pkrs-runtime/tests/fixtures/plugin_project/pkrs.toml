@@ -1,0 +1,18 @@
+# Fixture for tests/plugins_headless.rs (docs/design.md §9.4): four enabled plugins whose
+# resolved load order is ui-kit, day-night, status-pack, resonance. `overdrive` is installed
+# but not enabled, so it is never loaded (and its conflict with resonance does not apply).
+
+[game]
+name = "Plugin Fixture"
+id   = "com.example.plugins"
+
+[engine]
+version = "0.0"
+api     = 1
+
+[start]
+map      = "start"
+position = [1, 1]
+
+[plugins]
+enabled = ["resonance", "day-night", "status-pack", "ui-kit"]

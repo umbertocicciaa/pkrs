@@ -99,6 +99,29 @@ impl ManifestError {
     }
 }
 
+/// Errors from loading or validating a plugin's `plugin.toml` (§9.4).
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum PluginManifestError {
+    /// The file is not valid TOML, or a value has the wrong type / an unknown key.
+    #[error("plugin.toml: {0}")]
+    Parse(ManifestIssue),
+
+    /// The file parsed but failed validation; all problems are reported at once.
+    #[error("plugin.toml is invalid:{}", IssueList(.0))]
+    Invalid(Vec<ManifestIssue>),
+}
+
+impl PluginManifestError {
+    /// All issues carried by this error.
+    pub fn issues(&self) -> &[ManifestIssue] {
+        match self {
+            Self::Parse(issue) => core::slice::from_ref(issue),
+            Self::Invalid(issues) => issues,
+        }
+    }
+}
+
 struct IssueList<'a>(&'a [ManifestIssue]);
 
 impl fmt::Display for IssueList<'_> {

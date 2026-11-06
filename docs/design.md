@@ -438,7 +438,7 @@ flowchart LR
 | `tiled` | `MapImporter` | `TiledImporter` | `pkrs-world::Map` model | `pkrs-world` |
 | `mlua` | `BattleHooks` (from `pkrs-battle`) + `ScriptHost` | `LuaScriptHost`, `LuaBattleHooks` | `ScriptHost` | `pkrs-script` |
 | `rand_pcg` | `GameRng` | `Pcg64Rng` | `ctx.rng` | `pkrs-core` |
-| `toml` | manifest codec in `pkrs-core` | `manifest::toml_codec` | `ProjectManifest` | `pkrs-core` |
+| `toml` | manifest codec in `pkrs-core` | `manifest::toml_codec` | `ProjectManifest`, `PluginManifest` | `pkrs-core` |
 | `semver` | — (engine newtypes) | `Version`, `VersionReq` | `ProjectManifest.engine`, plugin versions (§9.4) | `pkrs-core` |
 | `ron` | codec functions in `pkrs-data` / `pkrs-save`; sprite animation descriptors in `pkrs-render` | `RonCodec`; `parse_animation_descriptor` | typed structs, `pkrs_save::Value`; `SpriteSheetAnimation` | `pkrs-data`, `pkrs-save`, `pkrs-render` |
 | `texture_packer` | `AtlasPacker` | `TexturePackerAdapter` | `pkrs build` pipeline | `pkrs-cli` |
@@ -789,6 +789,7 @@ end
 
 - While a "blocking" script runs, the player is locked by default (`player.lock()` happens automatically for `interact` and triggers).
 - Several coroutines can run concurrently (e.g. background NPC wander scripts). They are stepped in deterministic order (creation order).
+- **Implementation notes (`pkrs_script::Scheduler`, M3).** Tasks are started with `Scheduler::spawn(host, owner, fn, args, TaskKind)` and stepped with `Scheduler::step(host)` once per tick in the scripts phase (§3.3 step 2); the step advances the scheduler tick first, then resumes ready tasks in creation order. A task yields a `WaitRequest` that becomes a `WaitCondition`: `Ticks { resume_at }` (`time.wait(n)`, also the global `wait(n)`; issued at tick `T` it resumes in the step reaching `T + n`, `n = 0` meaning the next tick, and returns the current tick), `DialogueClosed`, `PathFinished { npc }`, `BattleEnded(request)` or `External(value)` for any other yielded value. The engine satisfies the non-tick conditions with `Scheduler::signal(WakeSignal::…)` (or `Scheduler::wake(task, answer)`); woken tasks resume in the **next** step, never mid-phase. `time.ticks()` reads the scheduler tick (pushed to the host with `ScriptHost::set_tick`). `TaskKind::Interact` / `Trigger` tasks hold the player lock (`pkrs_world::PlayerLock`, one holder per task, so overlapping cutscenes cannot unlock each other; `PlayerLock::gate` filters the player's movement input) until they finish, fail or are cancelled (`Scheduler::cancel` / `cancel_all`); `Background` tasks never lock. A task that errors is aborted, its lock released and the error logged (target `script`); other tasks in the same step still run. The Lua-side yields for dialogue (`{ wait = "dialogue" }`) and paths (`{ wait = "path", npc }`) are what `ui.say`/`npc:move` will yield once the v0 API lands.
 
 ### 9.4 Plugins
 
@@ -838,6 +839,13 @@ conflicts   = ["overdrive"]
 - Handlers run in ascending `priority` (default `0`), then in plugin load order.
 - Each handler receives the current value and returns a modified value (or `nil` = unchanged). For cancellable hooks, returning `{ cancel = true, message = "…" }` stops the chain and cancels the action.
 - This is **deterministic**: the same plugins and order give the same results, which `pkrs check --plugins` can print as the resolved hook table.
+
+**Implementation notes (`pkrs_script::plugin`, M5).**
+- **Manifest model.** `plugin.toml` is parsed into `pkrs_core::PluginManifest` by the same two-stage `toml_codec` as `pkrs.toml` (unknown keys are errors; then every validation problem with its field path). Required: `[plugin]` `id`, `name`, `version` (full semver), `api` (≥ 1); `description`, `[dependencies]` (id → semver requirement) and `[load]` `after` / `conflicts` are optional. Ids are plugin ids, lists have no duplicates, a plugin cannot name itself, and a dependency cannot also be a conflict.
+- **Discovery.** `discover_plugins` lists `plugins/*` through `ScriptFiles::list_dirs` (plus every enabled id, for sources that cannot list) and reads `plugins/<folder>/plugin.toml`. The folder must be named after `[plugin].id`, because `require` and assets resolve against `plugins/<id>/`. Broken manifests only count when the plugin is enabled; otherwise they are logged and ignored.
+- **Validation.** `resolve_load_order` reports every problem at once: enabled but not installed, unsupported API level (the runtime's `SUPPORTED_API`, §9.7), dependency not installed, installed but not enabled, or version out of range, both plugins of a `conflicts` pair enabled (one error per pair), and cycles. `load.after` entries that are not enabled are ignored, since they are only hints. Cycles count `after` edges as well as dependencies.
+- **Order.** Kahn's topological sort with a `(position in enabled, id)` priority queue, so the same set always gives the same order.
+- **Running.** `load_plugins` calls `PluginHost::bind_plugin` (which installs `plugin` in the plugin's own `_ENV`; `plugin.define()` returns one table `{ id, name, version, api, description, save = {} }`) and then runs `plugins/<id>/init.lua` if it exists, since a plugin may ship data only. A failing `init.lua` is reported in `PluginLoadReport` and never aborts the others, but plugins that depend on it are skipped. `pkrs-runtime --project` resolves and loads plugins at start-up and treats an invalid plugin set as a start-up error. Persisting `P.save` (§12), content merging (step 4) and hook chains are separate work.
 
 ### 9.5 Example: a gimmick written entirely as a plugin — *Resonance*
 

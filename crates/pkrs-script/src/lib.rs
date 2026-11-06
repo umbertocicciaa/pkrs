@@ -13,10 +13,18 @@
 //! - **Lua AI:** [`LuaAi`] implements `pkrs_battle::AiScript` by calling a profile script's
 //!   `choose_action(view)` (loaded with [`LuaScriptHost::load_ai_script`]) or a plugin's
 //!   `ai.register_profile(id, fn)` function (§7.5).
+//! - **Scheduler:** [`Scheduler`] steps tasks once per tick in creation order, resuming each
+//!   when its [`WaitCondition`] is met (`time.wait(n)`, dialogue closed, path finished, battle
+//!   ended) and locking the player for interact/trigger scripts (§9.3).
+//! - **Plugins:** [`plugin`] discovers `plugins/*/plugin.toml`, validates the enabled set and
+//!   sorts it ([`plan_plugins`]), then runs each `init.lua` in its own `_ENV`
+//!   ([`load_plugins`]) with `plugin.define()` bound to the manifest (§9.4, §9.7).
 
 mod error;
 mod host;
 mod lua;
+pub mod plugin;
+mod scheduler;
 
 pub use error::{Result, ScriptError, split_location};
 pub use host::{
@@ -26,6 +34,11 @@ pub use host::{
 pub use lua::{
     DEFAULT_AI_MAX_FAILURES, DEFAULT_MAX_FAILURES, HOOK_NAMES, LuaAi, LuaBattleHooks, LuaScriptHost,
 };
+pub use plugin::{
+    PluginError, PluginErrors, PluginHost, PluginInitError, PluginLoadReport, PluginPlan,
+    load_plugins, plan_plugins,
+};
+pub use scheduler::{Scheduler, StepReport, TaskKind, TaskOutcome, WaitCondition, WakeSignal};
 
 #[cfg(test)]
 mod tests {

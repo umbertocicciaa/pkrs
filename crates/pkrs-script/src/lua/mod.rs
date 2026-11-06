@@ -6,6 +6,7 @@
 pub(crate) mod battle;
 mod convert;
 mod sandbox;
+mod time;
 
 pub use battle::{DEFAULT_MAX_FAILURES, HOOK_NAMES, LuaBattleHooks};
 
@@ -62,6 +63,7 @@ impl LuaScriptHost {
         lua.set_app_data(sandbox::Files(files));
         lua.set_app_data(sandbox::Rng(rng));
         lua.set_app_data(battle::Registry::default());
+        time::init(&lua);
 
         let budget = Rc::new(Budget {
             limit: limits.instruction_budget,
@@ -305,12 +307,24 @@ impl ScriptHost for LuaScriptHost {
         let answer = convert::to_lua(&self.lua, &answer).map_err(engine)?;
         self.run_task(task, thread, MultiValue::from_vec(vec![answer]))
     }
+
+    fn cancel_task(&mut self, task: TaskId) -> bool {
+        self.tasks.remove(&task).is_some()
+    }
+
+    fn set_tick(&mut self, tick: u64) {
+        time::set_tick(&self.lua, tick);
+    }
 }
 
-/// Reads what a yielded task waits for; `battle.start_*` yields a `{ wait = "battle" }` table.
+/// Reads what a yielded task waits for; `battle.start_*` yields a `{ wait = "battle" }` table,
+/// `time.wait` a `{ wait = "ticks" }` one.
 fn wait_request(value: &Value) -> Result<WaitRequest> {
     let conv = |e: mlua::Error| ScriptError::Conversion(e.to_string());
     if let Value::Table(t) = value {
+        if let Some(request) = time::parse_wait(t)? {
+            return Ok(request);
+        }
         if t.raw_get::<Option<String>>("wait")
             .map_err(conv)?
             .as_deref()

@@ -10,10 +10,14 @@
 //! - **Battle hooks:** [`LuaBattleHooks`] implements `pkrs_battle::BattleHooks` by dispatching
 //!   to handlers registered with `battle.on(...)`; `battle.start_wild` / `start_trainer` yield
 //!   a [`WaitRequest::Battle`] from a task ([`ScriptHost::start_task`]).
+//! - **Scheduler:** [`Scheduler`] steps tasks once per tick in creation order, resuming each
+//!   when its [`WaitCondition`] is met (`time.wait(n)`, dialogue closed, path finished, battle
+//!   ended) and locking the player for interact/trigger scripts (§9.3).
 
 mod error;
 mod host;
 mod lua;
+mod scheduler;
 
 pub use error::{Result, ScriptError, split_location};
 pub use host::{
@@ -21,6 +25,7 @@ pub use host::{
     TaskId, TaskStatus, WaitRequest, battle_result_value,
 };
 pub use lua::{DEFAULT_MAX_FAILURES, HOOK_NAMES, LuaBattleHooks, LuaScriptHost};
+pub use scheduler::{Scheduler, StepReport, TaskKind, TaskOutcome, WaitCondition, WakeSignal};
 
 #[cfg(test)]
 mod tests {

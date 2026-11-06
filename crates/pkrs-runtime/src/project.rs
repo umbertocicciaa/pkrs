@@ -217,7 +217,7 @@ enum WarpPhase {
         pending: Box<PendingWarp>,
     },
     /// Fade in after the map swap.
-    InFade { remaining: u32     },
+    InFade { remaining: u32 },
 }
 
 fn transition_ticks_out(transition: WarpTransition) -> u32 {

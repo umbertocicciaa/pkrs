@@ -14,6 +14,7 @@ use pkrs_platform::{
 use pkrs_render::{Rect, Renderer, TextureHandle};
 use pkrs_world::{
     GridStepper, Map, MapImporter, MovementConfig, StepEvent, TerrainRuleRegistry, TiledImporter,
+    Transition as WarpTransition, Warp,
 };
 
 use crate::main_loop::SimulationHost;
@@ -110,6 +111,7 @@ impl UserPaths for DevPaths {
 }
 
 /// A validated project and where play starts.
+#[derive(Clone)]
 pub struct Project {
     /// The manifest.
     pub manifest: ProjectManifest,
@@ -156,7 +158,12 @@ impl Project {
 
     /// Imports `maps/<map_id>.tmx`.
     pub fn load_map(&self) -> Result<Map, ProjectError> {
-        let path = VfsPath::new(&format!("maps/{}.tmx", self.map_id))?;
+        self.load_map_by_id(&self.map_id)
+    }
+
+    /// Imports `maps/<map_id>.tmx` by stem (§6.4 warps).
+    pub fn load_map_by_id(&self, map_id: &str) -> Result<Map, ProjectError> {
+        let path = VfsPath::new(&format!("maps/{map_id}.tmx"))?;
         Ok(TiledImporter::new().import(&self.vfs, &path)?)
     }
 
@@ -186,8 +193,52 @@ impl Project {
 /// Ticks per grid step when walking (§6.3 default walking speed).
 pub const STEP_TICKS: u32 = MovementConfig::WALK_STEP_TICKS;
 
+/// Half-transition length for [`WarpTransition::Fade`] at 60 Hz (§6.4).
+const WARP_FADE_TICKS: u32 = 20;
+
+/// Pending destination after the outgoing half of a warp (§6.4).
+#[derive(Clone, Debug)]
+struct PendingWarp {
+    to_map: String,
+    to: GridPos,
+    facing: Option<Direction>,
+    transition: WarpTransition,
+}
+
+/// Whether the player is in the middle of a warp transition.
+#[derive(Debug, Default)]
+enum WarpPhase {
+    /// Normal overworld play.
+    #[default]
+    None,
+    /// Fade out (or door buildup) before swapping maps.
+    OutFade {
+        remaining: u32,
+        pending: Box<PendingWarp>,
+    },
+    /// Fade in after the map swap.
+    InFade { remaining: u32     },
+}
+
+fn transition_ticks_out(transition: WarpTransition) -> u32 {
+    match transition {
+        WarpTransition::None => 0,
+        WarpTransition::Fade => WARP_FADE_TICKS,
+        WarpTransition::Door => WARP_FADE_TICKS * 2,
+    }
+}
+
+fn transition_ticks_in(transition: WarpTransition) -> u32 {
+    match transition {
+        WarpTransition::None => 0,
+        WarpTransition::Fade => WARP_FADE_TICKS,
+        WarpTransition::Door => WARP_FADE_TICKS * 2,
+    }
+}
+
 /// The overworld of a loaded project: map scene, player and input.
 pub struct ProjectHost {
+    project: Project,
     renderer: Renderer,
     scene: MapScene,
     input: Input,
@@ -195,21 +246,14 @@ pub struct ProjectHost {
     walker: GridStepper,
     player_sprite: (TextureHandle, Rect),
     ticks: u64,
+    warp_phase: WarpPhase,
 }
 
 impl ProjectHost {
     /// Loads the start map of `project` and uploads its textures through `renderer`.
     pub fn new(project: &Project, mut renderer: Renderer) -> Result<Self, ProjectError> {
         let map = project.load_map()?;
-        let mut textures = Vec::with_capacity(map.tilesets.len());
-        for ts in &map.tilesets {
-            let image = ts
-                .image
-                .as_ref()
-                .ok_or_else(|| ProjectError::TilesetImage(ts.name.clone()))?;
-            let bytes = project.vfs.read(&VfsPath::new(&image.path)?)?;
-            textures.push(renderer.load_texture(&bytes)?.0);
-        }
+        let textures = upload_map_textures(project, &mut renderer, &map)?;
         let (start, facing) = project.start_tile(&map);
         if !map.grid.in_bounds(start) {
             return Err(ProjectError::StartOutOfBounds {
@@ -221,7 +265,7 @@ impl ProjectHost {
         }
         let (tw, th) = (map.tile_width, map.tile_height);
         let player_sprite = load_player_sprite(project, &mut renderer, tw, th)?;
-        tracing::info!(map = %map.id, start = %start, "map loaded");
+        tracing::info!(map = %map.id, start = %start, "map_enter");
 
         let mut scene = MapScene::new(map, &textures)?;
         scene.place_entity(
@@ -234,6 +278,7 @@ impl ProjectHost {
         let input = Input::from_manifest(InputFacadeConfig::default(), &project.manifest.input)
             .unwrap_or_else(|_| Input::new(InputFacadeConfig::default()));
         Ok(Self {
+            project: project.clone(),
             renderer,
             scene,
             input,
@@ -241,6 +286,7 @@ impl ProjectHost {
             walker: GridStepper::new(start, facing),
             player_sprite,
             ticks: 0,
+            warp_phase: WarpPhase::None,
         })
     }
 
@@ -278,6 +324,87 @@ impl ProjectHost {
         .find(|(a, _)| self.input.down(Action::Builtin(*a)))
         .map(|(_, d)| d)
     }
+
+    fn begin_warp(&mut self, warp: &Warp) {
+        let from_map = self.scene.map().id.clone();
+        let pending = PendingWarp {
+            to_map: warp.to_map.clone(),
+            to: warp.to,
+            facing: warp.facing,
+            transition: warp.transition,
+        };
+        tracing::info!(%from_map, to_map = %pending.to_map, pos = %pending.to, ?warp.transition, "map_exit (warp)");
+        let out = transition_ticks_out(warp.transition);
+        if out == 0 {
+            if self.apply_warp(&pending).is_ok() {
+                let inn = transition_ticks_in(pending.transition);
+                self.warp_phase = if inn == 0 {
+                    WarpPhase::None
+                } else {
+                    WarpPhase::InFade { remaining: inn }
+                };
+            }
+        } else {
+            self.warp_phase = WarpPhase::OutFade {
+                remaining: out,
+                pending: Box::new(pending),
+            };
+        }
+    }
+
+    fn apply_warp(&mut self, pending: &PendingWarp) -> Result<(), ProjectError> {
+        let facing = pending.facing.unwrap_or_else(|| self.walker.facing());
+        let map = self.project.load_map_by_id(&pending.to_map)?;
+        let textures = upload_map_textures(&self.project, &mut self.renderer, &map)?;
+        if !map.grid.in_bounds(pending.to) {
+            return Err(ProjectError::StartOutOfBounds {
+                map: map.id.clone(),
+                pos: pending.to,
+                width: map.width,
+                height: map.height,
+            });
+        }
+        let mut scene = MapScene::new(map, &textures)?;
+        scene.place_entity(
+            PLAYER_ENTITY,
+            pending.to,
+            self.player_sprite.0,
+            self.player_sprite.1,
+            false,
+        );
+        self.scene = scene;
+        self.walker = GridStepper::new(pending.to, facing);
+        tracing::info!(map = %self.scene.map().id, pos = %pending.to, "map_enter (warp)");
+        Ok(())
+    }
+
+    fn sync_player_sprite(&mut self) {
+        let (tx, ty) = self.walker.tile_position();
+        let (tw, th) = (self.scene.map().tile_width, self.scene.map().tile_height);
+        let (texture, src) = self.player_sprite;
+        if let Some(player) = self.scene.entity_mut(PLAYER_ENTITY) {
+            player.pos.set(tx * tw as f32, ty * th as f32);
+            player.texture = texture;
+            player.src = src;
+        }
+    }
+}
+
+fn upload_map_textures(
+    project: &Project,
+    renderer: &mut Renderer,
+    map: &Map,
+) -> Result<Vec<TextureHandle>, ProjectError> {
+    let mut textures = Vec::with_capacity(map.tilesets.len());
+    for ts in &map.tilesets {
+        let image = ts
+            .image
+            .as_ref()
+            .ok_or_else(|| ProjectError::TilesetImage(ts.name.clone()))?;
+        let bytes = project.vfs.read(&VfsPath::new(&image.path)?)?;
+        textures.push(renderer.load_texture(&bytes)?.0);
+    }
+    Ok(textures)
 }
 
 fn load_player_sprite(
@@ -312,23 +439,53 @@ impl SimulationHost for ProjectHost {
 
     fn simulation_tick(&mut self, _dt: f64) {
         self.ticks += 1;
+
+        match &mut self.warp_phase {
+            WarpPhase::OutFade { remaining, pending } => {
+                *remaining = remaining.saturating_sub(1);
+                if *remaining == 0 {
+                    let pending = (**pending).clone();
+                    if let Err(e) = self.apply_warp(&pending) {
+                        tracing::error!(%e, "warp failed");
+                        self.warp_phase = WarpPhase::None;
+                    } else {
+                        let inn = transition_ticks_in(pending.transition);
+                        self.warp_phase = if inn == 0 {
+                            WarpPhase::None
+                        } else {
+                            WarpPhase::InFade { remaining: inn }
+                        };
+                    }
+                }
+                self.scene.tick();
+                return;
+            }
+            WarpPhase::InFade { remaining } => {
+                *remaining = remaining.saturating_sub(1);
+                if *remaining == 0 {
+                    self.warp_phase = WarpPhase::None;
+                }
+                self.scene.tick();
+                return;
+            }
+            WarpPhase::None => {}
+        }
+
         let dir = self.held_direction();
         let running = self.input.down(Action::Builtin(BuiltinAction::Run));
         self.walker.set_running(running);
         let grid = &self.scene.map().grid;
         for event in self.walker.tick(dir, grid, &(), &self.terrain_rules) {
-            if matches!(event, StepEvent::StepCompleted { .. }) {
-                tracing::trace!(pos = %self.walker.pos(), "step");
+            if let StepEvent::StepCompleted { pos, .. } = event {
+                tracing::trace!(%pos, "step");
+                let warp = self.scene.map().warp_at(pos).cloned();
+                if let Some(warp) = warp {
+                    self.begin_warp(&warp);
+                    break;
+                }
             }
         }
-        let (tx, ty) = self.walker.tile_position();
-        let (tw, th) = (self.scene.map().tile_width, self.scene.map().tile_height);
-        let (texture, src) = self.player_sprite;
-        if let Some(player) = self.scene.entity_mut(PLAYER_ENTITY) {
-            player.pos.set(tx * tw as f32, ty * th as f32);
-            player.texture = texture;
-            player.src = src;
-        }
+        self.sync_player_sprite();
         self.scene.tick();
     }
 

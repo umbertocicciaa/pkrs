@@ -43,7 +43,7 @@ fn new_project_runs_headless_for_60_ticks() {
     let out = runtime(&dir, &[]);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stderr}");
-    assert!(stderr.contains("map loaded"), "{stderr}");
+    assert!(stderr.contains("map_enter"), "{stderr}");
     assert!(stderr.contains("TickLimit"), "{stderr}");
 
     let warped = runtime(&dir, &["--map", "start", "--warp", "3,3"]);
@@ -100,6 +100,23 @@ fn hold(host: &mut ProjectHost, dir: &Path, key: Key, steps: u32) {
     );
 }
 
+fn run_idle_ticks(host: &mut ProjectHost, dir: &Path, ticks: u32) {
+    let frames = std::iter::repeat_n(NullFrame::idle(), ticks as usize);
+    let mut platform = Platform::new(
+        Box::new(NullPlatform::new().with_frames(frames)),
+        Box::new(FixedPaths::under(dir.join("saves"))),
+        PlatformConfig::default(),
+    );
+    block_on_loop(
+        &mut platform,
+        host,
+        &RuntimeLoopConfig {
+            max_ticks: Some(u64::from(ticks)),
+            ..RuntimeLoopConfig::default()
+        },
+    );
+}
+
 #[test]
 fn the_template_map_is_walkable_with_collision() {
     let dir = new_project("walk");
@@ -122,6 +139,32 @@ fn the_template_map_is_walkable_with_collision() {
         GridPos::new(7, 1),
         "blocked by the tree border"
     );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn stepping_onto_warp_changes_map_after_fade() {
+    let dir = new_project("warp-step");
+    let mut host = host(&dir);
+    assert_eq!(host.scene().map().id, "start");
+
+    // Template warp tile is at (6, 10); start is (5, 7). Walk Down three tiles while holding.
+    let c = MovementConfig::default();
+    let steps: u32 = 3;
+    let walk_ticks = c.tap_turn_ticks + (steps - 1) * c.walk_step_ticks;
+    hold(&mut host, &dir, Key::Down, steps);
+    assert_eq!(host.walker().pos(), GridPos::new(5, 10));
+
+    // Fade out + fade in (20 ticks each, §6.4 default in ProjectHost).
+    run_idle_ticks(&mut host, &dir, 40);
+    assert_eq!(
+        host.scene().map().id,
+        "dest",
+        "warp should load maps/dest.tmx"
+    );
+    assert_eq!(host.walker().pos(), GridPos::new(5, 7));
+    assert_eq!(walk_ticks, 40, "sanity: held walk tick count for 3 steps");
+
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

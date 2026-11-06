@@ -192,6 +192,15 @@ impl Map {
         self.layers.iter().filter(move |l| l.kind == kind)
     }
 
+    /// Warp whose [`TileRect`](TileRect) contains `pos`, if any (§6.4).
+    #[must_use]
+    pub fn warp_at(&self, pos: GridPos) -> Option<&Warp> {
+        self.objects.iter().find_map(|o| match &o.kind {
+            ObjectKind::Warp(w) if o.rect.contains(pos) => Some(w),
+            _ => None,
+        })
+    }
+
     /// Object with Tiled id `id`.
     #[must_use]
     pub fn object(&self, id: u32) -> Option<&MapObject> {
@@ -225,6 +234,35 @@ impl Map {
 mod tests {
     use super::*;
 
+    fn minimal_map(w: u32, h: u32) -> Map {
+        let full = |id| vec![Some(TileRef::new(0, id)); (w * h) as usize];
+        Map {
+            id: "m".into(),
+            width: w,
+            height: h,
+            tile_width: 16,
+            tile_height: 16,
+            properties: Properties::new(),
+            tilesets: vec![MapTileset {
+                name: "t".into(),
+                tile_width: 16,
+                tile_height: 16,
+                columns: 4,
+                tile_count: 16,
+                spacing: 0,
+                margin: 0,
+                image: None,
+            }],
+            layers: vec![
+                TileLayer::new("ground", VisualLayerKind::Ground, w, h, full(0)).unwrap(),
+                TileLayer::new("overhead", VisualLayerKind::Overhead, w, h, full(1)).unwrap(),
+            ],
+            grid: LogicalGrid::new(w, h),
+            objects: vec![],
+            encounters: Vec::<EncounterZone>::new(),
+        }
+    }
+
     #[test]
     fn tile_layer_rejects_wrong_length() {
         assert!(TileLayer::new("ground", VisualLayerKind::Ground, 2, 2, vec![None; 3]).is_none());
@@ -239,6 +277,25 @@ mod tests {
         assert_eq!(layer.tile(1, 0), Some(TileRef::new(0, 5)));
         assert_eq!(layer.tile(0, 0), None);
         assert_eq!(layer.tile(2, 0), None);
+    }
+
+    #[test]
+    fn warp_at_finds_covering_warp() {
+        let mut m = minimal_map(10, 10);
+        m.objects.push(MapObject {
+            id: 2,
+            name: "door".into(),
+            rect: TileRect::new(6, 10, 1, 1),
+            kind: ObjectKind::Warp(Warp {
+                to_map: "dest".into(),
+                to: GridPos::new(5, 7),
+                facing: None,
+                transition: Transition::Fade,
+            }),
+            properties: Properties::new(),
+        });
+        assert!(m.warp_at(GridPos::new(6, 10)).is_some());
+        assert!(m.warp_at(GridPos::new(5, 10)).is_none());
     }
 
     #[test]

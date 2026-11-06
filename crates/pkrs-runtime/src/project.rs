@@ -12,7 +12,9 @@ use pkrs_platform::{
     Action, BuiltinAction, DisplaySettings, Input, InputFacadeConfig, Platform, UserPaths,
 };
 use pkrs_render::{Rect, Renderer, TextureHandle};
-use pkrs_world::{GridStepper, Map, MapImporter, MovementConfig, StepEvent, TiledImporter};
+use pkrs_world::{
+    GridStepper, Map, MapImporter, MovementConfig, StepEvent, TerrainRuleRegistry, TiledImporter,
+};
 
 use crate::main_loop::SimulationHost;
 use crate::scene::{MapScene, PLAYER_ENTITY};
@@ -184,15 +186,13 @@ impl Project {
 /// Ticks per grid step when walking (§6.3 default walking speed).
 pub const STEP_TICKS: u32 = MovementConfig::WALK_STEP_TICKS;
 
-/// Grid movement with facing, tap-turn and terrain rules (§6.3).
-pub type Walker = GridStepper;
-
 /// The overworld of a loaded project: map scene, player and input.
 pub struct ProjectHost {
     renderer: Renderer,
     scene: MapScene,
     input: Input,
-    walker: Walker,
+    terrain_rules: TerrainRuleRegistry,
+    walker: GridStepper,
     player_sprite: (TextureHandle, Rect),
     ticks: u64,
 }
@@ -237,6 +237,7 @@ impl ProjectHost {
             renderer,
             scene,
             input,
+            terrain_rules: TerrainRuleRegistry::new(),
             walker: GridStepper::new(start, facing),
             player_sprite,
             ticks: 0,
@@ -251,8 +252,13 @@ impl ProjectHost {
 
     /// The player walker.
     #[must_use]
-    pub fn walker(&self) -> &Walker {
+    pub fn walker(&self) -> &GridStepper {
         &self.walker
+    }
+
+    /// Shared custom-terrain rule registry (§6.3).
+    pub fn terrain_rules_mut(&mut self) -> &mut TerrainRuleRegistry {
+        &mut self.terrain_rules
     }
 
     /// Simulation ticks run so far.
@@ -310,7 +316,7 @@ impl SimulationHost for ProjectHost {
         let running = self.input.down(Action::Builtin(BuiltinAction::Run));
         self.walker.set_running(running);
         let grid = &self.scene.map().grid;
-        for event in self.walker.tick(dir, grid, &()) {
+        for event in self.walker.tick(dir, grid, &(), &self.terrain_rules) {
             if matches!(event, StepEvent::StepCompleted { .. }) {
                 tracing::trace!(pos = %self.walker.pos(), "step");
             }
@@ -337,34 +343,35 @@ impl SimulationHost for ProjectHost {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pkrs_world::{GridStepper, LogicalGrid, MovementConfig};
+    use pkrs_world::{GridStepper, LogicalGrid, MovementConfig, TerrainRuleRegistry};
 
     #[test]
     fn walker_steps_over_sixteen_ticks_and_respects_collision() {
         let mut grid = LogicalGrid::new(3, 1);
         grid.cell_mut(GridPos::new(2, 0)).unwrap().solid = true;
+        let rules = TerrainRuleRegistry::new();
         let cfg = MovementConfig {
             tap_turn_ticks: 1,
             walk_step_ticks: STEP_TICKS,
             ..MovementConfig::default()
         };
         let mut w = GridStepper::with_config(GridPos::new(0, 0), Direction::Down, cfg);
-        w.tick(Some(Direction::Right), &grid, &());
-        w.tick(Some(Direction::Right), &grid, &());
+        w.tick(Some(Direction::Right), &grid, &(), &rules);
+        w.tick(Some(Direction::Right), &grid, &(), &rules);
         assert_eq!(w.pos(), GridPos::new(1, 0));
         assert_eq!(w.facing(), Direction::Right);
         assert!(!w.is_idle());
         for _ in 0..STEP_TICKS - 1 {
-            w.tick(None, &grid, &());
+            w.tick(None, &grid, &(), &rules);
         }
         assert!(w.is_idle());
         assert_eq!(w.tile_position(), (1.0, 0.0));
-        w.tick(Some(Direction::Right), &grid, &());
+        w.tick(Some(Direction::Right), &grid, &(), &rules);
         assert_eq!(w.pos(), GridPos::new(1, 0));
-        w.tick(Some(Direction::Up), &grid, &());
-        w.tick(Some(Direction::Up), &grid, &());
+        w.tick(Some(Direction::Up), &grid, &(), &rules);
+        w.tick(Some(Direction::Up), &grid, &(), &rules);
         while !w.is_idle() {
-            w.tick(None, &grid, &());
+            w.tick(None, &grid, &(), &rules);
         }
         assert_eq!((w.pos(), w.facing()), (GridPos::new(1, 0), Direction::Up));
     }
@@ -372,16 +379,17 @@ mod tests {
     #[test]
     fn walker_interpolates_mid_step() {
         let grid = LogicalGrid::new(2, 1);
+        let rules = TerrainRuleRegistry::new();
         let cfg = MovementConfig {
             tap_turn_ticks: 1,
             walk_step_ticks: STEP_TICKS,
             ..MovementConfig::default()
         };
         let mut w = GridStepper::with_config(GridPos::new(0, 0), Direction::Down, cfg);
-        w.tick(Some(Direction::Right), &grid, &());
-        w.tick(Some(Direction::Right), &grid, &());
+        w.tick(Some(Direction::Right), &grid, &(), &rules);
+        w.tick(Some(Direction::Right), &grid, &(), &rules);
         for _ in 0..7 {
-            w.tick(None, &grid, &());
+            w.tick(None, &grid, &(), &rules);
         }
         assert_eq!(w.tile_position(), (0.5, 0.0));
     }

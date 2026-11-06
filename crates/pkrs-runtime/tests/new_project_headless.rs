@@ -12,7 +12,7 @@ use pkrs_platform::{
     FixedPaths, Key, NullFrame, NullPlatform, Platform, PlatformConfig, UserPaths,
 };
 use pkrs_render::{NullRenderer, Renderer, RendererConfig};
-use pkrs_runtime::project::{Project, ProjectHost, ProjectOptions, STEP_TICKS};
+use pkrs_runtime::project::{Project, ProjectHost, ProjectOptions};
 use pkrs_runtime::{RuntimeLoopConfig, block_on_loop};
 use pkrs_world::MovementConfig;
 
@@ -74,12 +74,16 @@ fn host(dir: &Path) -> ProjectHost {
     ProjectHost::new(&project, renderer).unwrap()
 }
 
-fn ticks_per_step() -> u32 {
-    MovementConfig::default().tap_turn_ticks + STEP_TICKS
+fn ticks_for_held_walk_steps(steps: u32) -> u32 {
+    let c = MovementConfig::default();
+    if steps == 0 {
+        return 0;
+    }
+    c.tap_turn_ticks + steps * c.walk_step_ticks
 }
 
 fn hold(host: &mut ProjectHost, dir: &Path, key: Key, steps: u32) {
-    let total = ticks_per_step() * steps;
+    let total = ticks_for_held_walk_steps(steps);
     let frames = std::iter::repeat_n(NullFrame::with_keys([key]), total as usize);
     let mut platform = Platform::new(
         Box::new(NullPlatform::new().with_frames(frames)),

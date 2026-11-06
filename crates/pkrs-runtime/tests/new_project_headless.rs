@@ -12,8 +12,9 @@ use pkrs_platform::{
     FixedPaths, Key, NullFrame, NullPlatform, Platform, PlatformConfig, UserPaths,
 };
 use pkrs_render::{NullRenderer, Renderer, RendererConfig};
-use pkrs_runtime::project::{Project, ProjectHost, ProjectOptions, STEP_TICKS};
+use pkrs_runtime::project::{Project, ProjectHost, ProjectOptions};
 use pkrs_runtime::{RuntimeLoopConfig, block_on_loop};
+use pkrs_world::MovementConfig;
 
 fn new_project(tag: &str) -> PathBuf {
     let nanos = std::time::SystemTime::now()
@@ -73,8 +74,17 @@ fn host(dir: &Path) -> ProjectHost {
     ProjectHost::new(&project, renderer).unwrap()
 }
 
+fn ticks_for_held_walk_steps(steps: u32) -> u32 {
+    let c = MovementConfig::default();
+    if steps == 0 {
+        return 0;
+    }
+    c.tap_turn_ticks + steps * c.walk_step_ticks
+}
+
 fn hold(host: &mut ProjectHost, dir: &Path, key: Key, steps: u32) {
-    let frames = std::iter::repeat_n(NullFrame::with_keys([key]), (STEP_TICKS * steps) as usize);
+    let total = ticks_for_held_walk_steps(steps);
+    let frames = std::iter::repeat_n(NullFrame::with_keys([key]), total as usize);
     let mut platform = Platform::new(
         Box::new(NullPlatform::new().with_frames(frames)),
         Box::new(FixedPaths::under(dir.join("saves"))),
@@ -84,7 +94,7 @@ fn hold(host: &mut ProjectHost, dir: &Path, key: Key, steps: u32) {
         &mut platform,
         host,
         &RuntimeLoopConfig {
-            max_ticks: Some(u64::from(STEP_TICKS * steps)),
+            max_ticks: Some(u64::from(total)),
             ..RuntimeLoopConfig::default()
         },
     );
@@ -95,20 +105,20 @@ fn the_template_map_is_walkable_with_collision() {
     let dir = new_project("walk");
     let mut host = host(&dir);
     assert_eq!(
-        host.walker().pos,
+        host.walker().pos(),
         GridPos::new(5, 7),
         "start.position from pkrs.toml"
     );
     assert_eq!(host.scene().map().id, "start");
 
     hold(&mut host, &dir, Key::Right, 2);
-    assert_eq!(host.walker().pos, GridPos::new(7, 7));
-    assert_eq!(host.walker().facing, Direction::Right);
+    assert_eq!(host.walker().pos(), GridPos::new(7, 7));
+    assert_eq!(host.walker().facing(), Direction::Right);
 
     // Walking up eventually hits the solid tree border, so the player stops on row 1.
     hold(&mut host, &dir, Key::Up, 10);
     assert_eq!(
-        host.walker().pos,
+        host.walker().pos(),
         GridPos::new(7, 1),
         "blocked by the tree border"
     );

@@ -229,6 +229,23 @@ impl TrainerAi {
         &self.items
     }
 
+    /// `true` when the profile lets the trainer use items.
+    #[must_use]
+    pub fn allows_items(&self) -> bool {
+        self.allow_items
+    }
+
+    /// Removes the first `id` from the unused items; `false` if there is none left.
+    pub(crate) fn take_item(&mut self, id: &str) -> bool {
+        match self.items.iter().position(|i| i == id) {
+            Some(i) => {
+                self.items.remove(i);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Index of the best of `scores` (higher is better); ties broken on the AI stream.
     fn pick_best(&mut self, scores: &[i64]) -> Option<usize> {
         let best = *scores.iter().max()?;

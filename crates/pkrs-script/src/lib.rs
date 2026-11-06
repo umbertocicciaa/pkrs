@@ -10,6 +10,9 @@
 //! - **Battle hooks:** [`LuaBattleHooks`] implements `pkrs_battle::BattleHooks` by dispatching
 //!   to handlers registered with `battle.on(...)`; `battle.start_wild` / `start_trainer` yield
 //!   a [`WaitRequest::Battle`] from a task ([`ScriptHost::start_task`]).
+//! - **Lua AI:** [`LuaAi`] implements `pkrs_battle::AiScript` by calling a profile script's
+//!   `choose_action(view)` (loaded with [`LuaScriptHost::load_ai_script`]) or a plugin's
+//!   `ai.register_profile(id, fn)` function (§7.5).
 
 mod error;
 mod host;
@@ -20,7 +23,9 @@ pub use host::{
     BattleRequest, MemoryScripts, ScriptFiles, ScriptHost, ScriptLimits, ScriptOwner, ScriptValue,
     TaskId, TaskStatus, WaitRequest, battle_result_value,
 };
-pub use lua::{DEFAULT_MAX_FAILURES, HOOK_NAMES, LuaBattleHooks, LuaScriptHost};
+pub use lua::{
+    DEFAULT_AI_MAX_FAILURES, DEFAULT_MAX_FAILURES, HOOK_NAMES, LuaAi, LuaBattleHooks, LuaScriptHost,
+};
 
 #[cfg(test)]
 mod tests {

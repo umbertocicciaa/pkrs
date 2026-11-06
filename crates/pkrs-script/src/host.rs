@@ -226,6 +226,15 @@ pub enum BattleRequest {
 pub enum WaitRequest {
     /// A battle; resume with [`battle_result_value`].
     Battle(BattleRequest),
+    /// `time.wait(n)`: resume after `n` simulation ticks (`0` = next tick, §3.1).
+    Ticks(u32),
+    /// Until the open dialogue box closes (`ui.say`, `ui.choose`, …).
+    DialogueClosed,
+    /// Until the NPC `npc` finishes its scripted path (`npc:move`).
+    PathFinished {
+        /// NPC id.
+        npc: String,
+    },
     /// Any other wait condition (dialogue closed, N ticks, …), as yielded by the script.
     Other(ScriptValue),
 }
@@ -308,6 +317,15 @@ pub trait ScriptHost {
 
     /// Resumes a waiting task with `answer` (e.g. [`battle_result_value`]).
     fn resume_task(&mut self, task: TaskId, answer: ScriptValue) -> Result<TaskStatus>;
+
+    /// Drops a waiting task without resuming it. Returns `false` if `task` was not waiting.
+    fn cancel_task(&mut self, _task: TaskId) -> bool {
+        false
+    }
+
+    /// Tells scripts the current simulation tick (`time.ticks()`); the
+    /// [`Scheduler`](crate::Scheduler) calls this before running tasks.
+    fn set_tick(&mut self, _tick: u64) {}
 }
 
 #[cfg(test)]

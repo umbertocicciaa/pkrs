@@ -26,8 +26,8 @@ pub use map::{
     VisualLayerKind, Warp,
 };
 pub use movement::{
-    FieldState, GridStepper, MovementConfig, Occupancy, StepEvent, TerrainRuleFn,
-    TerrainRuleRegistry, TerrainStepVerdict,
+    FieldState, GridStepper, LockHolder, MovementConfig, Occupancy, PlayerLock, StepEvent,
+    TerrainRuleFn, TerrainRuleRegistry, TerrainStepVerdict,
 };
 
 #[cfg(test)]

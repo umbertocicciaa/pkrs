@@ -1,51 +1,56 @@
 //! Choice menu overlay (§4.1, §5.5).
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use pkrs_platform::{Action, BuiltinAction};
-use pkrs_render::BitmapFont;
-use pkrs_render::{Color, Layer, Rect, TextStyle};
-use pkrs_ui::{ChoiceOption, ChoiceSession, WindowSkin};
+use pkrs_render::{Color, Layer, Rect, Renderer, TextStyle};
+use pkrs_ui::{ChoiceOption, ChoicePollOutcome, ChoiceSession};
 
 use super::{GameState, Transition};
 use crate::ctx::RuntimeCtx;
+use crate::ui_theme::UiTheme;
 
-const FONT_RON: &str = include_str!("../../../pkrs-render/tests/fixtures/minimal.ron");
+#[inline]
+fn scale_f(scale: u32) -> f32 {
+    scale.max(1) as f32
+}
+
+#[inline]
+fn u32_px(v: u32) -> f32 {
+    v as f32
+}
 
 /// Non-opaque choice list over the scene.
+///
+/// `result` is set before [`Transition::Pop`]: `None` = not finished, `Some(Some(i))` picked,
+/// `Some(None)` cancelled.
 pub struct ChoiceState {
     session: ChoiceSession,
-    skin: WindowSkin,
+    theme: UiTheme,
     panel: Rect,
-    font: BitmapFont,
-    font_tex: pkrs_render::TextureHandle,
+    result: Rc<Cell<Option<Option<usize>>>>,
 }
 
 impl ChoiceState {
-    /// Builds skin and font resources on `renderer`.
+    /// Overlays `options`; writes pick or cancel into `result` before popping.
     pub fn new(
-        renderer: &mut pkrs_render::Renderer,
+        theme: UiTheme,
+        renderer: &Renderer,
         options: Vec<ChoiceOption>,
+        result: Rc<Cell<Option<Option<usize>>>>,
     ) -> Result<Self, pkrs_ui::UiError> {
-        let tw = 32u32;
-        let th = 32u32;
-        let skin_px: Vec<u8> =
-            std::iter::repeat_n([200u8, 200u8, 220u8, 255u8], (tw * th) as usize)
-                .flatten()
-                .collect();
-        let tex = renderer.create_texture(tw, th, &skin_px)?;
-        let skin = WindowSkin::new(tex, tw, th, pkrs_ui::NineSliceSpec::default())?;
-        let font: BitmapFont = pkrs_render::parse_glyph_map_ron(FONT_RON)?;
-        let fw = font.atlas_width;
-        let fh = font.atlas_height;
-        let font_tex = renderer.create_texture(fw, fh, &vec![0u8; (fw * fh * 4) as usize])?;
         let (vw, vh) = renderer.view_size();
-        let margin = 8.0;
-        let panel = Rect::new(margin, margin, vw as f32 - 2.0 * margin, vh as f32 * 0.22);
+        let margin = 8.0f32;
+        let wf = vw as f32;
+        let vf = vh as f32;
+        let panel_h = (vf * 0.22).floor();
+        let panel = Rect::new(margin, margin, wf - 2.0 * margin, panel_h);
         Ok(Self {
-            session: ChoiceSession::new(options),
-            skin,
+            session: ChoiceSession::new(options)?,
+            theme,
             panel,
-            font,
-            font_tex,
+            result,
         })
     }
 }
@@ -60,30 +65,37 @@ impl GameState for ChoiceState {
     }
 
     fn update(&mut self, ctx: &mut RuntimeCtx) -> Transition {
-        if let Some(_ix) = self.session.poll(&ctx.input) {
-            let a = Action::Builtin(BuiltinAction::Confirm);
-            ctx.input.consume(a);
-            Transition::Pop
-        } else {
-            Transition::None
+        match self.session.poll(&ctx.input) {
+            Some(ChoicePollOutcome::Picked(ix)) => {
+                let a = Action::Builtin(BuiltinAction::Confirm);
+                ctx.input.consume(a);
+                self.result.set(Some(Some(ix)));
+                Transition::Pop
+            }
+            Some(ChoicePollOutcome::Cancelled) => {
+                let a = Action::Builtin(BuiltinAction::Cancel);
+                ctx.input.consume(a);
+                self.result.set(Some(None));
+                Transition::Pop
+            }
+            None => Transition::None,
         }
     }
 
-    fn render(&self, renderer: &mut pkrs_render::Renderer, _alpha: f32) {
+    fn render(&self, renderer: &mut Renderer, _alpha: f32) {
         let tint = Color {
             r: 255,
             g: 255,
             b: 255,
             a: 170,
         };
-        self.skin.draw(renderer, self.panel, tint);
+        self.theme.skin.draw(renderer, self.panel, tint);
         let style = TextStyle {
             tint: Color::WHITE,
             scale: 1,
             layer: Layer::Ui,
         };
-        let lh = pkrs_render::text::util::u32_px(self.font.line_height)
-            * pkrs_render::text::util::scale_f(style.scale);
+        let lh = u32_px(self.theme.font.line_height) * scale_f(style.scale);
         let base_x = self.panel.x + 28.0;
         let base_y = self.panel.y + 12.0;
         for (i, o) in self.session.options().iter().enumerate() {
@@ -93,8 +105,22 @@ impl GameState for ChoiceState {
             } else {
                 "  "
             };
-            renderer.draw_text(&self.font, self.font_tex, prefix, base_x - 18.0, y, style);
-            renderer.draw_text(&self.font, self.font_tex, &o.label, base_x, y, style);
+            renderer.draw_text(
+                &self.theme.font,
+                self.theme.font_tex,
+                prefix,
+                base_x - 18.0,
+                y,
+                style,
+            );
+            renderer.draw_text(
+                &self.theme.font,
+                self.theme.font_tex,
+                &o.label,
+                base_x,
+                y,
+                style,
+            );
         }
     }
 }

@@ -1,9 +1,23 @@
 //! Coloured dialogue layout and drawing (§5.5).
 
-use pkrs_render::{BitmapFont, text::util};
-use pkrs_render::{Color, Layer, Rect, Renderer, SpriteDraw};
+use pkrs_render::{BitmapFont, Color, Layer, Rect, Renderer, SpriteDraw};
 
 use crate::codes::DialogueSegment;
+
+#[inline]
+fn scale_f(scale: u32) -> f32 {
+    scale.max(1) as f32
+}
+
+#[inline]
+fn u32_px(v: u32) -> f32 {
+    v as f32
+}
+
+#[inline]
+fn i32_px(v: i32) -> f32 {
+    v as f32
+}
 
 /// Flatten segments into a `(char, color)` stream; explicit `\n` preserved.
 pub fn flatten_segments(segments: &[DialogueSegment]) -> Vec<(char, Color)> {
@@ -17,7 +31,7 @@ pub fn flatten_segments(segments: &[DialogueSegment]) -> Vec<(char, Color)> {
 }
 
 fn char_advance(font: &BitmapFont, prev: Option<char>, ch: char, scale: u32) -> f32 {
-    font.advance(prev, ch) * util::scale_f(scale)
+    font.advance(prev, ch) * scale_f(scale)
 }
 
 fn word_width(font: &BitmapFont, word: &[(char, Color)], scale: u32) -> f32 {
@@ -72,8 +86,25 @@ fn wrap_paragraph(
     let mut line_width = 0.0f32;
     let mut prev_in_line: Option<char> = None;
 
+    let flush_line = |line: &mut Vec<(char, Color)>,
+                      lines: &mut Vec<Vec<(char, Color)>>,
+                      lw: &mut f32,
+                      prev: &mut Option<char>| {
+        if !line.is_empty() {
+            lines.push(std::mem::take(line));
+            *lw = 0.0;
+            *prev = None;
+        }
+    };
+
     let mut i = 0usize;
     while i < chars.len() {
+        let ch = chars[i].0;
+        if ch == '\n' {
+            flush_line(&mut line, &mut lines, &mut line_width, &mut prev_in_line);
+            i += 1;
+            continue;
+        }
         while i < chars.len() && chars[i].0.is_whitespace() && chars[i].0 != '\n' {
             i += 1;
         }
@@ -95,9 +126,19 @@ fn wrap_paragraph(
             char_advance(font, prev_in_line, ' ', scale)
         };
         if !line.is_empty() && line_width + gap + ww > max_width {
-            lines.push(std::mem::take(&mut line));
-            line_width = 0.0;
-            prev_in_line = None;
+            flush_line(&mut line, &mut lines, &mut line_width, &mut prev_in_line);
+        }
+        if ww > max_width {
+            for &(ch, tint) in word {
+                let adv = char_advance(font, prev_in_line, ch, scale);
+                if !line.is_empty() && line_width + adv > max_width {
+                    flush_line(&mut line, &mut lines, &mut line_width, &mut prev_in_line);
+                }
+                line_width += adv;
+                line.push((ch, tint));
+                prev_in_line = Some(ch);
+            }
+            continue;
         }
         if !line.is_empty() {
             line_width += gap;
@@ -132,8 +173,8 @@ pub fn draw_colored_lines(
     scale: u32,
     layer: Layer,
 ) {
-    let scale_f = util::scale_f(scale);
-    let lh = util::u32_px(font.line_height) * scale_f;
+    let scale_f = scale_f(scale);
+    let lh = u32_px(font.line_height) * scale_f;
     let mut line_y = y;
     for row in lines {
         let mut cx = x;
@@ -154,8 +195,8 @@ pub fn draw_colored_lines(
             };
             let dst_w = metrics.src.width * scale_f;
             let dst_h = metrics.src.height * scale_f;
-            let dst_x = cx + util::i32_px(metrics.xoffset) * scale_f;
-            let dst_y = line_y + util::i32_px(metrics.yoffset) * scale_f;
+            let dst_x = cx + i32_px(metrics.xoffset) * scale_f;
+            let dst_y = line_y + i32_px(metrics.yoffset) * scale_f;
             renderer.draw_sprite(SpriteDraw {
                 texture,
                 src: metrics.src,

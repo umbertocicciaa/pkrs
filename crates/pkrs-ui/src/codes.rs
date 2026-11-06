@@ -11,15 +11,63 @@ pub struct DialogueSegment {
     pub tint: Color,
 }
 
-/// Expands `{player}`, `{var:name}`, strips `{color:…}` / `{pause:N}` into timing metadata only.
+/// Expands `{player}`, `{var:name}`, strips `{color:…}` / `{pause:N}` / `{page}` into metadata only.
 pub fn expand_dialogue<F>(raw: &str, mut lookup_var: F) -> Vec<DialogueSegment>
 where
     F: FnMut(&str) -> String,
 {
+    let (segs, _) = expand_dialogue_with_pauses(raw, &mut lookup_var);
+    segs
+}
+
+/// Like [`expand_dialogue`], plus `{pause:N}` positions measured in **expanded** glyph indices (same order as [`crate::layout::flatten_segments`]).
+pub fn expand_dialogue_with_pauses<F>(
+    raw: &str,
+    lookup_var: &mut F,
+) -> (Vec<DialogueSegment>, Vec<(usize, u32)>)
+where
+    F: FnMut(&str) -> String + ?Sized,
+{
     let tokens = parse_control_tokens(raw);
+    expand_tokens_with_pauses(&tokens, lookup_var)
+}
+
+/// Splits `raw` into pages at non-escaped `{page}` tokens; each chunk is expanded separately.
+pub fn dialogue_page_token_slices(raw: &str) -> Vec<Vec<ControlToken>> {
+    let tokens = parse_control_tokens(raw);
+    let mut pages: Vec<Vec<ControlToken>> = vec![Vec::new()];
+    for t in tokens {
+        if matches!(t, ControlToken::PageBreak) {
+            pages.push(Vec::new());
+        } else if let Some(last) = pages.last_mut() {
+            last.push(t);
+        }
+    }
+    pages
+}
+
+pub(crate) fn expand_page_tokens<F>(
+    tokens: &[ControlToken],
+    lookup_var: &mut F,
+) -> (Vec<DialogueSegment>, Vec<(usize, u32)>)
+where
+    F: FnMut(&str) -> String + ?Sized,
+{
+    expand_tokens_with_pauses(tokens, lookup_var)
+}
+
+fn expand_tokens_with_pauses<F>(
+    tokens: &[ControlToken],
+    lookup_var: &mut F,
+) -> (Vec<DialogueSegment>, Vec<(usize, u32)>)
+where
+    F: FnMut(&str) -> String + ?Sized,
+{
     let mut out: Vec<DialogueSegment> = Vec::new();
+    let mut pauses: Vec<(usize, u32)> = Vec::new();
     let mut cur_tint = Color::WHITE;
     let mut cur = String::new();
+    let mut glyph_pos = 0usize;
 
     let flush = |buf: &mut String, segs: &mut Vec<DialogueSegment>, tint: Color| {
         if buf.is_empty() {
@@ -33,14 +81,29 @@ where
 
     for t in tokens {
         match t {
-            ControlToken::Text(s) => cur.push_str(&s),
+            ControlToken::Text(s) => {
+                glyph_pos += s.chars().count();
+                cur.push_str(s);
+            }
             ControlToken::Color(name) => {
                 flush(&mut cur, &mut out, cur_tint);
-                cur_tint = color_from_name(&name);
+                cur_tint = color_from_name(name);
             }
-            ControlToken::Pause(_) | ControlToken::PageBreak => {}
-            ControlToken::PlayerName => cur.push_str("Player"),
-            ControlToken::Var(name) => cur.push_str(&lookup_var(&name)),
+            ControlToken::Pause(frames) => {
+                flush(&mut cur, &mut out, cur_tint);
+                pauses.push((glyph_pos, *frames));
+            }
+            ControlToken::PageBreak => {}
+            ControlToken::PlayerName => {
+                let s = lookup_var("player");
+                glyph_pos += s.chars().count();
+                cur.push_str(&s);
+            }
+            ControlToken::Var(name) => {
+                let s = lookup_var(name);
+                glyph_pos += s.chars().count();
+                cur.push_str(&s);
+            }
         }
     }
     flush(&mut cur, &mut out, cur_tint);
@@ -50,10 +113,10 @@ where
             tint: Color::WHITE,
         });
     }
-    out
+    (out, pauses)
 }
 
-/// Collects `{pause:N}` durations in order; same index as reveal position in the flattened string.
+/// Legacy: collects `{pause:N}` using raw token positions (prefer [`expand_dialogue_with_pauses`]).
 pub fn pause_schedule(raw: &str) -> Vec<(usize, u32)> {
     let tokens = parse_control_tokens(raw);
     let mut pos = 0usize;
@@ -70,7 +133,7 @@ pub fn pause_schedule(raw: &str) -> Vec<(usize, u32)> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum ControlToken {
+pub(crate) enum ControlToken {
     Text(String),
     Color(String),
     Pause(u32),
@@ -79,7 +142,7 @@ enum ControlToken {
     Var(String),
 }
 
-fn parse_control_tokens(raw: &str) -> Vec<ControlToken> {
+pub(crate) fn parse_control_tokens(raw: &str) -> Vec<ControlToken> {
     let mut out = Vec::new();
     let chars: Vec<char> = raw.chars().collect();
     let mut i = 0usize;
@@ -172,15 +235,25 @@ mod tests {
 
     #[test]
     fn expands_player_and_var() {
-        let segs = expand_dialogue("Hi {player}, score {var:pts}.", |k| {
-            if k == "pts" {
-                "10".into()
+        let segs = expand_dialogue("Hi {player}, score {var:pts}.", |k| match k {
+            "player" => "Player".into(),
+            "pts" => "10".into(),
+            _ => String::new(),
+        });
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].text, "Hi Player, score 10.");
+    }
+
+    #[test]
+    fn player_name_via_lookup_only() {
+        let segs = expand_dialogue("Hello {player}!", |k| {
+            if k == "player" {
+                "Pat".into()
             } else {
                 String::new()
             }
         });
-        assert_eq!(segs.len(), 1);
-        assert_eq!(segs[0].text, "Hi Player, score 10.");
+        assert_eq!(segs[0].text, "Hello Pat!");
     }
 
     #[test]
@@ -193,8 +266,9 @@ mod tests {
     }
 
     #[test]
-    fn pause_positions_match_char_index() {
-        let p = pause_schedule("ab{pause:5}c");
-        assert_eq!(p, vec![(2, 5)]);
+    fn pause_positions_use_expanded_text() {
+        let mut lookup = |_k: &str| "ZZ".to_string();
+        let (_, p) = expand_dialogue_with_pauses("{var:x}B{pause:3}C", &mut lookup);
+        assert_eq!(p, vec![(3, 3)]);
     }
 }

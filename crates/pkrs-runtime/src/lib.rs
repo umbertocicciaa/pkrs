@@ -10,6 +10,8 @@ pub mod scene;
 pub mod scripts;
 mod state;
 mod tick;
+mod ui_assets;
+mod ui_theme;
 pub mod wiring;
 
 pub use ctx::RuntimeCtx;
@@ -24,4 +26,6 @@ pub use state::{
     ChoiceState, DialogueState, FadeTransition, GameState, StateStack, TitleState, Transition,
 };
 pub use tick::{NullTickHooks, TickHooks, TickPhase, run_tick};
+pub use ui_assets::build_test_ui_theme;
+pub use ui_theme::UiTheme;
 pub use wiring::{AdapterSet, PlatformAdapter, RenderAdapter, RunMode};

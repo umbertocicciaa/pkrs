@@ -379,7 +379,7 @@ Key boundaries:
 - **`pkrs-battle` must not depend on macroquad, mlua or any I/O.** It exposes a `BattleHooks` trait, and `pkrs-script` implements that trait by calling Lua. Pure logic stays unit-testable and deterministic.
 - **Every third-party runtime crate is imported by exactly one owning crate**, and only inside its adapter module (§4.5). Only `pkrs-platform` and `pkrs-render` import macroquad, which keeps a future backend swap small (§0.3).
 - `pkrs-cli` reuses `pkrs-data`, `pkrs-world` and `pkrs-script` for `pkrs check` (it parses Lua without running the game).
-- **`pkrs-ui` depends only on `pkrs-render` and `pkrs-platform` (§4.3).** Vertical menus expose `MenuCursorDirection` (Up/Down) from `pkrs-platform` so choice lists do not add a `pkrs-core` edge; `Input::menu_direction` still returns `pkrs_core::Direction` for movement-aware callers.
+- **`pkrs-ui` depends only on `pkrs-render` and `pkrs-platform` (§4.3).** Vertical menus expose `MenuCursorDirection` (Up/Down) from `pkrs-platform` so choice lists do not add a `pkrs-core` edge; `Input::menu_direction` still returns `pkrs_core::Direction` for movement-aware callers. Runtime dialogue/choice overlays accept a shared `UiTheme` (font handle + `WindowSkin`) from the caller instead of uploading textures inside each state.
 
 ### 4.4 Multiplayer-ready boundaries (future, not v1)
 

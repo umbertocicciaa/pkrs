@@ -9,6 +9,9 @@ pub type Result<T, E = UiError> = std::result::Result<T, E>;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum UiError {
+    /// No options were provided for a choice menu.
+    #[error("choice list must not be empty")]
+    EmptyChoice,
     /// A window skin was malformed.
     #[error("invalid window skin `{0}`")]
     InvalidSkin(String),

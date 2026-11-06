@@ -7,7 +7,7 @@ mod error;
 mod layout;
 mod window_skin;
 
-pub use choice::{ChoiceOption, ChoiceSession};
+pub use choice::{ChoiceOption, ChoicePollOutcome, ChoiceSession};
 pub use codes::{DialogueSegment, expand_dialogue, pause_schedule};
 pub use dialogue::{DialogueAdvance, DialoguePage, DialogueSession};
 pub use error::{Result, UiError};

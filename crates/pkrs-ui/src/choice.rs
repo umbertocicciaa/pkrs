@@ -2,11 +2,22 @@
 
 use pkrs_platform::{Action, BuiltinAction, Input, MenuCursorDirection};
 
+use crate::UiError;
+
 /// One selectable row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChoiceOption {
     /// Label shown to the player.
     pub label: String,
+}
+
+/// Outcome of [`ChoiceSession::poll`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChoicePollOutcome {
+    /// Row chosen with Confirm.
+    Picked(usize),
+    /// Back / cancel.
+    Cancelled,
 }
 
 /// Vertical menu: Up/Down with repeat, Confirm to pick.
@@ -18,9 +29,11 @@ pub struct ChoiceSession {
 
 impl ChoiceSession {
     /// At least one option required by caller.
-    #[must_use]
-    pub fn new(options: Vec<ChoiceOption>) -> Self {
-        Self { options, cursor: 0 }
+    pub fn new(options: Vec<ChoiceOption>) -> Result<Self, UiError> {
+        if options.is_empty() {
+            return Err(UiError::EmptyChoice);
+        }
+        Ok(Self { options, cursor: 0 })
     }
 
     /// Current highlighted row index (0-based).
@@ -35,11 +48,8 @@ impl ChoiceSession {
         &self.options
     }
 
-    /// Update cursor from `input`; returns `Some(index)` on confirm.
-    pub fn poll(&mut self, input: &Input) -> Option<usize> {
-        if self.options.is_empty() {
-            return None;
-        }
+    /// Update cursor from `input`; returns a [`ChoicePollOutcome`] on confirm or cancel.
+    pub fn poll(&mut self, input: &Input) -> Option<ChoicePollOutcome> {
         if let Some(dir) = input.menu_cursor_direction() {
             match dir {
                 MenuCursorDirection::Up => {
@@ -51,7 +61,10 @@ impl ChoiceSession {
             }
         }
         if input.triggered(Action::Builtin(BuiltinAction::Confirm)) {
-            return Some(self.cursor);
+            return Some(ChoicePollOutcome::Picked(self.cursor));
+        }
+        if input.triggered(Action::Builtin(BuiltinAction::Cancel)) {
+            return Some(ChoicePollOutcome::Cancelled);
         }
         None
     }
@@ -79,7 +92,8 @@ mod tests {
         let mut c = ChoiceSession::new(vec![
             ChoiceOption { label: "a".into() },
             ChoiceOption { label: "b".into() },
-        ]);
+        ])
+        .unwrap();
         let _ = c.poll(&input);
         assert_eq!(c.cursor(), 1);
         let mut plat2 = Platform::new(
@@ -90,6 +104,6 @@ mod tests {
         block_on(plat2.next_frame());
         input.poll(&plat2);
         input.begin_tick();
-        assert_eq!(c.poll(&input), Some(1));
+        assert_eq!(c.poll(&input), Some(ChoicePollOutcome::Picked(1)));
     }
 }

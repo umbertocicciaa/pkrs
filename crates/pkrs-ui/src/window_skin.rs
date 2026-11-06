@@ -4,21 +4,16 @@ use pkrs_render::{Color, Layer, Rect, Renderer, SpriteDraw, TextureHandle};
 
 use crate::UiError;
 
-/// Corner size and edge strip thickness in texels (defaults match a 32×32 skin: corners 11, edges 11).
+/// Border width in texels: corners are `border×border`, center is the remainder (defaults match a 32×32 skin with 11px frame).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NineSliceSpec {
-    /// Corner square size.
-    pub corner: u32,
-    /// Edge strip thickness (top/bottom height, left/right width).
-    pub edge: u32,
+    /// Edge and corner size in texels (must fit twice in the atlas).
+    pub border: u32,
 }
 
 impl Default for NineSliceSpec {
     fn default() -> Self {
-        Self {
-            corner: 11,
-            edge: 11,
-        }
+        Self { border: 11 }
     }
 }
 
@@ -29,7 +24,7 @@ pub struct WindowSkin {
     pub texture: TextureHandle,
     /// Atlas width / height in texels.
     pub atlas_size: (u32, u32),
-    /// Corner and edge slice sizes in texels.
+    /// Border size in texels.
     pub spec: NineSliceSpec,
 }
 
@@ -41,23 +36,15 @@ impl WindowSkin {
         atlas_h: u32,
         spec: NineSliceSpec,
     ) -> Result<Self, UiError> {
-        let c = spec.corner;
-        let e = spec.edge;
-        if c == 0 || e == 0 {
-            return Err(UiError::InvalidSkin(
-                "corner and edge must be non-zero".into(),
-            ));
+        let b = spec.border;
+        if b == 0 {
+            return Err(UiError::InvalidSkin("border must be non-zero".into()));
         }
-        let min_w = c.saturating_mul(2);
-        let min_h = c.saturating_mul(2);
+        let min_w = b.saturating_mul(2);
+        let min_h = b.saturating_mul(2);
         if atlas_w < min_w || atlas_h < min_h {
             return Err(UiError::InvalidSkin(format!(
-                "atlas {atlas_w}x{atlas_h} too small for corner {c}"
-            )));
-        }
-        if e.saturating_mul(2) > atlas_w || e.saturating_mul(2) > atlas_h {
-            return Err(UiError::InvalidSkin(format!(
-                "edge {e} does not fit atlas {atlas_w}x{atlas_h}"
+                "atlas {atlas_w}x{atlas_h} too small for border {b}"
             )));
         }
         Ok(Self {
@@ -72,30 +59,23 @@ impl WindowSkin {
         let (w, h) = self.atlas_size;
         let wf = w as f32;
         let hf = h as f32;
-        let c = self.spec.corner as f32;
-        let e = self.spec.edge as f32;
+        let b = self.spec.border as f32;
 
         let r = SliceSrc {
-            tl: Rect::new(0.0, 0.0, c, c),
-            tr: Rect::new(wf - c, 0.0, c, c),
-            bl: Rect::new(0.0, hf - c, c, c),
-            br: Rect::new(wf - c, hf - c, c, c),
-            top: Rect::new(c, 0.0, (wf - 2.0 * c).max(0.0), e),
-            bottom: Rect::new(c, hf - e, (wf - 2.0 * c).max(0.0), e),
-            left: Rect::new(0.0, c, e, (hf - 2.0 * c).max(0.0)),
-            right: Rect::new(wf - e, c, e, (hf - 2.0 * c).max(0.0)),
-            center: Rect::new(e, e, (wf - 2.0 * e).max(0.0), (hf - 2.0 * e).max(0.0)),
+            tl: Rect::new(0.0, 0.0, b, b),
+            tr: Rect::new(wf - b, 0.0, b, b),
+            bl: Rect::new(0.0, hf - b, b, b),
+            br: Rect::new(wf - b, hf - b, b, b),
+            top: Rect::new(b, 0.0, (wf - 2.0 * b).max(0.0), b),
+            bottom: Rect::new(b, hf - b, (wf - 2.0 * b).max(0.0), b),
+            left: Rect::new(0.0, b, b, (hf - 2.0 * b).max(0.0)),
+            right: Rect::new(wf - b, b, b, (hf - 2.0 * b).max(0.0)),
+            center: Rect::new(b, b, (wf - 2.0 * b).max(0.0), (hf - 2.0 * b).max(0.0)),
         };
 
         let dw = dst_outer.width;
         let dh = dst_outer.height;
-        let c_dest = c.min(dw * 0.5).min(dh * 0.5);
-        let e_h = e
-            .min((dh - 2.0 * c_dest).max(0.0) * 0.5 + 0.0)
-            .min(dh * 0.5);
-        let e_w = e
-            .min((dw - 2.0 * c_dest).max(0.0) * 0.5 + 0.0)
-            .min(dw * 0.5);
+        let c_dest = b.min((dw * 0.5).floor()).min((dh * 0.5).floor());
 
         let mut blit = |src: Rect, dx: f32, dy: f32, rw: f32, rh: f32| {
             if rw <= 0.0 || rh <= 0.0 {
@@ -116,22 +96,28 @@ impl WindowSkin {
         blit(r.bl, 0.0, dh - c_dest, c_dest, c_dest);
         blit(r.br, dw - c_dest, dh - c_dest, c_dest, c_dest);
 
-        blit(r.top, c_dest, 0.0, (dw - 2.0 * c_dest).max(0.0), e_h);
+        blit(r.top, c_dest, 0.0, (dw - 2.0 * c_dest).max(0.0), c_dest);
         blit(
             r.bottom,
             c_dest,
-            dh - e_h,
+            dh - c_dest,
             (dw - 2.0 * c_dest).max(0.0),
-            e_h,
+            c_dest,
         );
-        blit(r.left, 0.0, c_dest, e_w, (dh - 2.0 * c_dest).max(0.0));
-        blit(r.right, dw - e_w, c_dest, e_w, (dh - 2.0 * c_dest).max(0.0));
+        blit(r.left, 0.0, c_dest, c_dest, (dh - 2.0 * c_dest).max(0.0));
+        blit(
+            r.right,
+            dw - c_dest,
+            c_dest,
+            c_dest,
+            (dh - 2.0 * c_dest).max(0.0),
+        );
         blit(
             r.center,
-            e_w,
-            e_h,
-            (dw - 2.0 * e_w).max(0.0),
-            (dh - 2.0 * e_h).max(0.0),
+            c_dest,
+            c_dest,
+            (dw - 2.0 * c_dest).max(0.0),
+            (dh - 2.0 * c_dest).max(0.0),
         );
     }
 

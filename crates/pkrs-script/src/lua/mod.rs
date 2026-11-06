@@ -5,6 +5,7 @@
 
 pub(crate) mod battle;
 mod convert;
+mod plugin;
 mod sandbox;
 
 pub use battle::{DEFAULT_MAX_FAILURES, HOOK_NAMES, LuaBattleHooks};

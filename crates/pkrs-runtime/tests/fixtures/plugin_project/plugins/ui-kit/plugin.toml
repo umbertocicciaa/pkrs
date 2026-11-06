@@ -1,0 +1,5 @@
+[plugin]
+id      = "ui-kit"
+name    = "UI Kit"
+version = "1.0.0"
+api     = 1

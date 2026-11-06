@@ -6,11 +6,15 @@
 //! 2. **Validate**: ranges, id formats, semver, cross-field rules. *All* problems are collected
 //!    into [`ManifestError::Invalid`], each with its dotted field path.
 //!
+//! Plugin manifests (`plugins/<id>/plugin.toml`, §9.4) use the same two stages; see
+//! [`PluginManifest`].
+//!
 //! Only `pkrs.toml` is required in a project; every folder is optional (§2.1). A minimal manifest
 //! needs just `[game]` (`name`, `id`), `[engine]` (`version`, `api`) and `[start]` (`map`,
 //! `position`); everything else has defaults.
 
 mod error;
+mod plugin;
 mod raw;
 mod toml_codec;
 
@@ -18,7 +22,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ops::RangeInclusive;
 use std::path::Path;
 
-pub use error::{Location, ManifestError, ManifestIssue};
+pub use error::{Location, ManifestError, ManifestIssue, PluginManifestError};
+pub use plugin::{PluginInfo, PluginLoadRules, PluginManifest};
 
 use crate::direction::Direction;
 use crate::grid::GridPos;

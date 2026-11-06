@@ -1,5 +1,5 @@
 //! Shared engine types: ids, `Direction`, `GridPos`, `Ctx` traits, events, errors, the `GameRng`
-//! port, semantic versions and the `pkrs.toml` project manifest.
+//! port, semantic versions, the `pkrs.toml` project manifest and `plugin.toml` plugin manifests.
 //!
 //! See `docs/design.md` §4.2–§4.3 and §4.5 for crate boundaries.
 
@@ -19,7 +19,10 @@ pub use error::{CoreError, Result};
 pub use events::{EngineEvent, EventPayload, EventQueue};
 pub use grid::GridPos;
 pub use id::{IdInterner, IdKind, MoveKind, SpeciesKind, TypedId, validate_id};
-pub use manifest::{ManifestError, ProjectManifest, is_action_name, is_plugin_id};
+pub use manifest::{
+    ManifestError, PluginManifest, PluginManifestError, ProjectManifest, is_action_name,
+    is_plugin_id,
+};
 pub use rng::{GameRng, Pcg64Rng, RngState};
 pub use version::{Version, VersionReq};
 

@@ -143,6 +143,14 @@ pub trait ScriptFiles {
 
     /// `true` if `path` exists.
     fn exists(&self, path: &str) -> bool;
+
+    /// Names of the direct subdirectories of `dir` (`"plugins"` → `["day-night", …]`), sorted.
+    /// Used for plugin discovery (§9.4). A missing directory, or a source that cannot list,
+    /// yields an empty list (the default).
+    fn list_dirs(&self, dir: &str) -> Vec<String> {
+        let _ = dir;
+        Vec::new()
+    }
 }
 
 /// In-memory [`ScriptFiles`] for tests and generated content.
@@ -179,6 +187,17 @@ impl ScriptFiles for MemoryScripts {
 
     fn exists(&self, path: &str) -> bool {
         self.files.contains_key(path)
+    }
+
+    fn list_dirs(&self, dir: &str) -> Vec<String> {
+        let prefix = format!("{}/", dir.trim_end_matches('/'));
+        let names: std::collections::BTreeSet<&str> = self
+            .files
+            .keys()
+            .filter_map(|path| path.strip_prefix(&prefix)?.split_once('/'))
+            .map(|(name, _)| name)
+            .collect();
+        names.into_iter().map(str::to_owned).collect()
     }
 }
 
@@ -313,6 +332,17 @@ mod tests {
             files.read_script("scripts/nope.lua"),
             Err(ScriptError::Load { .. })
         ));
+    }
+
+    #[test]
+    fn memory_scripts_list_direct_subdirectories() {
+        let files = MemoryScripts::new()
+            .with("plugins/b/plugin.toml", "")
+            .with("plugins/a/init.lua", "")
+            .with("plugins/a/lib/x.lua", "")
+            .with("plugins/readme.txt", "");
+        assert_eq!(files.list_dirs("plugins"), ["a", "b"]);
+        assert!(files.list_dirs("scripts").is_empty());
     }
 
     #[test]

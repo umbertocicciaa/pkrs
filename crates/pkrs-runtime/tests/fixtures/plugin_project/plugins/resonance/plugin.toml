@@ -1,0 +1,13 @@
+[plugin]
+id          = "resonance"
+name        = "Resonance"
+version     = "1.2.0"
+api         = 1
+description = "Once per battle, a creature can Resonate to empower its primary type."
+
+[dependencies]
+"status-pack" = "^1.0"
+
+[load]
+after     = ["day-night"]
+conflicts = ["overdrive"]

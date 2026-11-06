@@ -230,7 +230,7 @@ mod tests {
     #[test]
     fn push_and_pop_call_enter_exit_and_resume() {
         let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-        let mut ctx = RuntimeCtx;
+        let mut ctx = RuntimeCtx::default();
         let mut stack = StateStack::new();
         stack.push(&mut ctx, Box::new(RecordingState::new("root", log.clone())));
 
@@ -249,7 +249,7 @@ mod tests {
     #[test]
     fn replace_swaps_top_without_resume_below() {
         let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-        let mut ctx = RuntimeCtx;
+        let mut ctx = RuntimeCtx::default();
         let mut stack = StateStack::new();
         stack.push(&mut ctx, Box::new(RecordingState::new("root", log.clone())));
         let mut top = RecordingState::new("menu", log.clone());
@@ -269,7 +269,7 @@ mod tests {
     #[test]
     fn pop_to_peels_until_target_and_resumes_once() {
         let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-        let mut ctx = RuntimeCtx;
+        let mut ctx = RuntimeCtx::default();
         let mut stack = StateStack::new();
         stack.push(&mut ctx, Box::new(RecordingState::new("root", log.clone())));
         stack.push(&mut ctx, Box::new(RecordingState::new("d", log.clone())));
@@ -293,7 +293,7 @@ mod tests {
     #[test]
     fn transitions_are_not_applied_mid_update() {
         let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-        let mut ctx = RuntimeCtx;
+        let mut ctx = RuntimeCtx::default();
         let mut top_state = RecordingState::new("only", log.clone());
         top_state.next = Some(Transition::Push(Box::new(RecordingState::new(
             "pushed",
@@ -313,7 +313,7 @@ mod tests {
     #[test]
     fn background_update_only_when_opted_in() {
         let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-        let mut ctx = RuntimeCtx;
+        let mut ctx = RuntimeCtx::default();
         let mut under = RecordingState::new("under", log.clone());
         under.background = true;
         let mut stack = StateStack::new();
@@ -338,7 +338,7 @@ mod tests {
     fn render_walks_to_nearest_opaque_then_upward() {
         let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
         let mut stack = StateStack::new();
-        let mut ctx = RuntimeCtx;
+        let mut ctx = RuntimeCtx::default();
         let mut a = RecordingState::new("a", log.clone());
         a.opaque = true;
         let mut b = RecordingState::new("b", log.clone());
@@ -367,7 +367,7 @@ mod tests {
     fn debug_stack_lists_bottom_to_top() {
         let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
         let mut stack = StateStack::new();
-        let mut ctx = RuntimeCtx;
+        let mut ctx = RuntimeCtx::default();
         stack.push(
             &mut ctx,
             Box::new(RecordingState::new("title", log.clone())),
@@ -379,7 +379,7 @@ mod tests {
     #[test]
     fn pop_to_unknown_id_leaves_stack_unchanged() {
         let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-        let mut ctx = RuntimeCtx;
+        let mut ctx = RuntimeCtx::default();
         let mut stack = StateStack::new();
         stack.push(
             &mut ctx,
@@ -398,7 +398,7 @@ mod tests {
     #[test]
     fn pop_to_own_id_does_not_resume() {
         let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-        let mut ctx = RuntimeCtx;
+        let mut ctx = RuntimeCtx::default();
         let mut stack = StateStack::new();
         let mut top = RecordingState::new("a", log.clone());
         top.next = Some(Transition::PopTo("a"));
@@ -411,7 +411,7 @@ mod tests {
     #[test]
     fn pop_last_state_is_ignored() {
         let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-        let mut ctx = RuntimeCtx;
+        let mut ctx = RuntimeCtx::default();
         let mut stack = StateStack::new();
         let mut only = RecordingState::new("root", log.clone());
         only.next = Some(Transition::Pop);

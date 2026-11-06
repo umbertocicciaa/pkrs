@@ -28,6 +28,15 @@ impl Default for MenuRepeatConfig {
     }
 }
 
+/// Vertical menu cursor movement produced by [`Input::menu_cursor_direction`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MenuCursorDirection {
+    /// Cursor moves to the previous row.
+    Up,
+    /// Cursor moves to the next row.
+    Down,
+}
+
 /// Policy for overworld movement direction buffering at the end of a step.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MovementBufferConfig {
@@ -219,6 +228,19 @@ impl Input {
 
     /// Returns a menu cursor direction when it should move this tick (initial press or repeat).
     pub fn menu_direction(&self) -> Option<Direction> {
+        self.menu_cursor_direction_vdir()
+    }
+
+    /// Returns vertical menu cursor movement (up/down with repeat). Left/right are ignored.
+    pub fn menu_cursor_direction(&self) -> Option<MenuCursorDirection> {
+        self.menu_cursor_direction_vdir().and_then(|dir| match dir {
+            Direction::Up => Some(MenuCursorDirection::Up),
+            Direction::Down => Some(MenuCursorDirection::Down),
+            _ => None,
+        })
+    }
+
+    fn menu_cursor_direction_vdir(&self) -> Option<Direction> {
         let delay = self.config.menu_repeat.initial_delay_ticks;
         let rate = self.config.menu_repeat.repeat_rate_ticks;
         for (action, direction) in MENU_DIRECTIONS {

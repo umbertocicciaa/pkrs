@@ -33,7 +33,9 @@ pub use backend::DirectoriesPaths;
 pub use backend::MacroquadPlatform;
 pub use backend::{FrameFuture, NullFrame, NullPlatform, PlatformBackend, block_on};
 pub use error::{InputError, InputResult, PlatformError, Result};
-pub use input::{Input, InputFacadeConfig, MenuRepeatConfig, MovementBufferConfig};
+pub use input::{
+    Input, InputFacadeConfig, MenuCursorDirection, MenuRepeatConfig, MovementBufferConfig,
+};
 pub use key::Key;
 pub use paths::{FixedPaths, UserPaths};
 pub use platform::{DEFAULT_MAX_FRAME_TIME, Platform, PlatformConfig, PlatformEvent};

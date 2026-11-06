@@ -142,6 +142,7 @@ pub(super) fn build_env(
     env.raw_set("load", load_fn(lua, &env)?)?;
     env.raw_set("require", require_fn(lua, owner, &env)?)?;
     super::battle::install(lua, &env, owner)?;
+    super::ai::install(lua, &env, owner)?;
     super::time::install(lua, &env)?;
     Ok(env)
 }

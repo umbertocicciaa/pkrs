@@ -3,12 +3,14 @@
 //! This folder is the only place in the workspace that names `mlua` types. Lua 5.4 is vendored
 //! (`mlua` features `lua54` + `vendored`), so no system Lua is needed on any OS (§0.4).
 
+mod ai;
 pub(crate) mod battle;
 mod convert;
 mod plugin;
 mod sandbox;
 mod time;
 
+pub use ai::{DEFAULT_AI_MAX_FAILURES, LuaAi};
 pub use battle::{DEFAULT_MAX_FAILURES, HOOK_NAMES, LuaBattleHooks};
 
 use std::cell::Cell;

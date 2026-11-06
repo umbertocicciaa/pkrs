@@ -3,8 +3,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use pkrs_battle::{
-    Battle, BattleAction, BattleInput, BattleOutcome, BattlePhase, NullBattleHooks, RngPolicy,
-    SideId, SideInput, battle_testkit, config_hash, record_battle, replay_with_null_hooks,
+    Battle, BattleAction, BattleConfig, BattleInput, BattleOutcome, BattlePhase, NullBattleHooks,
+    RngPolicy, SideId, SideInput, battle_testkit, config_hash, record_battle,
+    replay_with_null_hooks,
 };
 
 fn turn_input() -> BattleInput {
@@ -62,7 +63,11 @@ fn recorded_wild_1v1_replays_byte_identical() {
 #[test]
 fn wild_1v1_event_log_insta_snapshot() {
     let setup = battle_testkit::wild_1v1();
-    let config = battle_testkit::singles_config();
+    // Pin tracing off so the snapshot does not depend on the `hook-trace` feature.
+    let config = BattleConfig {
+        trace_hooks: false,
+        ..battle_testkit::singles_config()
+    };
     let resources = battle_testkit::default_resources();
     let policy = RngPolicy::Fixed { seed: 4242 };
     let mut hooks = NullBattleHooks;

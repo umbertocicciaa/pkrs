@@ -5,6 +5,7 @@
 mod accuracy;
 mod action;
 mod ai;
+mod ai_script;
 mod battle;
 mod convert;
 mod damage;
@@ -24,6 +25,10 @@ mod status;
 pub use accuracy::AccuracyCalc;
 pub use action::{BattleAction, BattleInput, SideInput};
 pub use ai::{AiView, BattleAi, TrainerAi, ai_side_input};
+pub use ai_script::{
+    AiChoice, AiCreatureInfo, AiFallback, AiFallbackReason, AiMemory, AiMoveInfo, AiMoveRef,
+    AiRequest, AiScript, AiScriptView, AiSideInfo, ScriptedAi,
+};
 pub use battle::Battle;
 pub use convert::{IntoBattleSetup, testkit as battle_testkit};
 pub use damage::{DamageCalc, DamageModifierStage};

@@ -10,6 +10,9 @@
 //! - **Battle hooks:** [`LuaBattleHooks`] implements `pkrs_battle::BattleHooks` by dispatching
 //!   to handlers registered with `battle.on(...)`; `battle.start_wild` / `start_trainer` yield
 //!   a [`WaitRequest::Battle`] from a task ([`ScriptHost::start_task`]).
+//! - **Lua AI:** [`LuaAi`] implements `pkrs_battle::AiScript` by calling a profile script's
+//!   `choose_action(view)` (loaded with [`LuaScriptHost::load_ai_script`]) or a plugin's
+//!   `ai.register_profile(id, fn)` function (§7.5).
 //! - **Scheduler:** [`Scheduler`] steps tasks once per tick in creation order, resuming each
 //!   when its [`WaitCondition`] is met (`time.wait(n)`, dialogue closed, path finished, battle
 //!   ended) and locking the player for interact/trigger scripts (§9.3).
@@ -28,7 +31,9 @@ pub use host::{
     BattleRequest, MemoryScripts, ScriptFiles, ScriptHost, ScriptLimits, ScriptOwner, ScriptValue,
     TaskId, TaskStatus, WaitRequest, battle_result_value,
 };
-pub use lua::{DEFAULT_MAX_FAILURES, HOOK_NAMES, LuaBattleHooks, LuaScriptHost};
+pub use lua::{
+    DEFAULT_AI_MAX_FAILURES, DEFAULT_MAX_FAILURES, HOOK_NAMES, LuaAi, LuaBattleHooks, LuaScriptHost,
+};
 pub use plugin::{
     PluginError, PluginErrors, PluginHost, PluginInitError, PluginLoadReport, PluginPlan,
     load_plugins, plan_plugins,

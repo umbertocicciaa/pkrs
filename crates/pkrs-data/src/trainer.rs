@@ -14,6 +14,7 @@
 //!   script: "scripts/ai/champion.lua",
 //!   weights: (aggression: 0.8, switch: 0.6, predict: 0.9),
 //!   allow_items: true,
+//!   visibility: Full,
 //! )
 //! ```
 
@@ -64,6 +65,19 @@ impl AiWeights {
     }
 }
 
+/// What a scripted (Lua) AI may see of the opposing side (§7.5).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Deserialize)]
+pub enum AiVisibility {
+    /// What a human would know in that format: the foe's creatures once they have been sent
+    /// out, their level, types, HP as a percentage, stat stages and the moves they have used.
+    /// Exact HP, stats, PP and the unrevealed bench stay hidden.
+    #[default]
+    Fair,
+    /// Everything ("cheating" boss fights): the whole opposing party with exact HP, stats,
+    /// moves and PP.
+    Full,
+}
+
 fn default_true() -> bool {
     true
 }
@@ -88,6 +102,9 @@ pub struct AiProfile {
     /// Use a healing item when the active creature's HP falls to this percent or below.
     #[serde(default = "default_heal_below")]
     pub heal_below_percent: u8,
+    /// What a Lua `choose_action` script may see (ignored by the built-in tiers).
+    #[serde(default)]
+    pub visibility: AiVisibility,
 }
 
 fn default_heal_below() -> u8 {
@@ -105,6 +122,7 @@ impl AiProfile {
             weights: AiWeights::default(),
             allow_items: false,
             heal_below_percent: default_heal_below(),
+            visibility: AiVisibility::Fair,
         }
     }
 
@@ -277,6 +295,7 @@ AiProfile(
   script: "scripts/ai/champion.lua",
   weights: (aggression: 0.8, switch: 0.6, predict: 0.9),
   allow_items: true,
+  visibility: Full,
 )"#;
 
     const TRAINER: &str = r#"
@@ -294,6 +313,7 @@ Trainer(
         assert_eq!(p.weights.permille(), (800, 600, 900));
         assert!(p.allow_items);
         assert_eq!(p.heal_below_percent, 25);
+        assert_eq!(p.visibility, AiVisibility::Full);
 
         let t = TrainerDef::parse_ron(TRAINER, "champion_aria.ron").unwrap();
         assert_eq!(t.ai_profile_id(), "champion_hard");
@@ -306,6 +326,7 @@ Trainer(
         let p = AiProfile::parse_ron(r#"AiProfile(id: "x")"#, "x.ron").unwrap();
         assert_eq!(p.tier, AiTier::Basic);
         assert_eq!(p.weights, AiWeights::default());
+        assert_eq!(p.visibility, AiVisibility::Fair);
         let t = TrainerDef::parse_ron(
             r#"Trainer(id: "youngster", party: [(species: "a", level: 3)], ai_profile: "random")"#,
             "y.ron",

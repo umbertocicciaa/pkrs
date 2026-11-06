@@ -19,8 +19,8 @@ pub use error::{DataError, Result};
 pub use move_def::{EffectTarget, MoveCategory, MoveDef, MoveEffect, StatId};
 pub use species::SpeciesDef;
 pub use trainer::{
-    AiProfile, AiTier, AiWeights, BUILTIN_PROFILES, TrainerDef, TrainerMember, check_ai_profiles,
-    resolve_ai_profile,
+    AiProfile, AiTier, AiVisibility, AiWeights, BUILTIN_PROFILES, TrainerDef, TrainerMember,
+    check_ai_profiles, resolve_ai_profile,
 };
 pub use type_chart::TypeChart;
 

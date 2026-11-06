@@ -65,7 +65,7 @@ impl DialogueState {
 }
 
 impl GameState for DialogueState {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "dialogue"
     }
 

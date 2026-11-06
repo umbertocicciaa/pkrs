@@ -34,7 +34,7 @@ impl StateStack {
 
     /// Id of the top state, if any.
     #[must_use]
-    pub fn top_id(&self) -> Option<&'static str> {
+    pub fn top_id(&self) -> Option<&str> {
         self.states.last().map(|s| s.id())
     }
 
@@ -81,7 +81,7 @@ impl StateStack {
             Transition::Push(state) => self.push(ctx, state),
             Transition::Pop => self.pop(ctx),
             Transition::Replace(state) => self.replace(ctx, state),
-            Transition::PopTo(id) => self.pop_to(ctx, id),
+            Transition::PopTo(id) => self.pop_to(ctx, id.as_str()),
             Transition::Quit => self.quit_requested = true,
         }
     }
@@ -131,7 +131,7 @@ impl StateStack {
         }
     }
 
-    fn pop_to(&mut self, ctx: &mut RuntimeCtx, target: &'static str) {
+    fn pop_to(&mut self, ctx: &mut RuntimeCtx, target: &str) {
         let Some(keep) = self.states.iter().rposition(|s| s.id() == target) else {
             tracing::warn!(
                 target,
@@ -185,7 +185,7 @@ mod tests {
     }
 
     impl GameState for RecordingState {
-        fn id(&self) -> &'static str {
+        fn id(&self) -> &str {
             self.id
         }
 
@@ -274,7 +274,7 @@ mod tests {
         stack.push(&mut ctx, Box::new(RecordingState::new("root", log.clone())));
         stack.push(&mut ctx, Box::new(RecordingState::new("d", log.clone())));
         let mut driver = RecordingState::new("e", log.clone());
-        driver.next = Some(Transition::PopTo("root"));
+        driver.next = Some(Transition::PopTo("root".to_owned()));
         stack.push(&mut ctx, Box::new(driver));
         tick(&mut stack, &mut ctx);
         assert_eq!(
@@ -387,7 +387,7 @@ mod tests {
         );
         stack.push(&mut ctx, Box::new(RecordingState::new("menu", log.clone())));
         let mut driver = RecordingState::new("dialog", log.clone());
-        driver.next = Some(Transition::PopTo("ovreworld"));
+        driver.next = Some(Transition::PopTo("ovreworld".to_owned()));
         stack.push(&mut ctx, Box::new(driver));
         tick(&mut stack, &mut ctx);
         assert_eq!(stack.len(), 3);
@@ -401,7 +401,7 @@ mod tests {
         let mut ctx = RuntimeCtx::default();
         let mut stack = StateStack::new();
         let mut top = RecordingState::new("a", log.clone());
-        top.next = Some(Transition::PopTo("a"));
+        top.next = Some(Transition::PopTo("a".to_owned()));
         stack.push(&mut ctx, Box::new(top));
         tick(&mut stack, &mut ctx);
         assert_eq!(stack.len(), 1);

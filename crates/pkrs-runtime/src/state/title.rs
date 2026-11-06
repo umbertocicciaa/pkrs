@@ -10,7 +10,7 @@ use crate::ctx::RuntimeCtx;
 pub struct TitleState;
 
 impl GameState for TitleState {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "title"
     }
 

@@ -16,7 +16,7 @@ struct ScriptedDriver {
 }
 
 impl GameState for ScriptedDriver {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "script"
     }
 

@@ -3,6 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use pkrs_core::Direction;
+use pkrs_core::InputBuiltinPressed;
 use pkrs_core::manifest::{InputConfig as ManifestInputConfig, is_action_name};
 
 use crate::action::{Action, ActionRegistry, BuiltinAction, CustomActionId, resolve_action};
@@ -339,6 +340,12 @@ impl Input {
 
     fn builtin_binding_mut(&mut self, action: BuiltinAction) -> &mut ActionBinding {
         &mut self.builtins[action.index()]
+    }
+}
+
+impl InputBuiltinPressed for Input {
+    fn builtin_pressed(&self, action: BuiltinAction) -> bool {
+        self.pressed(Action::Builtin(action))
     }
 }
 

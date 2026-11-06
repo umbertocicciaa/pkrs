@@ -6,6 +6,7 @@ use crate::backend::RenderBackend;
 use crate::color::Color;
 use crate::draw::SpriteDraw;
 use crate::layer::Layer;
+use crate::rect::Rect;
 use crate::tilemap::{EntitySprite, TileGrid, TileSheet, tile_layer_draws, y_sort};
 use crate::viewport::{ViewportLayout, ViewportMode, compute_viewport};
 
@@ -92,6 +93,11 @@ impl Renderer {
     /// Queues a sprite draw (flushed in layer order in [`end_frame`](Self::end_frame)).
     pub fn draw_sprite(&mut self, draw: SpriteDraw) {
         self.pending.push(draw);
+    }
+
+    /// Queues a solid rectangle on `layer` (e.g. UI window chrome).
+    pub fn draw_filled_rect(&mut self, dst: Rect, color: Color, layer: Layer) {
+        self.backend.draw_filled_rect(dst, color, layer);
     }
 
     /// Queues the visible tiles of `grid` on `layer`; `origin` is the camera's

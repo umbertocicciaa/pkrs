@@ -14,6 +14,8 @@ use crate::viewport::ViewportLayout;
 /// One recorded sprite draw (for assertions).
 #[derive(Clone, Debug, PartialEq)]
 pub struct RecordedDraw {
+    /// When set, this is a solid `dst` with `tint` (ignore texture/src).
+    pub is_filled_rect: bool,
     /// Layer the sprite was drawn on.
     pub layer: Layer,
     /// Texture handle.
@@ -104,12 +106,25 @@ impl RenderBackend for NullRenderer {
 
     fn draw_sprite(&mut self, draw: &SpriteDraw) {
         self.log.0.borrow_mut().push(RecordedDraw {
+            is_filled_rect: false,
             layer: draw.layer,
             texture: draw.texture,
             src: draw.src,
             dst: draw.dst,
             flip_x: draw.flip_x,
             tint: draw.tint,
+        });
+    }
+
+    fn draw_filled_rect(&mut self, dst: crate::rect::Rect, color: Color, layer: Layer) {
+        self.log.0.borrow_mut().push(RecordedDraw {
+            is_filled_rect: true,
+            layer,
+            texture: TextureHandle(0),
+            src: crate::rect::Rect::new(0.0, 0.0, 0.0, 0.0),
+            dst,
+            flip_x: false,
+            tint: color,
         });
     }
 

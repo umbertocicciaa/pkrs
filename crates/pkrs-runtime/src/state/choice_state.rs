@@ -56,7 +56,7 @@ impl ChoiceState {
 }
 
 impl GameState for ChoiceState {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "choice"
     }
 

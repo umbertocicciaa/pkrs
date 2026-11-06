@@ -5,8 +5,8 @@
 use std::collections::HashMap;
 
 use ::macroquad::prelude::{
-    Camera2D, DrawTextureParams, FilterMode, RenderTarget, Texture2D, draw_texture_ex,
-    render_target, set_camera, set_default_camera,
+    Camera2D, DrawTextureParams, FilterMode, RenderTarget, Texture2D, draw_rectangle,
+    draw_texture_ex, render_target, set_camera, set_default_camera,
 };
 
 use super::RenderBackend;
@@ -158,6 +158,20 @@ impl RenderBackend for MacroquadRenderer {
                 ..Default::default()
             },
         );
+    }
+
+    fn draw_filled_rect(
+        &mut self,
+        dst: crate::rect::Rect,
+        color: Color,
+        _layer: crate::layer::Layer,
+    ) {
+        let Some(target) = self.internal.clone() else {
+            return;
+        };
+        let (w, h) = self.internal_size;
+        set_camera(&Self::internal_camera(w, h, target));
+        draw_rectangle(dst.x, dst.y, dst.width, dst.height, to_mq(color));
     }
 
     fn end_frame(&mut self) {

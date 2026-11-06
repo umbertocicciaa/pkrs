@@ -22,6 +22,7 @@
 
 mod error;
 mod host;
+pub mod input_bridge;
 mod lua;
 pub mod plugin;
 mod scheduler;
@@ -31,14 +32,18 @@ pub use host::{
     BattleRequest, MemoryScripts, ScriptFiles, ScriptHost, ScriptLimits, ScriptOwner, ScriptValue,
     TaskId, TaskStatus, WaitRequest, battle_result_value,
 };
+pub use input_bridge::ScriptInputSnapshot;
 pub use lua::{
-    DEFAULT_AI_MAX_FAILURES, DEFAULT_MAX_FAILURES, HOOK_NAMES, LuaAi, LuaBattleHooks, LuaScriptHost,
+    DEFAULT_AI_MAX_FAILURES, DEFAULT_MAX_FAILURES, GfxOp, HOOK_NAMES, LuaAi, LuaBattleHooks,
+    LuaScriptHost, UiScreenMethod,
 };
 pub use plugin::{
     PluginError, PluginErrors, PluginHost, PluginInitError, PluginLoadReport, PluginPlan,
     load_plugins, plan_plugins,
 };
-pub use scheduler::{Scheduler, StepReport, TaskKind, TaskOutcome, WaitCondition, WakeSignal};
+pub use scheduler::{
+    PendingUiPush, Scheduler, StepReport, TaskKind, TaskOutcome, WaitCondition, WakeSignal,
+};
 
 #[cfg(test)]
 mod tests {

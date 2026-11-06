@@ -12,6 +12,8 @@ pub use self::macroquad::MacroquadRenderer;
 use crate::Result;
 use crate::color::Color;
 use crate::draw::SpriteDraw;
+use crate::layer::Layer;
+use crate::rect::Rect;
 use crate::texture::TextureHandle;
 use crate::viewport::ViewportLayout;
 
@@ -38,6 +40,9 @@ pub trait RenderBackend {
 
     /// Draws one sprite into the internal target (call in layer order).
     fn draw_sprite(&mut self, draw: &SpriteDraw);
+
+    /// Solid filled rectangle in internal pixel space (UI chrome, placeholders).
+    fn draw_filled_rect(&mut self, dst: Rect, color: Color, layer: Layer);
 
     /// Presents the internal target scaled to the window viewport.
     fn end_frame(&mut self);

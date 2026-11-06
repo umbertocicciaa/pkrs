@@ -58,6 +58,13 @@ pub enum WaitCondition {
     },
     /// Resume after [`WakeSignal::BattleEnded`]; the engine should start `0`.
     BattleEnded(BattleRequest),
+    /// Until [`WakeSignal::UiClosed`] for this [`WaitRequest::PushUiScreen`].
+    UiPushScreen {
+        /// Same id as registration.
+        screen: String,
+        /// Args from `ui.push_screen` (for debugging).
+        args: ScriptValue,
+    },
     /// A script-defined request; resume with [`Scheduler::wake`].
     External(ScriptValue),
 }
@@ -74,6 +81,15 @@ pub enum WakeSignal {
     },
     /// The requested battle ended; resume with [`battle_result_value`](crate::battle_result_value).
     BattleEnded(ScriptValue),
+    /// Lua UI screen `screen` was popped; resume the `ui.push_screen` waiter with `result`.
+    UiClosed {
+        /// Waiting task ([`TaskId`]).
+        task: TaskId,
+        /// Screen id.
+        screen: String,
+        /// First return value from `update`, or nil.
+        result: ScriptValue,
+    },
 }
 
 /// What happened to a task when it ran.
@@ -107,9 +123,23 @@ impl StepReport {
     }
 }
 
+/// A Lua UI screen the engine should push this tick (§9.5).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PendingUiPush {
+    /// Script owner that registered the screen.
+    pub owner: ScriptOwner,
+    /// `ui.register_screen` id.
+    pub screen: String,
+    /// Second argument to `ui.push_screen`.
+    pub args: ScriptValue,
+    /// Task waiting for pop (for [`WakeSignal::UiClosed`] routing).
+    pub task: TaskId,
+}
+
 #[derive(Debug)]
 struct Entry {
     id: TaskId,
+    owner: ScriptOwner,
     name: String,
     kind: TaskKind,
     wait: WaitCondition,
@@ -137,6 +167,8 @@ pub struct Scheduler {
     tick: u64,
     tasks: Vec<Entry>,
     lock: PlayerLock,
+    /// UI opens requested by tasks that yielded `ui.push_screen` (consumed by the runtime).
+    pending_ui_pushes: Vec<PendingUiPush>,
 }
 
 impl Scheduler {
@@ -144,6 +176,11 @@ impl Scheduler {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Takes UI push requests queued by script tasks this tick (then clears the queue).
+    pub fn drain_pending_ui_pushes(&mut self) -> Vec<PendingUiPush> {
+        std::mem::take(&mut self.pending_ui_pushes)
     }
 
     /// Ticks stepped so far (`time.ticks()`).
@@ -212,12 +249,25 @@ impl Scheduler {
         })?;
         let outcome = match status {
             TaskStatus::Waiting(request) => {
-                let wait = self.condition(request);
+                let wait = self.condition(request.clone());
+                if let WaitRequest::PushUiScreen {
+                    ref screen,
+                    args: ref screen_args,
+                } = request
+                {
+                    self.pending_ui_pushes.push(PendingUiPush {
+                        owner: owner.clone(),
+                        screen: screen.clone(),
+                        args: screen_args.clone(),
+                        task: id,
+                    });
+                }
                 if kind.locks_player() {
                     self.lock.lock(u64::from(id));
                 }
                 self.tasks.push(Entry {
                     id,
+                    owner: owner.clone(),
                     name: name.to_owned(),
                     kind,
                     wait: wait.clone(),
@@ -245,9 +295,22 @@ impl Scheduler {
                 continue;
             };
             let id = self.tasks[i].id;
+            let entry_owner = self.tasks[i].owner.clone();
             match host.resume_task(id, answer) {
                 Ok(TaskStatus::Waiting(request)) => {
-                    let wait = self.condition(request);
+                    let wait = self.condition(request.clone());
+                    if let WaitRequest::PushUiScreen {
+                        ref screen,
+                        args: ref screen_args,
+                    } = request
+                    {
+                        self.pending_ui_pushes.push(PendingUiPush {
+                            owner: entry_owner,
+                            screen: screen.clone(),
+                            args: screen_args.clone(),
+                            task: id,
+                        });
+                    }
                     self.tasks[i].wait = wait.clone();
                     report.outcomes.push((id, TaskOutcome::Waiting(wait)));
                     i += 1;
@@ -286,6 +349,17 @@ impl Scheduler {
                     ScriptValue::Nil
                 }
                 (WakeSignal::BattleEnded(result), WaitCondition::BattleEnded(_)) => result.clone(),
+                (
+                    WakeSignal::UiClosed {
+                        task,
+                        screen,
+                        result,
+                    },
+                    WaitCondition::UiPushScreen {
+                        screen: want,
+                        args: _,
+                    },
+                ) if screen == want && entry.id == *task => result.clone(),
                 _ => continue,
             };
             entry.answer = Some(answer);
@@ -346,6 +420,9 @@ impl Scheduler {
             WaitRequest::DialogueClosed => WaitCondition::DialogueClosed,
             WaitRequest::PathFinished { npc } => WaitCondition::PathFinished { npc },
             WaitRequest::Battle(request) => WaitCondition::BattleEnded(request),
+            WaitRequest::PushUiScreen { screen, args } => {
+                WaitCondition::UiPushScreen { screen, args }
+            }
             WaitRequest::Other(value) => WaitCondition::External(value),
         }
     }

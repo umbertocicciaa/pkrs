@@ -235,6 +235,13 @@ pub enum WaitRequest {
         /// NPC id.
         npc: String,
     },
+    /// Until [`WakeSignal::UiClosed`] for this screen (`ui.push_screen`).
+    PushUiScreen {
+        /// Registered screen id.
+        screen: String,
+        /// Arguments table from `push_screen` (may be `nil`).
+        args: ScriptValue,
+    },
     /// Any other wait condition (dialogue closed, N ticks, …), as yielded by the script.
     Other(ScriptValue),
 }

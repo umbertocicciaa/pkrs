@@ -6,80 +6,8 @@ use pkrs_core::manifest::is_action_name;
 
 use crate::error::{InputError, InputResult};
 
-/// Built-in actions every game reads instead of raw keys.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[repr(u8)]
-#[non_exhaustive]
-pub enum BuiltinAction {
-    /// Step / menu cursor up.
-    Up,
-    /// Step / menu cursor down.
-    Down,
-    /// Step / menu cursor left.
-    Left,
-    /// Step / menu cursor right.
-    Right,
-    /// Primary confirm (talk, select menu row, …).
-    Confirm,
-    /// Back / close.
-    Cancel,
-    /// Pause / party menu.
-    Menu,
-    /// Hold while moving to run (overworld).
-    Run,
-    /// Secondary select / register (when used).
-    Select,
-}
-
-impl BuiltinAction {
-    /// Every built-in action, in declaration order.
-    pub const ALL: &'static [BuiltinAction] = &[
-        BuiltinAction::Up,
-        BuiltinAction::Down,
-        BuiltinAction::Left,
-        BuiltinAction::Right,
-        BuiltinAction::Confirm,
-        BuiltinAction::Cancel,
-        BuiltinAction::Menu,
-        BuiltinAction::Run,
-        BuiltinAction::Select,
-    ];
-
-    /// Manifest / Lua action name (`up`, `confirm`, …).
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Up => "up",
-            Self::Down => "down",
-            Self::Left => "left",
-            Self::Right => "right",
-            Self::Confirm => "confirm",
-            Self::Cancel => "cancel",
-            Self::Menu => "menu",
-            Self::Run => "run",
-            Self::Select => "select",
-        }
-    }
-
-    /// Parses a built-in action name.
-    pub fn parse(name: &str) -> Option<Self> {
-        match name {
-            "up" => Some(Self::Up),
-            "down" => Some(Self::Down),
-            "left" => Some(Self::Left),
-            "right" => Some(Self::Right),
-            "confirm" => Some(Self::Confirm),
-            "cancel" => Some(Self::Cancel),
-            "menu" => Some(Self::Menu),
-            "run" => Some(Self::Run),
-            "select" => Some(Self::Select),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn index(self) -> usize {
-        self as u8 as usize
-    }
-}
+/// Re-export: built-in action ids (defined in `pkrs-core` for script/runtime sharing).
+pub use pkrs_core::BuiltinAction;
 
 /// A built-in or plugin-registered action.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]

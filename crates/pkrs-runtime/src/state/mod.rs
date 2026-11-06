@@ -3,12 +3,14 @@
 mod choice_state;
 mod dialogue;
 mod fade;
+mod lua_ui;
 mod stack;
 mod title;
 
 pub use choice_state::ChoiceState;
 pub use dialogue::DialogueState;
 pub use fade::FadeTransition;
+pub use lua_ui::LuaUiState;
 pub use stack::StateStack;
 pub use title::TitleState;
 
@@ -19,7 +21,7 @@ use crate::ctx::RuntimeCtx;
 /// Lifecycle hooks and per-tick logic for one screen on the stack.
 pub trait GameState {
     /// Stable id used by [`Transition::PopTo`] and debug overlays.
-    fn id(&self) -> &'static str;
+    fn id(&self) -> &str;
 
     /// Called once when this state becomes the top of the stack.
     fn on_enter(&mut self, _ctx: &mut RuntimeCtx) {}
@@ -62,7 +64,7 @@ pub enum Transition {
     /// Replace the top state without calling [`GameState::on_resume`] on the state below.
     Replace(Box<dyn GameState>),
     /// Pop until the top state's [`GameState::id`] matches.
-    PopTo(&'static str),
+    PopTo(String),
     /// Exit the main loop after the tick completes.
     Quit,
 }

@@ -9,9 +9,11 @@ mod convert;
 mod plugin;
 mod sandbox;
 mod time;
+mod ui;
 
 pub use ai::{DEFAULT_AI_MAX_FAILURES, LuaAi};
 pub use battle::{DEFAULT_MAX_FAILURES, HOOK_NAMES, LuaBattleHooks};
+pub use ui::GfxOp;
 
 use std::cell::Cell;
 use std::collections::BTreeMap;
@@ -22,12 +24,14 @@ use mlua::{
     Value, VmState,
 };
 use pkrs_core::GameRng;
+use pkrs_core::InputBuiltinPressed;
 
 use crate::error::{Result, ScriptError, split_location};
 use crate::host::{
     BattleRequest, ScriptFiles, ScriptHost, ScriptLimits, ScriptOwner, ScriptValue, TaskId,
     TaskStatus, WaitRequest,
 };
+use crate::input_bridge::{LastScriptInput, ScriptInputSnapshot};
 
 /// Instructions between two budget checks.
 const HOOK_STRIDE: u32 = 1_000;
@@ -209,6 +213,166 @@ impl LuaScriptHost {
             _ => Ok(None),
         }
     }
+
+    /// Updates `__pkrs_input.pressed` for Lua UI (`input.pressed("cancel")`, §9.5 §10).
+    pub fn sync_script_input(
+        &mut self,
+        owner: &ScriptOwner,
+        input: &impl InputBuiltinPressed,
+    ) -> Result<()> {
+        self.lua
+            .set_app_data(LastScriptInput(ScriptInputSnapshot::capture(input)));
+        let env = self.env(owner)?;
+        ui::ensure_input_table(&self.lua, &env).map_err(engine)?;
+        Ok(())
+    }
+
+    /// Returns the handler table registered with `ui.register_screen`, if any.
+    pub fn get_ui_screen_table(
+        &mut self,
+        owner: &ScriptOwner,
+        screen_id: &str,
+    ) -> Result<Option<Table>> {
+        let env = self.env(owner)?;
+        let screens: Value = env.raw_get("__pkrs_ui_screens").map_err(engine)?;
+        let Value::Table(screens) = screens else {
+            return Ok(None);
+        };
+        let t: Value = screens.raw_get(screen_id).map_err(engine)?;
+        match t {
+            Value::Table(tab) => Ok(Some(tab)),
+            _ => Ok(None),
+        }
+    }
+
+    /// Invokes a Lua UI screen handler: `on_enter`, `update`, or `render` (§9.5).
+    ///
+    /// Missing optional methods return [`ScriptValue::Nil`]. For `render`, recorded ops are read
+    /// with [`take_ui_gfx_ops`](Self::take_ui_gfx_ops).
+    pub fn ui_invoke(
+        &mut self,
+        owner: &ScriptOwner,
+        screen_id: &str,
+        method: UiScreenMethod,
+        screen_table: &Table,
+        arg: Option<ScriptValue>,
+    ) -> Result<ScriptValue> {
+        let method_name = method.as_str();
+        let method_fn: Value = screen_table.raw_get(method_name).map_err(engine)?;
+        let f = match method_fn {
+            Value::Function(f) => f,
+            Value::Nil => return Ok(ScriptValue::Nil),
+            _ => {
+                return Err(ScriptError::Conversion(format!(
+                    "ui screen `{screen_id}`: `{method_name}` must be a function or nil"
+                )));
+            }
+        };
+        let env = self.env(owner)?;
+        ui::ensure_input_table(&self.lua, &env).map_err(engine)?;
+        let instance = screen_table.clone();
+        let args = match method {
+            UiScreenMethod::OnEnter => {
+                let a = match arg {
+                    Some(v) => convert::to_lua(&self.lua, &v).map_err(engine)?,
+                    None => Value::Nil,
+                };
+                MultiValue::from_vec(vec![Value::Table(instance), a])
+            }
+            UiScreenMethod::Update => {
+                let input: Table = env.raw_get("__pkrs_input").map_err(engine)?;
+                MultiValue::from_vec(vec![Value::Table(instance), Value::Table(input)])
+            }
+            UiScreenMethod::Render => {
+                ui::begin_gfx_recording(&self.lua);
+                let gfx = ui::gfx_api_table(&self.lua)?;
+                MultiValue::from_vec(vec![Value::Table(instance), Value::Table(gfx)])
+            }
+        };
+        let results = self.protected(&format!("ui:{screen_id}:{method_name}"), |_| {
+            f.call::<MultiValue>(args)
+        })?;
+        let first = results.into_iter().next().unwrap_or(Value::Nil);
+        convert::from_lua(&first)
+    }
+
+    /// Draw commands recorded during the last [`ui_invoke`](Self::ui_invoke) with [`UiScreenMethod::Render`].
+    #[must_use]
+    pub fn take_ui_gfx_ops(&mut self) -> Vec<ui::GfxOp> {
+        ui::take_gfx_ops(&self.lua)
+    }
+
+    /// Runs the screen's `on_enter(self, args?)` if registered.
+    pub fn ui_screen_on_enter(
+        &mut self,
+        owner: &ScriptOwner,
+        screen_id: &str,
+        args: ScriptValue,
+    ) -> Result<()> {
+        let Some(table) = self.get_ui_screen_table(owner, screen_id)? else {
+            return Err(ScriptError::Engine(format!(
+                "ui screen `{screen_id}` is not registered for {owner}"
+            )));
+        };
+        self.ui_invoke(
+            owner,
+            screen_id,
+            UiScreenMethod::OnEnter,
+            &table,
+            Some(args),
+        )?;
+        Ok(())
+    }
+
+    /// Runs `update(self, input)`; missing `update` returns [`ScriptValue::Nil`].
+    pub fn ui_screen_update(
+        &mut self,
+        owner: &ScriptOwner,
+        screen_id: &str,
+    ) -> Result<ScriptValue> {
+        let Some(table) = self.get_ui_screen_table(owner, screen_id)? else {
+            return Err(ScriptError::Engine(format!(
+                "ui screen `{screen_id}` is not registered for {owner}"
+            )));
+        };
+        self.ui_invoke(owner, screen_id, UiScreenMethod::Update, &table, None)
+    }
+
+    /// Runs `render(self, gfx)` and returns recorded draw commands.
+    pub fn ui_screen_render_ops(
+        &mut self,
+        owner: &ScriptOwner,
+        screen_id: &str,
+    ) -> Result<Vec<ui::GfxOp>> {
+        let Some(table) = self.get_ui_screen_table(owner, screen_id)? else {
+            return Err(ScriptError::Engine(format!(
+                "ui screen `{screen_id}` is not registered for {owner}"
+            )));
+        };
+        self.ui_invoke(owner, screen_id, UiScreenMethod::Render, &table, None)?;
+        Ok(self.take_ui_gfx_ops())
+    }
+}
+
+/// Lua screen lifecycle method (§9.5).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UiScreenMethod {
+    /// `on_enter(self, args?)`.
+    OnEnter,
+    /// `update(self, input)`.
+    Update,
+    /// `render(self, gfx)`.
+    Render,
+}
+
+impl UiScreenMethod {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::OnEnter => "on_enter",
+            Self::Update => "update",
+            Self::Render => "render",
+        }
+    }
 }
 
 impl ScriptHost for LuaScriptHost {
@@ -326,6 +490,9 @@ fn wait_request(value: &Value) -> Result<WaitRequest> {
     let conv = |e: mlua::Error| ScriptError::Conversion(e.to_string());
     if let Value::Table(t) = value {
         if let Some(request) = time::parse_wait(t)? {
+            return Ok(request);
+        }
+        if let Some(request) = ui::parse_ui_push(t)? {
             return Ok(request);
         }
         if t.raw_get::<Option<String>>("wait")

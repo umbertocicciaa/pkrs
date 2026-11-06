@@ -9,6 +9,7 @@ mod error;
 mod events;
 mod grid;
 mod id;
+pub mod input;
 pub mod manifest;
 mod rng;
 mod version;
@@ -19,6 +20,7 @@ pub use error::{CoreError, Result};
 pub use events::{EngineEvent, EventPayload, EventQueue};
 pub use grid::GridPos;
 pub use id::{IdInterner, IdKind, MoveKind, SpeciesKind, TypedId, validate_id};
+pub use input::{BuiltinAction, InputBuiltinPressed};
 pub use manifest::{
     ManifestError, PluginManifest, PluginManifestError, ProjectManifest, is_action_name,
     is_plugin_id,

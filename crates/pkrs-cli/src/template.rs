@@ -274,6 +274,7 @@ mod tests {
             "_gitignore",
             "LICENSES.md",
             "maps/start.tmx",
+            "maps/dest.tmx",
             "tilesets/overworld.tsx",
             "tilesets/overworld.png",
             "sprites/player.png",

@@ -10,5 +10,6 @@ redistribute them without attribution.
 | `tilesets/overworld.tsx` | pkrs contributors | CC0-1.0 |
 | `sprites/player.png` | pkrs contributors | CC0-1.0 |
 | `maps/start.tmx` | pkrs contributors | CC0-1.0 |
+| `maps/dest.tmx` | pkrs contributors | CC0-1.0 |
 
 When you add third-party assets, list them here with their author and license.

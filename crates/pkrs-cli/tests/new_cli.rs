@@ -41,6 +41,7 @@ fn new_scaffolds_a_pinned_one_shot_project() {
         "LICENSES.md",
         "README.md",
         "maps/start.tmx",
+        "maps/dest.tmx",
         "tilesets/overworld.tsx",
         "tilesets/overworld.png",
         "sprites/player.png",

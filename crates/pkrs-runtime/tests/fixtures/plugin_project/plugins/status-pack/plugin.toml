@@ -1,0 +1,8 @@
+[plugin]
+id      = "status-pack"
+name    = "Status Pack"
+version = "1.4.2"
+api     = 1
+
+[dependencies]
+"ui-kit" = "^1.0"

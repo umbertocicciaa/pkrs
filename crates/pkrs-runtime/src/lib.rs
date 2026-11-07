@@ -3,6 +3,7 @@
 pub mod battle;
 mod ctx;
 mod demo;
+pub mod encounters;
 mod fixed_step;
 mod game_host;
 mod main_loop;

@@ -6,6 +6,7 @@
 mod battle_pack;
 mod battle_rules;
 pub mod content;
+mod encounter;
 mod error;
 mod move_def;
 mod species;
@@ -21,6 +22,10 @@ pub use content::{
     AbilityDef, ContentDb, ContentDef, ContentEntry, ContentKind, ContentOverride, ContentSource,
     ContentValue, ContentValueError, EffectDef, ItemDef, Record, TerrainDef, is_content_id,
     parse_content,
+};
+pub use encounter::{
+    EncounterPick, EncounterSlot, EncounterTable, EncounterTables, MAX_ENCOUNTER_LEVEL,
+    roll_encounter_rate,
 };
 pub use error::{DataError, Result};
 pub use move_def::{EffectTarget, MoveCategory, MoveDef, MoveEffect, StatId};

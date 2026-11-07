@@ -3,7 +3,7 @@
 use mlua::Table;
 use pkrs_core::PluginManifest;
 
-use super::{LuaScriptHost, engine};
+use super::{LuaScriptHost, engine, hook_order};
 use crate::error::Result;
 use crate::host::ScriptOwner;
 use crate::plugin::PluginHost;
@@ -17,6 +17,8 @@ return { define = function() return P end }
 impl PluginHost for LuaScriptHost {
     fn bind_plugin(&mut self, manifest: &PluginManifest) -> Result<()> {
         let owner = ScriptOwner::plugin(manifest.id());
+        // Bound in load order, so this is the plugin's rank in hook chains (§9.4).
+        hook_order::bind_plugin_rank(&self.lua, manifest.id());
         let env = self.env(&owner)?;
         let info = &manifest.plugin;
         let p: Table = self.lua.create_table().map_err(engine)?;

@@ -4,6 +4,7 @@ use core::fmt;
 use std::collections::BTreeMap;
 
 use crate::error::{Result, ScriptError};
+use crate::events::{ListenerId, ListenerInfo, ScriptEvent};
 
 /// Who a chunk belongs to. Each owner runs with its own `_ENV` table, so plugins cannot clobber
 /// each other's (or the game's) globals (§9.6).
@@ -13,6 +14,9 @@ pub enum ScriptOwner {
     Game,
     /// A plugin (`plugins/<id>/`).
     Plugin(String),
+    /// The per-map script of map `id` (`scripts/maps/<id>.lua`), loaded on map enter and
+    /// unloaded on map exit (§6.4).
+    Map(String),
 }
 
 impl ScriptOwner {
@@ -29,6 +33,7 @@ impl ScriptOwner {
         match self {
             Self::Game => vec!["scripts".into()],
             Self::Plugin(id) => vec![format!("plugins/{id}"), "scripts".into()],
+            Self::Map(_) => vec!["scripts".into()],
         }
     }
 }
@@ -38,6 +43,7 @@ impl fmt::Display for ScriptOwner {
         match self {
             Self::Game => write!(f, "the game"),
             Self::Plugin(id) => write!(f, "plugin `{id}`"),
+            Self::Map(id) => write!(f, "map script `{id}`"),
         }
     }
 }
@@ -62,6 +68,9 @@ pub enum ScriptValue {
     /// A value that only lives inside the script engine (function, userdata, thread); holds its
     /// type name. Passed back to scripts as `nil`.
     Opaque(&'static str),
+    /// Handle to the NPC with this id on the active map; scripts see an `npc` object with
+    /// `:move`, `:face`, … (§9.1).
+    Npc(String),
 }
 
 impl ScriptValue {
@@ -333,6 +342,32 @@ pub trait ScriptHost {
     /// Tells scripts the current simulation tick (`time.ticks()`); the
     /// [`Scheduler`](crate::Scheduler) calls this before running tasks.
     fn set_tick(&mut self, _tick: u64) {}
+
+    /// Appends `event` to the event queue (`events.emit` does the same from Lua, §9.2).
+    fn emit_event(&mut self, _event: ScriptEvent) {}
+
+    /// Takes every queued event, in emission order.
+    fn take_events(&mut self) -> Vec<ScriptEvent> {
+        Vec::new()
+    }
+
+    /// Listeners registered for `event` with `events.on`, in hook-chain order (§9.4:
+    /// priority, then plugin load order, then registration order).
+    fn listeners(&mut self, _event: &str) -> Vec<ListenerInfo> {
+        Vec::new()
+    }
+
+    /// Starts listener `listener` as a task with `args` and runs it until it yields or
+    /// returns, like [`start_task`](Self::start_task).
+    fn start_listener(
+        &mut self,
+        listener: ListenerId,
+        _args: &[ScriptValue],
+    ) -> Result<(TaskId, TaskStatus)> {
+        Err(ScriptError::Engine(format!(
+            "this script host has no event listener {listener}"
+        )))
+    }
 }
 
 #[cfg(test)]
@@ -345,6 +380,14 @@ mod tests {
         assert_eq!(
             ScriptOwner::plugin("resonance").require_roots(),
             ["plugins/resonance", "scripts"]
+        );
+        assert_eq!(
+            ScriptOwner::Map("route_1".into()).require_roots(),
+            ["scripts"]
+        );
+        assert_eq!(
+            ScriptOwner::Map("route_1".into()).to_string(),
+            "map script `route_1`"
         );
     }
 

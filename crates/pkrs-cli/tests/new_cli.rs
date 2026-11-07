@@ -105,3 +105,55 @@ fn run_outside_a_project_explains_itself() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("no pkrs.toml"));
     std::fs::remove_dir_all(&root).unwrap();
 }
+
+#[test]
+fn check_plugins_prints_the_resolved_hook_table() {
+    let root = temp_dir("check");
+    let dest = root.join("game");
+    let out = pkrs()
+        .args(["new", "game", "--path"])
+        .arg(&dest)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let manifest = std::fs::read_to_string(dest.join("pkrs.toml")).unwrap();
+    std::fs::write(
+        dest.join("pkrs.toml"),
+        format!("{manifest}\n[plugins]\nenabled = [\"shield\", \"crit\"]\n"),
+    )
+    .unwrap();
+    for (id, priority) in [("shield", -5), ("crit", 10)] {
+        let dir = dest.join("plugins").join(id);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("plugin.toml"),
+            format!("[plugin]\nid = \"{id}\"\nname = \"{id}\"\nversion = \"1.0.0\"\napi = 1\n"),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("init.lua"),
+            format!("battle.on('on_damage_taken', function() end, {{ priority = {priority} }})\n"),
+        )
+        .unwrap();
+    }
+    let out = pkrs()
+        .args(["check", "--plugins", "--project"])
+        .arg(&dest)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n");
+    assert!(
+        out.status.success(),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("plugins (load order): shield, crit\n"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("  on_damage_taken\n      -5  shield\n      10  crit\n"),
+        "{stdout}"
+    );
+    std::fs::remove_dir_all(&root).unwrap();
+}

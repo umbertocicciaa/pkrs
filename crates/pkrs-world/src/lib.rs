@@ -27,8 +27,8 @@ pub use map::{
     VisualLayerKind, Warp,
 };
 pub use movement::{
-    FieldState, GridStepper, LinkCrossing, MovementConfig, Occupancy, PlayerLock, StepEvent,
-    TerrainRuleFn, TerrainRuleRegistry, TerrainStepVerdict,
+    FieldState, GridStepper, LinkCrossing, LockHolder, MovementConfig, Occupancy, PathProgress,
+    PlayerLock, ScriptedPath, StepEvent, TerrainRuleFn, TerrainRuleRegistry, TerrainStepVerdict,
 };
 pub use world_layout::{
     MapLinks, NeighborLink, WORLD_RON, WorldLayout, neighbor_pixel_offset, on_departure_edge,

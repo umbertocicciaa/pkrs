@@ -16,18 +16,35 @@
 //! - **Scheduler:** [`Scheduler`] steps tasks once per tick in creation order, resuming each
 //!   when its [`WaitCondition`] is met (`time.wait(n)`, dialogue closed, path finished, battle
 //!   ended) and locking the player for interact/trigger scripts (§9.3).
+//! - **Lua API v0 (§9.1):** namespaced `game`, `map`, `npc` objects, `player`, `ui`, `camera`,
+//!   `time`, `log` and `events` tables in every environment. They reach the engine only through
+//!   the [`ScriptWorld`] port ([`LuaScriptHost::set_world`]); blocking-looking calls
+//!   (`ui.say`, `ui.choose`, `ui.yes_no`, `npc:move`, `wait`) yield to the [`Scheduler`].
+//! - **Events (§9.2):** `events.on` / `events.emit` and the engine events ([`ScriptEvent`]) are
+//!   queued and flushed once per tick with [`Scheduler::dispatch_events`], in emission order.
 //! - **Plugins:** [`plugin`] discovers `plugins/*/plugin.toml`, validates the enabled set and
 //!   sorts it ([`plan_plugins`]), then runs each `init.lua` in its own `_ENV`
 //!   ([`load_plugins`]) with `plugin.define()` bound to the manifest (§9.4, §9.7).
+//! - **Hook chains:** [`chain`] orders handlers by priority, then plugin load order, then
+//!   registration order, threads the value through them and stops on cancel (§9.4).
+//!   [`LuaScriptHost::hook_table`] returns the resolved [`HookTable`].
 
+pub mod chain;
 mod error;
+pub mod events;
 mod host;
 pub mod input_bridge;
 mod lua;
 pub mod plugin;
 mod scheduler;
+mod world;
 
+pub use chain::{
+    ChainKey, ChainOutcome, HookChain, HookKind, HookTable, HookTableEntry, LoadOrder, Step,
+    run_chain,
+};
 pub use error::{Result, ScriptError, split_location};
+pub use events::{DispatchReport, ENGINE_EVENTS, ListenerId, ListenerInfo, ScriptEvent};
 pub use host::{
     BattleRequest, MemoryScripts, ScriptFiles, ScriptHost, ScriptLimits, ScriptOwner, ScriptValue,
     TaskId, TaskStatus, WaitRequest, battle_result_value,
@@ -43,6 +60,9 @@ pub use plugin::{
 };
 pub use scheduler::{
     PendingUiPush, Scheduler, StepReport, TaskKind, TaskOutcome, WaitCondition, WakeSignal,
+};
+pub use world::{
+    ApiError, ApiResult, CameraCommand, CameraTarget, ScriptWorld, TileInfo, direction_toward,
 };
 
 #[cfg(test)]

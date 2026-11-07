@@ -8,7 +8,8 @@
 //! 3. [`load_plugins`] binds each manifest to its plugin environment (`plugin.define()`) and
 //!    runs `plugins/<id>/init.lua` in load order.
 //!
-//! Hook chains (combining handlers across plugins) are not part of this module.
+//! Hook chains (combining handlers across plugins) live in [`crate::chain`]; binding a plugin
+//! also fixes its rank in them.
 
 mod discover;
 mod error;

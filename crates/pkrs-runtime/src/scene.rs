@@ -182,6 +182,13 @@ impl MapScene {
         }
     }
 
+    /// Removes the entity `id` (e.g. a hidden NPC); returns whether it existed.
+    pub fn remove_entity(&mut self, id: u32) -> bool {
+        let before = self.entities.len();
+        self.entities.retain(|e| e.id != id);
+        self.entities.len() != before
+    }
+
     /// Entity by id.
     pub fn entity_mut(&mut self, id: u32) -> Option<&mut SceneEntity> {
         self.entities.iter_mut().find(|e| e.id == id)

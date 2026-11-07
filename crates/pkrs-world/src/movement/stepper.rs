@@ -87,6 +87,18 @@ impl GridStepper {
         self.facing
     }
 
+    /// Turns to `dir` without moving (scripted `face`, §9.1). Ignored mid-step; returns
+    /// whether the facing was applied.
+    pub fn face(&mut self, dir: Direction) -> bool {
+        if !self.is_idle() {
+            return false;
+        }
+        self.facing = dir;
+        self.hold_dir = None;
+        self.hold_ticks = 0;
+        true
+    }
+
     /// Walk-cycle foot for sprite selection.
     #[must_use]
     pub fn foot(&self) -> u8 {

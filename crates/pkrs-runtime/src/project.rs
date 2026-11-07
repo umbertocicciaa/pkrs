@@ -12,7 +12,8 @@ use pkrs_core::{Direction, GridPos, ProjectManifest, Version};
 use pkrs_platform::{
     Action, BuiltinAction, DisplaySettings, Input, InputFacadeConfig, Platform, UserPaths,
 };
-use pkrs_render::{Rect, Renderer, TextureHandle};
+use pkrs_render::{CameraTarget, Rect, Renderer, TextureHandle};
+use pkrs_script::{CameraCommand, CameraTarget as ScriptCameraTarget, LuaScriptHost};
 use pkrs_world::{
     GridStepper, LinkCrossing, Map, MapImporter, MovementConfig, StepEvent, TerrainRuleRegistry,
     TiledImporter, Transition as WarpTransition, WORLD_RON, Warp, WorldLayout,
@@ -20,7 +21,10 @@ use pkrs_world::{
 };
 
 use crate::main_loop::SimulationHost;
+use crate::overworld::{OverworldScripts, ScreenFade, ScriptOverlay};
 use crate::scene::{MapScene, NeighborBackdrop, PLAYER_ENTITY, tile_sheet};
+use crate::ui_assets::build_test_ui_theme;
+use crate::ui_theme::UiTheme;
 
 /// Scripting API levels this runtime supports (§9.7).
 pub const SUPPORTED_API: std::ops::RangeInclusive<u32> = 1..=1;
@@ -43,7 +47,7 @@ pub enum ProjectError {
     /// The start map failed to load.
     #[error(transparent)]
     Map(#[from] pkrs_world::MapError),
-    /// World layout or connection error.
+    /// World layout (`world.ron`) failed to load or validate.
     #[error(transparent)]
     World(#[from] pkrs_world::WorldError),
     /// A texture could not be decoded or uploaded.
@@ -293,7 +297,7 @@ fn neighbor_cache(
     }
 }
 
-/// The overworld of a loaded project: map scene, player and input.
+/// The overworld of a loaded project: map scene, player, NPCs, scripts and input.
 pub struct ProjectHost {
     project: Project,
     renderer: Renderer,
@@ -302,16 +306,43 @@ pub struct ProjectHost {
     terrain_rules: TerrainRuleRegistry,
     walker: GridStepper,
     player_sprite: (TextureHandle, Rect),
+    npc_sprite: (TextureHandle, Rect),
     ticks: u64,
     warp_phase: WarpPhase,
+    scripts: Option<OverworldScripts>,
+    ui_theme: Option<UiTheme>,
+    overlay: Option<ScriptOverlay>,
+    fade: ScreenFade,
+    /// Tile the player last stood on between steps (trigger zones fire on entry).
+    player_tile: GridPos,
     crossing: Option<CrossingContext>,
     neighbors: Vec<NeighborCache>,
     active_textures: Vec<TextureHandle>,
 }
 
 impl ProjectHost {
-    /// Loads the start map of `project` and uploads its textures through `renderer`.
-    pub fn new(project: &Project, mut renderer: Renderer) -> Result<Self, ProjectError> {
+    /// Loads the start map of `project` and uploads its textures through `renderer`. No
+    /// scripts run; see [`with_scripts`](Self::with_scripts).
+    pub fn new(project: &Project, renderer: Renderer) -> Result<Self, ProjectError> {
+        Self::build(project, renderer, None)
+    }
+
+    /// Like [`new`](Self::new), with the overworld driven by `scripts` (plugins already
+    /// loaded): `scripts/main.lua` runs, `game_start` and `map_enter` fire, the start map's
+    /// script is loaded and NPCs, triggers and signs run their scripts (§6.4, §9.1–§9.3).
+    pub fn with_scripts(
+        project: &Project,
+        renderer: Renderer,
+        scripts: LuaScriptHost,
+    ) -> Result<Self, ProjectError> {
+        Self::build(project, renderer, Some(scripts))
+    }
+
+    fn build(
+        project: &Project,
+        mut renderer: Renderer,
+        scripts: Option<LuaScriptHost>,
+    ) -> Result<Self, ProjectError> {
         let map = project.load_map()?;
         let textures = upload_map_textures(project, &mut renderer, &map)?;
         let (start, facing) = project.start_tile(&map);
@@ -337,6 +368,17 @@ impl ProjectHost {
         );
         let input = Input::from_manifest(InputFacadeConfig::default(), &project.manifest.input)
             .unwrap_or_else(|_| Input::new(InputFacadeConfig::default()));
+        let npc_sprite = marker_sprite(&mut renderer, tw, th, [60, 90, 230, 255])?;
+        let ui_theme = match &scripts {
+            Some(_) => match build_test_ui_theme(&mut renderer) {
+                Ok(theme) => Some(theme),
+                Err(err) => {
+                    tracing::warn!(%err, "no UI theme: script dialogue closes immediately");
+                    None
+                }
+            },
+            None => None,
+        };
         let mut host = Self {
             project: project.clone(),
             renderer,
@@ -345,13 +387,27 @@ impl ProjectHost {
             terrain_rules: TerrainRuleRegistry::new(),
             walker: GridStepper::new(start, facing),
             player_sprite,
+            npc_sprite,
             ticks: 0,
             warp_phase: WarpPhase::None,
+            scripts: scripts.map(OverworldScripts::new),
+            ui_theme,
+            overlay: None,
+            fade: ScreenFade::default(),
+            player_tile: start,
             crossing: None,
             neighbors: Vec::new(),
             active_textures: textures,
         };
         host.bootstrap_world_layout()?;
+        if let Some(scripts) = host.scripts.as_mut() {
+            scripts.start_game(host.scene.map(), start, facing);
+            host.place_npcs();
+        }
+        if let Some(scripts) = host.scripts.as_mut() {
+            scripts.flush_events();
+        }
+        host.apply_script_requests();
         Ok(host)
     }
 
@@ -359,6 +415,29 @@ impl ProjectHost {
     #[must_use]
     pub fn is_warping(&self) -> bool {
         !matches!(self.warp_phase, WarpPhase::None)
+    }
+
+    /// Overworld scripting, when enabled with [`with_scripts`](Self::with_scripts).
+    #[must_use]
+    pub fn scripts(&self) -> Option<&OverworldScripts> {
+        self.scripts.as_ref()
+    }
+
+    /// Mutable overworld scripting (tests, debug console).
+    pub fn scripts_mut(&mut self) -> Option<&mut OverworldScripts> {
+        self.scripts.as_mut()
+    }
+
+    /// The script dialogue on screen, if any.
+    #[must_use]
+    pub fn overlay(&self) -> Option<&ScriptOverlay> {
+        self.overlay.as_ref()
+    }
+
+    /// Current screen fade level (`camera.fade_out` / `fade_in`), `0.0`–`1.0`.
+    #[must_use]
+    pub fn fade_level(&self) -> f32 {
+        self.fade.level()
     }
 
     /// The scene (map, entities, camera).
@@ -426,6 +505,9 @@ impl ProjectHost {
     fn apply_warp(&mut self, pending: &PendingWarp) -> Result<(), ProjectError> {
         let facing = pending.facing.unwrap_or_else(|| self.walker.facing());
         let map = self.project.load_map_by_id(&pending.to_map)?;
+        if let Some(scripts) = self.scripts.as_mut() {
+            scripts.exit_map();
+        }
         let textures = upload_map_textures(&self.project, &mut self.renderer, &map)?;
         if !map.grid.in_bounds(pending.to) {
             return Err(ProjectError::StartOutOfBounds {
@@ -446,7 +528,12 @@ impl ProjectHost {
         self.scene = scene;
         self.active_textures = textures;
         self.walker = GridStepper::new(pending.to, facing);
+        self.player_tile = pending.to;
         tracing::info!(map = %self.scene.map().id, pos = %pending.to, "map_enter (warp)");
+        if let Some(scripts) = self.scripts.as_mut() {
+            scripts.enter_map(self.scene.map(), pending.to, facing);
+        }
+        self.place_npcs();
         self.refresh_neighbors()?;
         Ok(())
     }
@@ -567,6 +654,9 @@ impl ProjectHost {
         entry: GridPos,
         via: Direction,
     ) -> Result<(), ProjectError> {
+        if let Some(scripts) = self.scripts.as_mut() {
+            scripts.exit_map();
+        }
         let old_map = self.scene.map().clone();
         let old_textures = std::mem::take(&mut self.active_textures);
         let old_id = old_map.id.clone();
@@ -593,6 +683,7 @@ impl ProjectHost {
                 height: map.height,
             });
         }
+        let facing = self.walker.facing();
         let mut scene = MapScene::new(map, &textures)?;
         scene.place_entity(
             PLAYER_ENTITY,
@@ -604,7 +695,12 @@ impl ProjectHost {
         self.scene = scene;
         self.active_textures = textures;
         self.walker.relocate(entry);
+        self.player_tile = entry;
         tracing::info!(map = %self.scene.map().id, pos = %entry, "map_enter (seamless)");
+        if let Some(scripts) = self.scripts.as_mut() {
+            scripts.enter_map(self.scene.map(), entry, facing);
+        }
+        self.place_npcs();
 
         let mut reuse = self.drain_neighbor_reuse();
         reuse.insert(old_id, (old_map, old_textures));
@@ -657,14 +753,236 @@ impl ProjectHost {
         Ok(())
     }
 
-    fn on_step_completed(&mut self, pos: GridPos) {
-        tracing::trace!(%pos, "step");
-        let grid = &self.scene.map().grid;
-        if grid.in_bounds(pos) {
-            let warp = self.scene.map().warp_at(pos).cloned();
-            if let Some(warp) = warp {
-                self.begin_warp(&warp);
+    /// Adds a scene entity for every visible NPC of the active map.
+    fn place_npcs(&mut self) {
+        let Some(scripts) = self.scripts.as_ref() else {
+            return;
+        };
+        let npcs: Vec<(u32, GridPos, bool)> = scripts
+            .world()
+            .get()
+            .npcs
+            .iter()
+            .map(|n| (n.object_id, n.walker.pos(), n.visible))
+            .collect();
+        let (texture, src) = self.npc_sprite;
+        for (id, pos, visible) in npcs {
+            if visible {
+                self.scene.place_entity(id, pos, texture, src, false);
             }
+        }
+    }
+
+    /// Moves NPC entities to their walkers' interpolated tiles; hides hidden ones.
+    fn sync_npc_sprites(&mut self) {
+        let Some(scripts) = self.scripts.as_ref() else {
+            return;
+        };
+        let npcs: Vec<(u32, (f32, f32), bool)> = scripts
+            .world()
+            .get()
+            .npcs
+            .iter()
+            .map(|n| (n.object_id, n.walker.tile_position(), n.visible))
+            .collect();
+        let (tw, th) = (self.scene.map().tile_width, self.scene.map().tile_height);
+        let (texture, src) = self.npc_sprite;
+        for (id, (tx, ty), visible) in npcs {
+            if !visible {
+                self.scene.remove_entity(id);
+                continue;
+            }
+            if self.scene.entity_mut(id).is_none() {
+                let tile = GridPos::new(tx.round() as i32, ty.round() as i32);
+                self.scene.place_entity(id, tile, texture, src, false);
+            }
+            if let Some(entity) = self.scene.entity_mut(id) {
+                entity.pos.set(tx * tw as f32, ty * th as f32);
+            }
+        }
+    }
+
+    /// Applies what scripts asked for: opens the next dialogue, starts a scripted warp, runs
+    /// camera commands and turns the player.
+    fn apply_script_requests(&mut self) {
+        let Some(scripts) = self.scripts.as_mut() else {
+            return;
+        };
+        if let Some(dir) = scripts.take_player_face() {
+            self.walker.face(dir);
+        }
+        if self.overlay.is_none() {
+            if let Some(request) = scripts.take_ui_request() {
+                match &self.ui_theme {
+                    Some(theme) => {
+                        let view = self.renderer.view_size();
+                        self.overlay = Some(ScriptOverlay::open(request, theme, view));
+                    }
+                    None => scripts.close_dialogue(pkrs_script::ScriptValue::Nil),
+                }
+            }
+        }
+        let commands = scripts.take_camera_commands();
+        let warp = scripts.take_warp_request();
+        for command in commands {
+            self.apply_camera(command);
+        }
+        if let Some(warp) = warp {
+            if matches!(self.warp_phase, WarpPhase::None) {
+                self.begin_warp(&Warp {
+                    to_map: warp.map,
+                    to: warp.to,
+                    facing: warp.facing,
+                    transition: WarpTransition::Fade,
+                });
+            } else {
+                tracing::warn!(target: "script", map = %warp.map, "map.warp ignored: a warp is already running");
+            }
+        }
+    }
+
+    fn apply_camera(&mut self, command: CameraCommand) {
+        let (tw, th) = (
+            self.scene.map().tile_width as f32,
+            self.scene.map().tile_height as f32,
+        );
+        match command {
+            CameraCommand::PanTo { to, ticks } => {
+                let x = to.x as f32 * tw + tw / 2.0;
+                let y = to.y as f32 * th + th / 2.0;
+                self.scene.camera_mut().pan_to(x, y, ticks);
+            }
+            CameraCommand::Follow(ScriptCameraTarget::Player) => {
+                self.scene.camera_mut().follow(CameraTarget::Player);
+            }
+            CameraCommand::Follow(ScriptCameraTarget::Npc(id)) => {
+                let entity = self
+                    .scripts
+                    .as_ref()
+                    .and_then(|s| s.world().get().npc(&id).map(|n| n.object_id));
+                match entity {
+                    Some(entity) => self.scene.camera_mut().follow(CameraTarget::Entity(entity)),
+                    None => {
+                        tracing::warn!(target: "script", npc = %id, "camera.follow: no such npc")
+                    }
+                }
+            }
+            CameraCommand::Shake { intensity, ticks } => {
+                self.scene.camera_mut().shake(intensity as f32, ticks);
+            }
+            CameraCommand::FadeOut { ticks } => self.fade.start(1.0, ticks),
+            CameraCommand::FadeIn { ticks } => self.fade.start(0.0, ticks),
+        }
+    }
+
+    /// One overworld tick (§3.3 step 3): the open dialogue takes the input; otherwise the
+    /// player walks (gated by the script locks), steps fire `step` / `trigger_enter` / warps,
+    /// and Confirm interacts.
+    fn tick_overworld(&mut self) {
+        if let Some(overlay) = self.overlay.as_mut() {
+            if let Some(answer) = overlay.update(&mut self.input) {
+                self.overlay = None;
+                if let Some(scripts) = self.scripts.as_mut() {
+                    scripts.close_dialogue(answer);
+                }
+            }
+            return;
+        }
+        let held = self.held_direction();
+        let dir = match &self.scripts {
+            Some(scripts) => scripts.gate(held),
+            None => held,
+        };
+        let running = self.input.down(Action::Builtin(BuiltinAction::Run));
+        self.walker.set_running(running);
+        let link_crossing = self.crossing.as_ref().map(CrossingContext::link_crossing);
+        let events = {
+            let grid = &self.scene.map().grid;
+            match &self.scripts {
+                Some(scripts) => {
+                    let world = scripts.world().get();
+                    let occupied = |p: GridPos| world.blocks(p);
+                    self.walker.tick(
+                        dir,
+                        grid,
+                        &occupied,
+                        &self.terrain_rules,
+                        link_crossing.as_ref(),
+                    )
+                }
+                None => {
+                    self.walker
+                        .tick(dir, grid, &(), &self.terrain_rules, link_crossing.as_ref())
+                }
+            }
+        };
+        for event in events {
+            match event {
+                StepEvent::StepCompleted { pos, facing, .. } => {
+                    tracing::trace!(%pos, "step");
+                    if let Some(scripts) = self.scripts.as_mut() {
+                        scripts.on_player_step(self.scene.map(), self.player_tile, pos, facing);
+                    }
+                    self.player_tile = pos;
+                    let warp = self.scene.map().warp_at(pos).cloned();
+                    if let Some(warp) = warp {
+                        self.begin_warp(&warp);
+                        return;
+                    }
+                }
+                StepEvent::CrossedMap { to_map, entry, .. } => {
+                    let via = self.walker.facing();
+                    if let Err(e) = self.apply_seamless_cross(&to_map, entry, via) {
+                        tracing::error!(%e, "seamless crossing failed");
+                    } else if let Some(scripts) = self.scripts.as_mut() {
+                        let facing = self.walker.facing();
+                        scripts.on_player_step(self.scene.map(), self.player_tile, entry, facing);
+                    }
+                    return;
+                }
+                StepEvent::Turned { .. } => {}
+            }
+        }
+        let confirm = Action::Builtin(BuiltinAction::Confirm);
+        if let Some(scripts) = self.scripts.as_mut() {
+            scripts.sync_player(self.walker.pos(), self.walker.facing());
+            if self.walker.is_idle() && !scripts.player_locked() && self.input.triggered(confirm) {
+                self.input.consume(confirm);
+                scripts.interact(self.scene.map());
+            }
+        }
+    }
+
+    /// Advances a running warp transition; `true` while one is in progress (the overworld
+    /// does not update during it).
+    fn tick_warp_phase(&mut self) -> bool {
+        match &mut self.warp_phase {
+            WarpPhase::OutFade { remaining, pending } => {
+                *remaining = remaining.saturating_sub(1);
+                if *remaining == 0 {
+                    let pending = (**pending).clone();
+                    if let Err(e) = self.apply_warp(&pending) {
+                        tracing::error!(%e, "warp failed");
+                        self.warp_phase = WarpPhase::None;
+                    } else {
+                        let inn = transition_ticks_in(pending.transition);
+                        self.warp_phase = if inn == 0 {
+                            WarpPhase::None
+                        } else {
+                            WarpPhase::InFade { remaining: inn }
+                        };
+                    }
+                }
+                true
+            }
+            WarpPhase::InFade { remaining } => {
+                *remaining = remaining.saturating_sub(1);
+                if *remaining == 0 {
+                    self.warp_phase = WarpPhase::None;
+                }
+                true
+            }
+            WarpPhase::None => false,
         }
     }
 
@@ -711,10 +1029,20 @@ fn load_player_sprite(
         return Ok((tex, Rect::new(0.0, 0.0, fw as f32, h.min(th * 2) as f32)));
     }
     // No sprite in the project: a plain marker the size of one tile.
-    let rgba: Vec<u8> = std::iter::repeat_n([230, 60, 60, 255], (tw * th) as usize)
+    marker_sprite(renderer, tw, th, [230, 60, 60, 255])
+}
+
+/// A one-tile solid-colour sprite (player without `sprites/player.png`, NPCs).
+fn marker_sprite(
+    renderer: &mut Renderer,
+    tw: u32,
+    th: u32,
+    rgba: [u8; 4],
+) -> Result<(TextureHandle, Rect), ProjectError> {
+    let pixels: Vec<u8> = std::iter::repeat_n(rgba, (tw * th) as usize)
         .flatten()
         .collect();
-    let tex = renderer.create_texture(tw, th, &rgba)?;
+    let tex = renderer.create_texture(tw, th, &pixels)?;
     Ok((tex, Rect::new(0.0, 0.0, tw as f32, th as f32)))
 }
 
@@ -730,66 +1058,29 @@ impl SimulationHost for ProjectHost {
     fn simulation_tick(&mut self, _dt: f64) {
         self.ticks += 1;
 
-        match &mut self.warp_phase {
-            WarpPhase::OutFade { remaining, pending } => {
-                *remaining = remaining.saturating_sub(1);
-                if *remaining == 0 {
-                    let pending = (**pending).clone();
-                    if let Err(e) = self.apply_warp(&pending) {
-                        tracing::error!(%e, "warp failed");
-                        self.warp_phase = WarpPhase::None;
-                    } else {
-                        let inn = transition_ticks_in(pending.transition);
-                        self.warp_phase = if inn == 0 {
-                            WarpPhase::None
-                        } else {
-                            WarpPhase::InFade { remaining: inn }
-                        };
-                    }
-                }
-                self.scene.tick();
-                return;
-            }
-            WarpPhase::InFade { remaining } => {
-                *remaining = remaining.saturating_sub(1);
-                if *remaining == 0 {
-                    self.warp_phase = WarpPhase::None;
-                }
-                self.scene.tick();
-                return;
-            }
-            WarpPhase::None => {}
+        // §3.3 step 2: resume script tasks.
+        if let Some(scripts) = self.scripts.as_mut() {
+            scripts.run_scripts_phase();
+        }
+        self.apply_script_requests();
+
+        // §3.3 step 3: warp transition or overworld update.
+        if !self.tick_warp_phase() {
+            self.tick_overworld();
+        }
+        if let Some(scripts) = self.scripts.as_mut() {
+            scripts.tick_npcs(&self.terrain_rules);
         }
 
-        let dir = self.held_direction();
-        let running = self.input.down(Action::Builtin(BuiltinAction::Run));
-        self.walker.set_running(running);
-        let grid = &self.scene.map().grid;
-        let link_crossing = self.crossing.as_ref().map(CrossingContext::link_crossing);
-        for event in self
-            .walker
-            .tick(dir, grid, &(), &self.terrain_rules, link_crossing.as_ref())
-        {
-            match event {
-                StepEvent::StepCompleted { pos, .. } => {
-                    self.on_step_completed(pos);
-                    if !matches!(self.warp_phase, WarpPhase::None) {
-                        break;
-                    }
-                }
-                StepEvent::CrossedMap { to_map, entry, .. } => {
-                    let via = self.walker.facing();
-                    if let Err(e) = self.apply_seamless_cross(&to_map, entry, via) {
-                        tracing::error!(%e, "seamless crossing failed");
-                    } else {
-                        self.on_step_completed(entry);
-                    }
-                    break;
-                }
-                StepEvent::Turned { .. } => {}
-            }
+        // §3.3 step 5: engine and script events to listeners.
+        if let Some(scripts) = self.scripts.as_mut() {
+            scripts.flush_events();
         }
+        self.apply_script_requests();
+
         self.sync_player_sprite();
+        self.sync_npc_sprites();
+        self.fade.tick();
         self.scene.tick();
     }
 
@@ -799,6 +1090,10 @@ impl SimulationHost for ProjectHost {
         let backdrops: Vec<&NeighborBackdrop> =
             self.neighbors.iter().map(|n| &n.backdrop).collect();
         self.scene.render(&mut self.renderer, alpha, &backdrops);
+        if let (Some(overlay), Some(theme)) = (&self.overlay, &self.ui_theme) {
+            overlay.render(&mut self.renderer, theme);
+        }
+        self.fade.render(&mut self.renderer);
         self.renderer.end_frame();
     }
 }
@@ -819,22 +1114,23 @@ mod tests {
             ..MovementConfig::default()
         };
         let mut w = GridStepper::with_config(GridPos::new(0, 0), Direction::Down, cfg);
-        w.tick(Some(Direction::Right), &grid, &(), &rules, None);
-        w.tick(Some(Direction::Right), &grid, &(), &rules, None);
+        let links = None;
+        w.tick(Some(Direction::Right), &grid, &(), &rules, links);
+        w.tick(Some(Direction::Right), &grid, &(), &rules, links);
         assert_eq!(w.pos(), GridPos::new(1, 0));
         assert_eq!(w.facing(), Direction::Right);
         assert!(!w.is_idle());
         for _ in 0..STEP_TICKS - 1 {
-            w.tick(None, &grid, &(), &rules, None);
+            w.tick(None, &grid, &(), &rules, links);
         }
         assert!(w.is_idle());
         assert_eq!(w.tile_position(), (1.0, 0.0));
-        w.tick(Some(Direction::Right), &grid, &(), &rules, None);
+        w.tick(Some(Direction::Right), &grid, &(), &rules, links);
         assert_eq!(w.pos(), GridPos::new(1, 0));
-        w.tick(Some(Direction::Up), &grid, &(), &rules, None);
-        w.tick(Some(Direction::Up), &grid, &(), &rules, None);
+        w.tick(Some(Direction::Up), &grid, &(), &rules, links);
+        w.tick(Some(Direction::Up), &grid, &(), &rules, links);
         while !w.is_idle() {
-            w.tick(None, &grid, &(), &rules, None);
+            w.tick(None, &grid, &(), &rules, links);
         }
         assert_eq!((w.pos(), w.facing()), (GridPos::new(1, 0), Direction::Up));
     }
@@ -849,10 +1145,11 @@ mod tests {
             ..MovementConfig::default()
         };
         let mut w = GridStepper::with_config(GridPos::new(0, 0), Direction::Down, cfg);
-        w.tick(Some(Direction::Right), &grid, &(), &rules, None);
-        w.tick(Some(Direction::Right), &grid, &(), &rules, None);
+        let links = None;
+        w.tick(Some(Direction::Right), &grid, &(), &rules, links);
+        w.tick(Some(Direction::Right), &grid, &(), &rules, links);
         for _ in 0..7 {
-            w.tick(None, &grid, &(), &rules, None);
+            w.tick(None, &grid, &(), &rules, links);
         }
         assert_eq!(w.tile_position(), (0.5, 0.0));
     }

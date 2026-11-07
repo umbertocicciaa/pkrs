@@ -98,6 +98,53 @@ impl ScriptValue {
             _ => None,
         }
     }
+
+    /// The value as stored in the save model (§6.5, §12). `nil`, engine-only values
+    /// ([`Opaque`](Self::Opaque)) and NPC handles have no saved form and give `None`; inside
+    /// tables they are left out.
+    #[must_use]
+    pub fn to_save_value(&self) -> Option<pkrs_save::Value> {
+        use pkrs_save::Value;
+        Some(match self {
+            Self::Nil | Self::Opaque(_) | Self::Npc(_) => return None,
+            Self::Bool(b) => Value::Bool(*b),
+            Self::Int(i) => Value::Int(*i),
+            Self::Number(n) => Value::Float(*n),
+            Self::String(s) => Value::String(s.clone()),
+            Self::List(items) => {
+                Value::List(items.iter().filter_map(Self::to_save_value).collect())
+            }
+            Self::Map(map) => Value::Map(
+                map.iter()
+                    .filter_map(|(k, v)| v.to_save_value().map(|v| (k.clone(), v)))
+                    .collect(),
+            ),
+        })
+    }
+
+    /// The script value of a saved value (`None` reads as `nil`).
+    #[must_use]
+    pub fn from_save_value(value: Option<&pkrs_save::Value>) -> Self {
+        use pkrs_save::Value;
+        match value {
+            None => Self::Nil,
+            Some(Value::Bool(b)) => Self::Bool(*b),
+            Some(Value::Int(i)) => Self::Int(*i),
+            Some(Value::Float(n)) => Self::Number(*n),
+            Some(Value::String(s)) => Self::String(s.clone()),
+            Some(Value::List(items)) => Self::List(
+                items
+                    .iter()
+                    .map(|v| Self::from_save_value(Some(v)))
+                    .collect(),
+            ),
+            Some(Value::Map(map)) => Self::Map(
+                map.iter()
+                    .map(|(k, v)| (k.clone(), Self::from_save_value(Some(v))))
+                    .collect(),
+            ),
+        }
+    }
 }
 
 impl From<&str> for ScriptValue {
@@ -391,6 +438,35 @@ pub trait ScriptHost {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn save_values_round_trip_and_drop_engine_only_values() {
+        let mut map = BTreeMap::new();
+        map.insert("n".to_owned(), ScriptValue::Number(1.5));
+        map.insert("npc".to_owned(), ScriptValue::Npc("keeper".into()));
+        let value = ScriptValue::List(vec![
+            ScriptValue::Bool(true),
+            ScriptValue::Int(3),
+            ScriptValue::from("s"),
+            ScriptValue::Map(map),
+            ScriptValue::Opaque("function"),
+        ]);
+        let saved = value.to_save_value().unwrap();
+        let back = ScriptValue::from_save_value(Some(&saved));
+        let mut expected = BTreeMap::new();
+        expected.insert("n".to_owned(), ScriptValue::Number(1.5));
+        assert_eq!(
+            back,
+            ScriptValue::List(vec![
+                ScriptValue::Bool(true),
+                ScriptValue::Int(3),
+                ScriptValue::from("s"),
+                ScriptValue::Map(expected),
+            ])
+        );
+        assert_eq!(ScriptValue::Nil.to_save_value(), None);
+        assert_eq!(ScriptValue::from_save_value(None), ScriptValue::Nil);
+    }
 
     #[test]
     fn require_roots_are_scripts_and_own_plugin_folder() {

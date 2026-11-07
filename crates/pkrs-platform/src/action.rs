@@ -78,6 +78,11 @@ impl ActionRegistry {
         Ok(CustomActionId::new(index))
     }
 
+    /// Registered names, in registration order.
+    pub(crate) fn names(&self) -> &[String] {
+        &self.names
+    }
+
     /// Resolves a registered custom action by name.
     pub(crate) fn id_by_name(&self, name: &str) -> Option<CustomActionId> {
         self.names

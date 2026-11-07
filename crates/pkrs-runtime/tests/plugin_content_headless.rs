@@ -142,15 +142,9 @@ fn plugin_move_terrain_and_field_action_in_a_headless_scenario() {
 
     // Facing mud, Confirm runs the tile-bound field action.
     tap(&mut host, Key::Z);
-    let probed = host
-        .scripts()
-        .unwrap()
-        .world()
-        .get()
-        .vars
-        .get("probed")
-        .cloned();
-    assert_eq!(probed, Some(ScriptValue::from("2,1")));
+    let probed =
+        ScriptValue::from_save_value(host.scripts().unwrap().world().get().state.var("probed"));
+    assert_eq!(probed, ScriptValue::from("2,1"));
 
     // The party menu offers the waders (not the tile-only probe) and uses them.
     let menu: Vec<String> = host
@@ -182,10 +176,7 @@ fn plugin_move_terrain_and_field_action_in_a_headless_scenario() {
             .any(|(name, _)| name == "mudworks:whistle")
     );
     tap(&mut host, Key::M);
-    assert_eq!(
-        host.scripts().unwrap().world().get().flags.get("whistled"),
-        Some(&true)
-    );
+    assert!(host.scripts().unwrap().world().get().state.flag("whistled"));
 
     // `plugin.save` holds the plugin's data (persisting it is §12 / M6).
     let save = host

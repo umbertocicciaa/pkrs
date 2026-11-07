@@ -125,10 +125,9 @@ fn var(host: &ProjectHost, name: &str) -> ScriptValue {
         .unwrap()
         .world()
         .get()
-        .vars
-        .get(name)
-        .cloned()
-        .unwrap_or(ScriptValue::Nil)
+        .state
+        .var(name)
+        .map_or(ScriptValue::Nil, |v| ScriptValue::from_save_value(Some(v)))
 }
 
 fn keeper(host: &ProjectHost) -> (GridPos, Direction) {
@@ -222,8 +221,8 @@ fn keeper_cutscene_moves_the_npc_asks_and_sets_the_flag() {
             .unwrap()
             .world()
             .get()
-            .flags
-            .contains_key("keeper_met")
+            .state
+            .flag("keeper_met")
     );
     close_text_box(&mut host);
     idle(&mut host, 2);
@@ -231,8 +230,8 @@ fn keeper_cutscene_moves_the_npc_asks_and_sets_the_flag() {
     let scripts = host.scripts().unwrap();
     {
         let w = scripts.world().get();
-        assert_eq!(w.flags.get("keeper_met"), Some(&true));
-        assert_eq!(w.bag.get("lamp_oil"), Some(&1));
+        assert!(w.state.flag("keeper_met"));
+        assert_eq!(w.state.item_count("lamp_oil"), 1);
     }
     assert!(scripts.scheduler().is_empty());
     assert!(!scripts.player_locked());
@@ -265,7 +264,7 @@ fn declining_skips_the_walk_and_leaves_the_flag_unset() {
     let scripts = host.scripts().unwrap();
     assert!(scripts.scheduler().is_empty());
     assert_eq!(keeper(&host).0, GridPos::new(5, 3));
-    assert!(!scripts.world().get().flags.contains_key("keeper_met"));
+    assert!(!scripts.world().get().state.flag("keeper_met"));
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

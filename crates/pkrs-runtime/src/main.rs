@@ -10,6 +10,9 @@ use pkrs_platform::{
 use pkrs_render::{MacroquadRenderer, Renderer, RendererConfig};
 use pkrs_runtime::plugins::start_project_scripts;
 use pkrs_runtime::project::{Project, ProjectHost, ProjectOptions};
+use pkrs_runtime::test_harness::{
+    DEFAULT_SCENARIO_TICKS, ScenarioOptions, resolve_script, run_scenario,
+};
 use pkrs_runtime::wiring::{headless_platform, headless_renderer, window_config};
 use pkrs_runtime::{
     AdapterSet, AnimationDemoHost, LoopExit, PlatformAdapter, RenderAdapter, RunMode,
@@ -33,6 +36,10 @@ fn main() -> anyhow::Result<()> {
         vsync = cli.vsync,
         "pkrs-runtime starting"
     );
+
+    if let (Some(script), Some(opts)) = (&cli.script, cli.project_options()) {
+        return run_script(&opts, script, cli.ticks);
+    }
 
     let max_ticks = if cli.headless {
         Some(cli.ticks.unwrap_or(DEFAULT_HEADLESS_TICKS))
@@ -79,6 +86,28 @@ fn run_project_headless(opts: &ProjectOptions, config: RuntimeLoopConfig) -> any
     let exit = block_on_loop(&mut platform, &mut host, &config);
     tracing::info!(?exit, ticks = host.ticks(), "headless project run finished");
     check_headless_exit(exit, &config)
+}
+
+/// `--script`: runs a `tests/*.lua` scenario headless against the project (§15.2). A failed
+/// expectation is printed with its location and makes the process exit non-zero.
+fn run_script(
+    opts: &ProjectOptions,
+    script: &std::path::Path,
+    ticks: Option<u64>,
+) -> anyhow::Result<()> {
+    let project = Project::open(opts)
+        .with_context(|| format!("cannot open project `{}`", opts.dir.display()))?;
+    let file = resolve_script(&opts.dir, script);
+    let options = ScenarioOptions {
+        max_ticks: ticks.unwrap_or(DEFAULT_SCENARIO_TICKS),
+        ..ScenarioOptions::default()
+    };
+    let report = run_scenario(&project, &file.path, &file.name, &options)
+        .with_context(|| format!("cannot run scenario `{}`", file.name))?;
+    tracing::info!(scenario = %file.name, ticks = report.ticks, passed = report.passed(), "scenario finished");
+    eprintln!("{report}");
+    anyhow::ensure!(report.passed(), "scenario `{}` failed", file.name);
+    Ok(())
 }
 
 /// `--project` in a window (`pkrs run`).
@@ -187,6 +216,7 @@ struct RuntimeCliOptions {
     project: Option<PathBuf>,
     map: Option<String>,
     warp: Option<GridPos>,
+    script: Option<PathBuf>,
 }
 
 /// Parses `x,y` (non-negative tile coordinates).
@@ -227,6 +257,7 @@ impl RuntimeCliOptions {
         let mut project = None;
         let mut map = None;
         let mut warp = None;
+        let mut script = None;
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
             match arg.as_ref() {
@@ -242,6 +273,10 @@ impl RuntimeCliOptions {
                 "--warp" => {
                     let raw = args.next().context("--warp requires `x,y`")?;
                     warp = Some(parse_warp(raw.as_ref())?);
+                }
+                "--script" => {
+                    let path = args.next().context("--script requires a scenario file")?;
+                    script = Some(PathBuf::from(path.as_ref()));
                 }
                 "--no-vsync" => vsync = false,
                 "--ticks" => {
@@ -268,6 +303,12 @@ impl RuntimeCliOptions {
             project.is_some() || (map.is_none() && warp.is_none()),
             "--map and --warp need --project <dir>"
         );
+        anyhow::ensure!(
+            project.is_some() || script.is_none(),
+            "--script needs --project <dir>"
+        );
+        // A scenario always runs on the Null adapters.
+        let headless = headless || script.is_some();
         Ok(Self {
             headless,
             ticks,
@@ -275,6 +316,7 @@ impl RuntimeCliOptions {
             project,
             map,
             warp,
+            script,
         })
     }
 }
@@ -291,6 +333,9 @@ OPTIONS:
     --project DIR    Run the game project in DIR (loose files, dev saves in DIR/saves)
     --map ID         Start on map ID instead of [start].map (needs --project)
     --warp X,Y       Start on tile X,Y (needs --project)
+    --script FILE    Run a scripted-input test scenario (tests/*.lua) headless and exit
+                     non-zero if it fails (needs --project; FILE is looked up in the
+                     project first; --ticks caps the scenario, default 36000)
     --headless       Use NullPlatform (no window, for CI)
     --ticks N        Stop after N simulation ticks (60 Hz); default 600 with --headless
     --no-vsync       Debug: request uncapped frame rate (§3.2)
@@ -383,6 +428,28 @@ mod tests {
         ] {
             assert!(RuntimeCliOptions::parse_from(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn cli_parses_script_and_implies_headless() {
+        let opts = RuntimeCliOptions::parse_from([
+            "--project",
+            "games/demo",
+            "--script",
+            "tests/smoke.lua",
+            "--ticks",
+            "600",
+        ])
+        .expect("parse");
+        assert_eq!(opts.script, Some(PathBuf::from("tests/smoke.lua")));
+        assert!(opts.headless, "a scenario always runs headless");
+        assert_eq!(opts.ticks, Some(600));
+    }
+
+    #[test]
+    fn cli_rejects_script_without_project_or_file() {
+        assert!(RuntimeCliOptions::parse_from(["--script", "tests/smoke.lua"]).is_err());
+        assert!(RuntimeCliOptions::parse_from(["--project", "d", "--script"]).is_err());
     }
 
     #[test]

@@ -1,11 +1,17 @@
 //! Save system: save model, versioning, migrations and atomic writes.
 //!
-//! This crate is currently a skeleton; see `docs/design.md` §4.3 for its role
-//! and dependency boundaries.
+//! So far this crate holds the in-memory save model the overworld keeps during play:
+//! [`WorldState`] (flags, variables, bag, money) with per-map [`MapState`] (§6.5), and the
+//! dynamic [`Value`] type script variables are stored as. Serialisation, versioning and atomic
+//! writes land with M6; see `docs/design.md` §4.3 and §12.
 
 mod error;
+mod value;
+mod world;
 
 pub use error::{Result, SaveError};
+pub use value::Value;
+pub use world::{MapState, ObjectState, WorldState};
 
 #[cfg(test)]
 mod tests {

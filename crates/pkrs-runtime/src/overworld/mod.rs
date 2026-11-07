@@ -7,7 +7,7 @@
 //!    gathered last tick (dialogue closed, path finished) and step the scheduler.
 //! 2. During the overworld update: [`on_player_step`](OverworldScripts::on_player_step)
 //!    (`step`, `trigger_enter`), [`interact`](OverworldScripts::interact) (`interact` plus
-//!    the object's own script) and [`tick_npcs`](OverworldScripts::tick_npcs) (NPC paths).
+//!    the object's own script, or an item pickup) and [`tick_npcs`](OverworldScripts::tick_npcs) (NPC paths).
 //! 3. [`flush_events`](OverworldScripts::flush_events): start every queued event's listeners.
 //!
 //! Field actions (§9.4) run from the party menu ([`use_field_action`](OverworldScripts::use_field_action))
@@ -24,7 +24,8 @@ mod world;
 
 pub use overlay::{CHARS_PER_TICK, ScreenFade, ScriptOverlay};
 pub use world::{
-    FIELD_STATES, NpcState, SharedWorld, UiRequest, WarpRequest, WorldModel, is_field_state,
+    EntityKind, FIELD_STATES, InteractionTarget, MapEntity, NpcState, SharedWorld, UiRequest,
+    WarpRequest, WorldModel, is_field_state,
 };
 
 use std::collections::BTreeSet;
@@ -34,7 +35,7 @@ use pkrs_script::{
     CameraCommand, DispatchReport, FieldActionInfo, FieldActionSource, FieldContext, LuaScriptHost,
     Scheduler, ScriptEvent, ScriptHost, ScriptOwner, ScriptValue, TaskKind, WakeSignal,
 };
-use pkrs_world::{Map, ObjectKind, TerrainRules};
+use pkrs_world::{Map, TerrainRules};
 
 /// Game script run once when the game starts (if the project has one).
 pub const MAIN_SCRIPT: &str = "scripts/main.lua";
@@ -107,7 +108,7 @@ impl OverworldScripts {
         self.enter_map(map, player, facing);
     }
 
-    /// Loads `map`'s NPCs into the world, runs its script in a fresh [`ScriptOwner::Map`]
+    /// Spawns `map`'s NPCs, signs, items and triggers through its persistent state, runs its script in a fresh [`ScriptOwner::Map`]
     /// environment and queues `map_enter`.
     pub fn enter_map(&mut self, map: &Map, player: GridPos, facing: Direction) {
         self.world.get_mut().enter_map(map, player, facing);
@@ -123,7 +124,8 @@ impl OverworldScripts {
     }
 
     /// Leaves the active map: dispatches `map_exit` while its handlers are still registered,
-    /// ends NPC paths (waking their tasks) and unloads the map script.
+    /// ends NPC paths (waking their tasks), records NPC changes in the map's persistent state
+    /// ([`WorldModel::sync_map_state`]) and unloads the map script.
     pub fn exit_map(&mut self) {
         let Some(map) = self.world.get().map_id.clone() else {
             return;
@@ -141,6 +143,7 @@ impl OverworldScripts {
         for npc in walking {
             self.wakes.push(WakeSignal::PathFinished { npc });
         }
+        self.world.get_mut().sync_map_state();
         if let Some(owner) = self.map_owner.take() {
             let removed = self.host.unload_owner(&owner);
             tracing::debug!(target: "script", %owner, removed, "map script unloaded");
@@ -184,63 +187,47 @@ impl OverworldScripts {
     }
 
     /// The player completed a step from `from` to `pos`: queues `step`, then `trigger_enter`
-    /// for every trigger zone entered (and starts its `on_enter` script).
-    pub fn on_player_step(&mut self, map: &Map, from: GridPos, pos: GridPos, facing: Direction) {
+    /// for every trigger zone entered (and starts its `on_enter` script). A `once` trigger
+    /// that already fired on this map is skipped before any script runs (§6.5).
+    pub fn on_player_step(&mut self, from: GridPos, pos: GridPos, facing: Direction) {
         self.sync_player(pos, facing);
         self.host.emit_event(ScriptEvent::step(pos, facing));
-        for object in &map.objects {
-            let ObjectKind::Trigger { on_enter, once } = &object.kind else {
-                continue;
-            };
-            if !object.rect.contains(pos) || object.rect.contains(from) {
-                continue;
-            }
-            let key = (map.id.clone(), object.persistent_key());
-            if *once && !self.world.get_mut().fired_triggers.insert(key) {
-                continue;
-            }
-            let id = if object.name.is_empty() {
-                object.persistent_key()
-            } else {
-                object.name.clone()
-            };
+        let entered = self.world.get_mut().enter_triggers(from, pos);
+        for (id, on_enter) in entered {
             let event = ScriptEvent::trigger_enter(&id, pos);
             let payload = event.payload.clone();
             self.host.emit_event(event);
             if let Some(script) = on_enter {
-                self.spawn_script(script, &[payload], TaskKind::Trigger);
+                self.spawn_script(&script, &[payload], TaskKind::Trigger);
             }
         }
     }
 
-    /// The player pressed Confirm: talks to the NPC or reads the sign in front of them (or
-    /// reports the tile). Queues `interact` and starts the object's script.
-    pub fn interact(&mut self, map: &Map) {
-        let (target, npc) = {
+    /// The player pressed Confirm: acts on [`WorldModel::interaction_target`] (the tile the
+    /// player faces: NPC, then item ball, then sign, else the plain tile). Queues `interact`
+    /// and starts the object's script; an item ball goes into the bag and is recorded as
+    /// picked up so it never respawns (§6.5).
+    pub fn interact(&mut self) {
+        let (target, tile) = {
             let w = self.world.get();
-            let target = w.player_pos.neighbour(w.player_facing);
-            (
-                target,
-                w.npc_at(target).map(|n| (n.id.clone(), n.script.clone())),
-            )
+            (w.interaction_target(), w.facing_tile())
         };
-        if let Some((id, script)) = npc {
-            self.host.emit_event(ScriptEvent::interact_npc(&id, target));
-            if let Some(script) = script {
-                self.spawn_script(&script, &[ScriptValue::Npc(id)], TaskKind::Interact);
+        match target {
+            InteractionTarget::Npc { id, script } => {
+                self.host.emit_event(ScriptEvent::interact_npc(&id, tile));
+                if let Some(script) = script {
+                    self.spawn_script(&script, &[ScriptValue::Npc(id)], TaskKind::Interact);
+                }
             }
-            return;
-        }
-        let sign = map.objects.iter().find_map(|o| match &o.kind {
-            ObjectKind::Sign { script, text } if o.rect.contains(target) => {
-                Some((o.persistent_key(), script.clone(), text.clone()))
+            InteractionTarget::Item { key, item, count } => {
+                if self.world.get_mut().pick_up_item(&key) {
+                    self.host
+                        .emit_event(ScriptEvent::interact_item(&key, &item, count, tile));
+                }
             }
-            _ => None,
-        });
-        match sign {
-            Some((id, script, text)) => {
+            InteractionTarget::Sign { key, script, text } => {
                 self.host
-                    .emit_event(ScriptEvent::interact_sign(&id, text.as_deref(), target));
+                    .emit_event(ScriptEvent::interact_sign(&key, text.as_deref(), tile));
                 match (script, text) {
                     (Some(script), _) => self.spawn_script(&script, &[], TaskKind::Interact),
                     (None, Some(text)) => {
@@ -252,8 +239,8 @@ impl OverworldScripts {
                     (None, None) => {}
                 }
             }
-            None => {
-                self.host.emit_event(ScriptEvent::interact_tile(target));
+            InteractionTarget::Tile => {
+                self.host.emit_event(ScriptEvent::interact_tile(tile));
                 let ctx = self.field_context(FieldActionSource::FacingTile);
                 if let Some(action) = self.host.available_field_actions(&ctx).into_iter().next() {
                     self.start_field_action(&action.id, &ctx);
@@ -317,6 +304,11 @@ impl OverworldScripts {
         payload.insert("action".to_owned(), ScriptValue::from(name));
         self.host
             .emit_event(ScriptEvent::new("action", ScriptValue::Map(payload)));
+    }
+
+    /// Scene entities that disappeared (picked-up items) since the last call.
+    pub fn take_removed_entities(&mut self) -> Vec<u32> {
+        std::mem::take(&mut self.world.get_mut().removed_entities)
     }
 
     /// Advances NPC paths; finished paths wake their `npc:move` next tick.

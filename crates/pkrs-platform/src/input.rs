@@ -152,6 +152,20 @@ impl Input {
         resolve_action(name, &self.registry)
     }
 
+    /// Keys currently bound to `action` (scripted input picks the first, §15.2).
+    pub fn bound_keys(&self, action: Action) -> &[Key] {
+        &self.binding(action).keys
+    }
+
+    /// Names of every action: the built-ins, then registered custom actions in order.
+    pub fn action_names(&self) -> Vec<String> {
+        BuiltinAction::ALL
+            .iter()
+            .map(|b| b.name().to_owned())
+            .chain(self.registry.names().iter().cloned())
+            .collect()
+    }
+
     /// Polls keyboard state once per rendered frame (§3.1).
     pub fn poll(&mut self, platform: &Platform) {
         self.keys_down.clear();
@@ -632,5 +646,22 @@ mod tests {
             .bindings
             .insert("confrim".to_owned(), vec!["z".to_owned()]);
         assert!(Input::from_manifest(InputFacadeConfig::default(), &manifest).is_err());
+    }
+
+    #[test]
+    fn bound_keys_and_action_names_list_bindings() {
+        let mut input = Input::default();
+        assert_eq!(
+            input.bound_keys(Action::Builtin(BuiltinAction::Confirm)),
+            &[Key::Z, Key::Enter]
+        );
+        let toggle = input
+            .register_action("resonance:toggle", &[Key::R])
+            .expect("register");
+        assert_eq!(input.bound_keys(toggle), &[Key::R]);
+        let names = input.action_names();
+        assert_eq!(names.len(), BuiltinAction::ALL.len() + 1);
+        assert!(names.iter().any(|n| n == "confirm"));
+        assert_eq!(names.last().map(String::as_str), Some("resonance:toggle"));
     }
 }

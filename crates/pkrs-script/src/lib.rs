@@ -35,6 +35,9 @@
 //! - **Hook chains:** [`chain`] orders handlers by priority, then plugin load order, then
 //!   registration order, threads the value through them and stops on cancel (§9.4).
 //!   [`LuaScriptHost::hook_table`] returns the resolved [`HookTable`].
+//! - **Test scenarios (§15.2):** [`LuaScenario`] runs a `tests/*.lua` scenario in its own
+//!   sandboxed Lua state with the scripted-input test API; [`scenario`] holds the engine-side
+//!   snapshot, step and failure types the runtime's harness uses.
 
 pub mod chain;
 mod error;
@@ -44,6 +47,7 @@ pub mod input_bridge;
 mod lua;
 pub mod plugin;
 pub mod registry;
+pub mod scenario;
 mod scheduler;
 mod world;
 
@@ -60,7 +64,7 @@ pub use host::{
 pub use input_bridge::ScriptInputSnapshot;
 pub use lua::{
     DEFAULT_AI_MAX_FAILURES, DEFAULT_MAX_FAILURES, GfxOp, HOOK_NAMES, LuaAi, LuaBattleHooks,
-    LuaScriptHost, UiScreenMethod,
+    LuaScenario, LuaScriptHost, SCENARIO_API, UiScreenMethod,
 };
 pub use plugin::{
     ContentError, PluginError, PluginErrors, PluginHost, PluginInitError, PluginLoadReport,

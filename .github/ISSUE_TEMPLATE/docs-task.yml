@@ -1,0 +1,144 @@
+name: Documentation task
+description: A focused task for the user-facing docs site (tutorials, guides, concepts, reference for the engine, the CLI and the editor UI). Does not need to follow the design doc.
+title: "docs: <short imperative summary>"
+labels: ["documentation", "type:task", "area:docs"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The docs site explains to **users and customers how to use pkrs**: the engine, the `pkrs` CLI, the editor UI (when it ships) and anything else about using the product. Think "Learn Rust / Getting started", not internal notes.
+        Contributor material (rustdoc, design doc, internal architecture) does **not** belong here; open an engine task instead.
+        One task = one PR. Docs describe **what actually ships**: the code and the current release are the source of truth, not the design doc.
+        Docs tasks are tracked under the **[Epic] M8 · Documentation** epic. Everything in this repo is written in **English**.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What this task documents or changes, in 2–4 sentences.
+    validations:
+      required: true
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: Which user need this answers and what users can't do (or keep getting wrong) without it.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: audience
+    attributes:
+      label: Audience
+      multiple: true
+      options:
+        - New users (evaluating / first game)
+        - Game authors (no Rust)
+        - Plugin authors (Lua)
+        - Players of games made with pkrs
+    validations:
+      required: true
+
+  - type: dropdown
+    id: product-area
+    attributes:
+      label: Product area
+      multiple: true
+      options:
+        - Engine / runtime (game features)
+        - CLI (`pkrs`)
+        - Editor UI (future)
+        - Lua scripting & plugins
+        - Distribution & platforms
+        - Docs site (structure, navigation, deploy)
+        - Release notes / README
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind of docs
+      multiple: true
+      options:
+        - Tutorial (learning by doing)
+        - How-to guide (task-oriented)
+        - Concepts (explanation)
+        - Reference (CLI, config keys, Lua API, data formats)
+        - Example walkthrough
+        - Troubleshooting / FAQ
+        - Release notes / README
+        - Docs site infrastructure
+    validations:
+      required: true
+
+  - type: textarea
+    id: pages
+    attributes:
+      label: Pages affected
+      description: Files or site pages to add or change, and where they go in the `mkdocs.yml` nav (Get started, Guides, Concepts, Reference, Examples, Help).
+      placeholder: |
+        - docs/getting-started/install.md (new, nav: Getting started → Install)
+        - README.md
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: Concrete content or work items as a checklist.
+      value: |
+        - [ ]
+    validations:
+      required: true
+
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of scope
+      description: What is deliberately left for another issue.
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Observable outcomes a reviewer can check.
+      value: |
+        - [ ]
+    validations:
+      required: true
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: Related issues, PRs, code paths, external docs.
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Issues that must land first (e.g. the feature being documented).
+      placeholder: "Blocked by #"
+
+  - type: checkboxes
+    id: dod
+    attributes:
+      label: Definition of done
+      options:
+        - label: "`mkdocs build --strict` passes (no broken links, missing nav entries or warnings)"
+          required: true
+        - label: Every command, config snippet and code sample was run or checked against the current release
+          required: true
+        - label: Platform-specific steps checked on Linux, Windows and macOS (or marked as untested)
+          required: true
+        - label: New pages added to the `mkdocs.yml` nav and cross-linked from related pages
+          required: true
+        - label: No third-party franchise names or assets; images and assets have a recorded license
+          required: true
+        - label: Written in English for users of the product (no internal/contributor details), following the docs style guide
+          required: true
+        - label: Uses neutral engine terminology (creature, species, move, trainer) and the glossary terms
+          required: true

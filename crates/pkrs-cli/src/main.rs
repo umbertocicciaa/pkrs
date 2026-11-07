@@ -1,8 +1,8 @@
 //! The `pkrs` command-line tool (§2.3).
 //!
-//! Implemented: `pkrs new` (one-shot template), `pkrs run` and a first `pkrs check` (manifest
-//! and plugin set; `--plugins` prints the resolved hook table, §9.4). `build`, `upgrade` and
-//! `plugin` arrive with their milestones (M5–M7).
+//! Implemented: `pkrs new` (one-shot template), `pkrs run`, `pkrs plugin new` and a first
+//! `pkrs check` (manifest and plugin set; `--plugins` prints the resolved load order and hook
+//! table, §9.4). `build` and `upgrade` arrive with their milestones (M6–M7).
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -10,6 +10,7 @@ use std::process::ExitCode;
 use anyhow::Context as _;
 use clap::{Parser, Subcommand, ValueEnum};
 use pkrs_cli::check;
+use pkrs_cli::plugin::{self, PluginVars};
 use pkrs_cli::run::{self, RUNTIME_ENV, RunRequest};
 use pkrs_cli::template::{self, Template, TemplateVars};
 use tracing_subscriber::EnvFilter;
@@ -84,6 +85,23 @@ enum Command {
         #[arg(long)]
         project: Option<PathBuf>,
     },
+    /// Work with plugins (§9.4).
+    Plugin {
+        #[command(subcommand)]
+        command: PluginCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum PluginCommand {
+    /// Scaffold `plugins/<id>/` with a manifest and hook examples.
+    New {
+        /// Plugin name; its id (and folder name) is the lowercase, `-`-joined form.
+        name: String,
+        /// Project folder (default: the nearest folder with a pkrs.toml).
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
 }
 
 fn parse_warp_arg(raw: &str) -> Result<(u32, u32), String> {
@@ -125,14 +143,7 @@ fn execute(cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Check { plugins, project } => {
             let project = project_root(project)?;
             let report = check::check_project(&project, plugins)?;
-            if report.load_order.is_empty() {
-                println!("plugins: none enabled");
-            } else {
-                println!("plugins (load order): {}", report.load_order.join(", "));
-            }
-            if let Some(hooks) = &report.hooks {
-                print!("{hooks}");
-            }
+            print!("{report}");
             for err in &report.content_errors {
                 eprintln!("error: {err}");
             }
@@ -145,6 +156,24 @@ fn execute(cli: Cli) -> anyhow::Result<ExitCode> {
             } else {
                 ExitCode::FAILURE
             })
+        }
+        Command::Plugin {
+            command: PluginCommand::New { name, project },
+        } => {
+            let vars = PluginVars::for_plugin(&name)?;
+            let project = project_root(project)?;
+            let out = plugin::new_plugin(&project, &vars)?;
+            println!(
+                "Created {} ({} files) in {}",
+                vars,
+                out.files.len(),
+                out.dir.display()
+            );
+            match &out.enable_hint {
+                Some(hint) => println!("Next: enable it in pkrs.toml:\n{hint}"),
+                None => println!("Next: pkrs check --plugins"),
+            }
+            Ok(ExitCode::SUCCESS)
         }
         Command::Run {
             map,
@@ -295,6 +324,31 @@ mod tests {
         };
         assert!(!plugins);
         assert_eq!(project, Some(PathBuf::from("game")));
+    }
+
+    #[test]
+    fn parses_plugin_new() {
+        let cli = Cli::try_parse_from(["pkrs", "plugin", "new", "Day Night"]).unwrap();
+        let Command::Plugin {
+            command: PluginCommand::New { name, project },
+        } = cli.command
+        else {
+            panic!("expected plugin new")
+        };
+        assert_eq!(name, "Day Night");
+        assert!(project.is_none());
+        let cli = Cli::try_parse_from(["pkrs", "plugin", "new", "x", "--project", "game"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Plugin {
+                command: PluginCommand::New {
+                    project: Some(_),
+                    ..
+                }
+            }
+        ));
+        assert!(Cli::try_parse_from(["pkrs", "plugin"]).is_err());
+        assert!(Cli::try_parse_from(["pkrs", "plugin", "new"]).is_err());
     }
 
     #[test]

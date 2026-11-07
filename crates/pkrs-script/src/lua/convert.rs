@@ -28,6 +28,9 @@ fn from_lua_depth(value: &Value, depth: usize) -> Result<ScriptValue> {
 }
 
 fn table_from_lua(table: &Table, depth: usize) -> Result<ScriptValue> {
+    if let Some(id) = super::npc::handle_id(table) {
+        return Ok(ScriptValue::Npc(id));
+    }
     if depth >= MAX_DEPTH {
         return Err(ScriptError::Conversion(format!(
             "table nesting deeper than {MAX_DEPTH} (or a cycle)"
@@ -76,6 +79,7 @@ pub(super) fn to_lua(lua: &Lua, value: &ScriptValue) -> mlua::Result<Value> {
         ScriptValue::Int(i) => Value::Integer(*i),
         ScriptValue::Number(n) => Value::Number(*n),
         ScriptValue::String(s) => Value::String(lua.create_string(s)?),
+        ScriptValue::Npc(id) => Value::Table(super::npc::handle(lua, id)?),
         ScriptValue::List(items) => {
             let t = lua.create_table_with_capacity(items.len(), 0)?;
             for (i, item) in items.iter().enumerate() {

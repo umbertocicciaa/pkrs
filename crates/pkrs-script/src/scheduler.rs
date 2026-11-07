@@ -247,7 +247,21 @@ impl Scheduler {
         let (id, status) = host.start_task(owner, name, args).inspect_err(|err| {
             tracing::warn!(target: "script", task = name, "script task aborted: {err}");
         })?;
-        let outcome = match status {
+        Ok((id, self.adopt(owner, name, kind, id, status)))
+    }
+
+    /// Takes over a task the host already started (e.g. an event listener,
+    /// [`ScriptHost::start_listener`]): a waiting task is suspended (and locks the player for
+    /// [`TaskKind::Interact`] / [`TaskKind::Trigger`]) exactly as with [`spawn`](Self::spawn).
+    pub fn adopt(
+        &mut self,
+        owner: &ScriptOwner,
+        name: &str,
+        kind: TaskKind,
+        id: TaskId,
+        status: TaskStatus,
+    ) -> TaskOutcome {
+        match status {
             TaskStatus::Waiting(request) => {
                 let wait = self.condition(request.clone());
                 if let WaitRequest::PushUiScreen {
@@ -276,8 +290,7 @@ impl Scheduler {
                 TaskOutcome::Waiting(wait)
             }
             TaskStatus::Finished(value) => TaskOutcome::Finished(value),
-        };
-        Ok((id, outcome))
+        }
     }
 
     /// Advances one tick and resumes every task whose condition is met, in creation order.

@@ -21,7 +21,7 @@ use pkrs_world::{
 };
 
 use crate::main_loop::SimulationHost;
-use crate::overworld::{OverworldScripts, ScreenFade, ScriptOverlay};
+use crate::overworld::{EntityKind, OverworldScripts, ScreenFade, ScriptOverlay};
 use crate::scene::{MapScene, NeighborBackdrop, PLAYER_ENTITY, tile_sheet};
 use crate::ui_assets::build_test_ui_theme;
 use crate::ui_theme::UiTheme;
@@ -307,6 +307,7 @@ pub struct ProjectHost {
     walker: GridStepper,
     player_sprite: (TextureHandle, Rect),
     npc_sprite: (TextureHandle, Rect),
+    item_sprite: (TextureHandle, Rect),
     ticks: u64,
     warp_phase: WarpPhase,
     scripts: Option<OverworldScripts>,
@@ -369,6 +370,7 @@ impl ProjectHost {
         let input = Input::from_manifest(InputFacadeConfig::default(), &project.manifest.input)
             .unwrap_or_else(|_| Input::new(InputFacadeConfig::default()));
         let npc_sprite = marker_sprite(&mut renderer, tw, th, [60, 90, 230, 255])?;
+        let item_sprite = marker_sprite(&mut renderer, tw, th, [240, 200, 40, 255])?;
         let ui_theme = match &scripts {
             Some(_) => match build_test_ui_theme(&mut renderer) {
                 Ok(theme) => Some(theme),
@@ -388,6 +390,7 @@ impl ProjectHost {
             walker: GridStepper::new(start, facing),
             player_sprite,
             npc_sprite,
+            item_sprite,
             ticks: 0,
             warp_phase: WarpPhase::None,
             scripts: scripts.map(OverworldScripts::new),
@@ -753,31 +756,38 @@ impl ProjectHost {
         Ok(())
     }
 
-    /// Adds a scene entity for every visible NPC of the active map.
+    /// Adds a scene entity for every visible NPC and every item ball of the active map.
     fn place_npcs(&mut self) {
         let Some(scripts) = self.scripts.as_ref() else {
             return;
         };
-        let npcs: Vec<(u32, GridPos, bool)> = scripts
-            .world()
-            .get()
-            .npcs
-            .iter()
-            .map(|n| (n.object_id, n.walker.pos(), n.visible))
-            .collect();
-        let (texture, src) = self.npc_sprite;
-        for (id, pos, visible) in npcs {
-            if visible {
-                self.scene.place_entity(id, pos, texture, src, false);
-            }
+        let placed: Vec<(u32, GridPos, (TextureHandle, Rect))> = {
+            let world = scripts.world().get();
+            let npcs = world
+                .npcs
+                .iter()
+                .filter(|n| n.visible)
+                .map(|n| (n.object_id, n.walker.pos(), self.npc_sprite));
+            let items = world
+                .entities
+                .iter()
+                .filter(|e| matches!(e.kind, EntityKind::Item { .. }))
+                .map(|e| (e.object_id, e.rect.origin(), self.item_sprite));
+            npcs.chain(items).collect()
+        };
+        for (id, pos, (texture, src)) in placed {
+            self.scene.place_entity(id, pos, texture, src, false);
         }
     }
 
     /// Moves NPC entities to their walkers' interpolated tiles; hides hidden ones.
     fn sync_npc_sprites(&mut self) {
-        let Some(scripts) = self.scripts.as_ref() else {
+        let Some(scripts) = self.scripts.as_mut() else {
             return;
         };
+        for id in scripts.take_removed_entities() {
+            self.scene.remove_entity(id);
+        }
         let npcs: Vec<(u32, (f32, f32), bool)> = scripts
             .world()
             .get()
@@ -921,7 +931,7 @@ impl ProjectHost {
                 StepEvent::StepCompleted { pos, facing, .. } => {
                     tracing::trace!(%pos, "step");
                     if let Some(scripts) = self.scripts.as_mut() {
-                        scripts.on_player_step(self.scene.map(), self.player_tile, pos, facing);
+                        scripts.on_player_step(self.player_tile, pos, facing);
                     }
                     self.player_tile = pos;
                     let warp = self.scene.map().warp_at(pos).cloned();
@@ -936,7 +946,7 @@ impl ProjectHost {
                         tracing::error!(%e, "seamless crossing failed");
                     } else if let Some(scripts) = self.scripts.as_mut() {
                         let facing = self.walker.facing();
-                        scripts.on_player_step(self.scene.map(), self.player_tile, entry, facing);
+                        scripts.on_player_step(self.player_tile, entry, facing);
                     }
                     return;
                 }
@@ -948,7 +958,7 @@ impl ProjectHost {
             scripts.sync_player(self.walker.pos(), self.walker.facing());
             if self.walker.is_idle() && !scripts.player_locked() && self.input.triggered(confirm) {
                 self.input.consume(confirm);
-                scripts.interact(self.scene.map());
+                scripts.interact();
             }
         }
     }

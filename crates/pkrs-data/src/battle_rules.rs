@@ -52,6 +52,36 @@ pub struct StatusDef {
     pub immune_types: Vec<String>,
 }
 
+impl StatusDef {
+    /// Schema checks: chances are `0..=100`, sleep ranges are non-empty and start at 1.
+    pub fn validate(&self) -> Result<()> {
+        if self.full_paralysis_chance.is_some_and(|c| c > 100) {
+            return Err(DataError::InvalidField {
+                field: "full_paralysis_chance".into(),
+                context: self.id.clone(),
+                message: "must be 0..=100".into(),
+            });
+        }
+        if self.thaw_chance.is_some_and(|c| c > 100) {
+            return Err(DataError::InvalidField {
+                field: "thaw_chance".into(),
+                context: self.id.clone(),
+                message: "must be 0..=100".into(),
+            });
+        }
+        if let Some((min, max)) = self.sleep_turns {
+            if min == 0 || max < min {
+                return Err(DataError::InvalidField {
+                    field: "sleep_turns".into(),
+                    context: self.id.clone(),
+                    message: "invalid range".into(),
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Field weather entry.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct WeatherDef {
@@ -175,22 +205,7 @@ impl BattleRules {
 
     /// Inserts a status (errors on duplicate id).
     pub fn insert_status(&mut self, def: StatusDef) -> Result<()> {
-        if def.full_paralysis_chance.is_some_and(|c| c > 100) {
-            return Err(DataError::InvalidField {
-                field: "full_paralysis_chance".into(),
-                context: def.id.clone(),
-                message: "must be 0..=100".into(),
-            });
-        }
-        if let Some((min, max)) = def.sleep_turns {
-            if min == 0 || max < min {
-                return Err(DataError::InvalidField {
-                    field: "sleep_turns".into(),
-                    context: def.id.clone(),
-                    message: "invalid range".into(),
-                });
-            }
-        }
+        def.validate()?;
         match self.statuses.entry(def.id.clone()) {
             std::collections::btree_map::Entry::Occupied(_) => Err(DataError::Duplicate {
                 kind: "status".into(),

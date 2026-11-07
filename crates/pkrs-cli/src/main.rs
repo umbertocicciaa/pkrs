@@ -133,6 +133,9 @@ fn execute(cli: Cli) -> anyhow::Result<ExitCode> {
             if let Some(hooks) = &report.hooks {
                 print!("{hooks}");
             }
+            for err in &report.content_errors {
+                eprintln!("error: {err}");
+            }
             for failed in &report.failed {
                 eprintln!("error: {failed}");
             }

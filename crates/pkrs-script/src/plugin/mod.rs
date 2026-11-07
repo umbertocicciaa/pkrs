@@ -5,12 +5,16 @@
 //! 2. [`resolve_load_order`] checks the plugins enabled in `pkrs.toml` (existence, API level,
 //!    semver dependencies, conflicts, cycles) and sorts them deterministically.
 //!    [`plan_plugins`] runs both steps and reports every problem at once.
-//! 3. [`load_plugins`] binds each manifest to its plugin environment (`plugin.define()`) and
-//!    runs `plugins/<id>/init.lua` in load order.
+//! 3. [`load_plugins`] merges the game's `data/` and every plugin's `data/` folder into the
+//!    content database in load order ([`merge_content`], §9.4 step 4), then binds each
+//!    manifest to its plugin environment (`plugin.define()`) and runs `plugins/<id>/init.lua`
+//!    in load order, where plugins register more content (`data.register_*`), terrains,
+//!    field, battle and input actions.
 //!
 //! Hook chains (combining handlers across plugins) live in [`crate::chain`]; binding a plugin
 //! also fixes its rank in them.
 
+mod content;
 mod discover;
 mod error;
 mod resolve;
@@ -19,7 +23,12 @@ use std::collections::BTreeSet;
 use std::ops::RangeInclusive;
 
 use pkrs_core::PluginManifest;
+use pkrs_data::{ContentDb, ContentOverride};
 
+pub use content::{
+    ContentError, ContentMerge, DATA_DIR, check_custom_terrain, log_override, merge_content,
+    plugin_data_dir,
+};
 pub use discover::{Discovery, PLUGINS_DIR, discover_plugins, init_path, manifest_path};
 pub use error::{PluginError, PluginErrors, PluginInitError};
 pub use resolve::{PluginPlan, resolve_load_order};
@@ -34,6 +43,9 @@ pub trait PluginHost: ScriptHost {
     /// `{ id, name, version, api, description, save = {} }`. Repeated calls return the same
     /// table. (`save` is the plugin's save namespace; persisting it arrives with §12.)
     fn bind_plugin(&mut self, manifest: &PluginManifest) -> Result<()>;
+
+    /// Installs the merged content database; `data.register_*` calls add to it (§9.4).
+    fn set_content(&mut self, db: ContentDb);
 }
 
 /// Discovers the plugins in `files` and resolves those in `enabled` (§9.4 steps 1–3).
@@ -77,6 +89,13 @@ pub struct PluginLoadReport {
     pub loaded: Vec<String>,
     /// Plugins that failed, or were skipped because a dependency failed, in load order.
     pub failed: Vec<PluginInitError>,
+    /// Content files merged from `data/` folders.
+    pub content_files: usize,
+    /// Content overrides applied while merging `data/` folders (also logged).
+    pub content_overrides: Vec<ContentOverride>,
+    /// Problems in `data/` folders (duplicate ids without `override`, parse and schema
+    /// errors). The runtime refuses to start when this is not empty.
+    pub content_errors: Vec<ContentError>,
 }
 
 /// Runs every plugin of `plan` in load order: binds its manifest ([`PluginHost::bind_plugin`])
@@ -89,6 +108,15 @@ pub fn load_plugins<H: PluginHost + ?Sized>(
     plan: &PluginPlan,
 ) -> PluginLoadReport {
     let mut report = PluginLoadReport::default();
+    let ids: Vec<&str> = plan.plugins().iter().map(|m| m.id()).collect();
+    let merge = merge_content(files, &ids);
+    for err in &merge.errors {
+        tracing::error!(target: "data", "{err}");
+    }
+    report.content_files = merge.files;
+    report.content_overrides = merge.db.overrides().to_vec();
+    report.content_errors = merge.errors;
+    host.set_content(merge.db);
     let mut failed: BTreeSet<String> = BTreeSet::new();
     for manifest in plan.plugins() {
         let id = manifest.id();

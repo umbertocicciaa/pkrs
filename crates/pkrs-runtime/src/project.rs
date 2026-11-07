@@ -10,14 +10,14 @@ use std::path::{Path, PathBuf};
 use pkrs_assets::{FolderVfs, Vfs, VfsPath};
 use pkrs_core::{Direction, GridPos, ProjectManifest, Version};
 use pkrs_platform::{
-    Action, BuiltinAction, DisplaySettings, Input, InputFacadeConfig, Platform, UserPaths,
+    Action, BuiltinAction, DisplaySettings, Input, InputFacadeConfig, Key, Platform, UserPaths,
 };
 use pkrs_render::{CameraTarget, Rect, Renderer, TextureHandle};
 use pkrs_script::{CameraCommand, CameraTarget as ScriptCameraTarget, LuaScriptHost};
 use pkrs_world::{
-    GridStepper, LinkCrossing, Map, MapImporter, MovementConfig, StepEvent, TerrainRuleRegistry,
-    TiledImporter, Transition as WarpTransition, WORLD_RON, Warp, WorldLayout,
-    neighbor_pixel_offset,
+    GridStepper, LinkCrossing, Map, MapImporter, MovementConfig, StepEvent, TerrainQuery,
+    TerrainRuleRegistry, TerrainRules, TerrainStepVerdict, TiledImporter,
+    Transition as WarpTransition, WORLD_RON, Warp, WorldLayout, neighbor_pixel_offset,
 };
 
 use crate::main_loop::SimulationHost;
@@ -297,6 +297,25 @@ fn neighbor_cache(
     }
 }
 
+/// The player's terrain rules (§6.3): Rust rules registered on the host first, then plugin
+/// rules (Lua `world.register_terrain`, data-defined terrains) from the script host.
+struct PlayerTerrain<'a> {
+    builtin: &'a TerrainRuleRegistry,
+    scripts: Option<&'a LuaScriptHost>,
+}
+
+impl TerrainRules for PlayerTerrain<'_> {
+    fn verdict(&self, query: &TerrainQuery<'_>) -> TerrainStepVerdict {
+        if self.builtin.get(query.terrain).is_some() {
+            return self.builtin.verdict(query);
+        }
+        match self.scripts {
+            Some(scripts) => scripts.verdict(query),
+            None => TerrainStepVerdict::Allow,
+        }
+    }
+}
+
 /// The overworld of a loaded project: map scene, player, NPCs, scripts and input.
 pub struct ProjectHost {
     project: Project,
@@ -304,6 +323,8 @@ pub struct ProjectHost {
     scene: MapScene,
     input: Input,
     terrain_rules: TerrainRuleRegistry,
+    /// Custom input actions registered by scripts (`input.register_action`, §10).
+    custom_actions: Vec<(String, Action)>,
     walker: GridStepper,
     player_sprite: (TextureHandle, Rect),
     npc_sprite: (TextureHandle, Rect),
@@ -385,6 +406,7 @@ impl ProjectHost {
             scene,
             input,
             terrain_rules: TerrainRuleRegistry::new(),
+            custom_actions: Vec::new(),
             walker: GridStepper::new(start, facing),
             player_sprite,
             npc_sprite,
@@ -450,6 +472,18 @@ impl ProjectHost {
     #[must_use]
     pub fn walker(&self) -> &GridStepper {
         &self.walker
+    }
+
+    /// Custom input actions bound so far (`input.register_action`), by name.
+    #[must_use]
+    pub fn custom_actions(&self) -> Vec<(String, Action)> {
+        self.custom_actions.clone()
+    }
+
+    /// The input facade (bindings, custom actions).
+    #[must_use]
+    pub fn input(&self) -> &Input {
+        &self.input
     }
 
     /// Shared custom-terrain rule registry (§6.3).
@@ -808,6 +842,23 @@ impl ProjectHost {
         let Some(scripts) = self.scripts.as_mut() else {
             return;
         };
+        for request in scripts.host_mut().take_input_actions() {
+            let mut keys = Vec::new();
+            for name in &request.keys {
+                match Key::parse_name(name) {
+                    Some(key) => keys.push(key),
+                    None => {
+                        tracing::warn!(target: "script", action = %request.name, key = %name, "input.register_action: unknown key")
+                    }
+                }
+            }
+            match self.input.register_action(&request.name, &keys) {
+                Ok(action) => self.custom_actions.push((request.name, action)),
+                Err(err) => {
+                    tracing::error!(target: "script", action = %request.name, owner = %request.owner, "input.register_action: {err}");
+                }
+            }
+        }
         if let Some(dir) = scripts.take_player_face() {
             self.walker.face(dir);
         }
@@ -900,15 +951,25 @@ impl ProjectHost {
             let grid = &self.scene.map().grid;
             match &self.scripts {
                 Some(scripts) => {
-                    let world = scripts.world().get();
-                    let occupied = |p: GridPos| world.blocks(p);
-                    self.walker.tick(
-                        dir,
-                        grid,
-                        &occupied,
-                        &self.terrain_rules,
-                        link_crossing.as_ref(),
-                    )
+                    // Snapshot first: plugin terrain rules may call back into the world.
+                    let (field, occupied) = {
+                        let world = scripts.world().get();
+                        let occupied: Vec<GridPos> = world
+                            .npcs
+                            .iter()
+                            .filter(|n| n.visible)
+                            .map(|n| n.walker.pos())
+                            .collect();
+                        (world.field_state(), occupied)
+                    };
+                    *self.walker.field_mut() = field;
+                    let blocked = |p: GridPos| occupied.contains(&p);
+                    let rules = PlayerTerrain {
+                        builtin: &self.terrain_rules,
+                        scripts: Some(scripts.host()),
+                    };
+                    self.walker
+                        .tick(dir, grid, &blocked, &rules, link_crossing.as_ref())
                 }
                 None => {
                     self.walker
@@ -1063,6 +1124,15 @@ impl SimulationHost for ProjectHost {
             scripts.run_scripts_phase();
         }
         self.apply_script_requests();
+
+        // Custom input actions (§10) become `action` events.
+        if let Some(scripts) = self.scripts.as_mut() {
+            for (name, action) in &self.custom_actions {
+                if self.input.pressed(*action) {
+                    scripts.emit_action(name);
+                }
+            }
+        }
 
         // §3.3 step 3: warp transition or overworld update.
         if !self.tick_warp_phase() {

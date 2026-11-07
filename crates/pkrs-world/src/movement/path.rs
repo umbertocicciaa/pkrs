@@ -15,7 +15,9 @@ use crate::LogicalGrid;
 use super::events::StepEvent;
 use super::occupancy::Occupancy;
 use super::stepper::GridStepper;
+#[cfg(test)]
 use super::terrain::TerrainRuleRegistry;
+use super::terrain::TerrainRules;
 
 /// Progress of a [`ScriptedPath`] after one tick.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,7 +81,7 @@ impl ScriptedPath {
         walker: &mut GridStepper,
         grid: &LogicalGrid,
         occupancy: &O,
-        rules: &TerrainRuleRegistry,
+        rules: &dyn TerrainRules,
     ) -> PathProgress {
         let Some(&dir) = self.steps.front() else {
             if walker.is_idle() {

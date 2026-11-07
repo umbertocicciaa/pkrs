@@ -49,6 +49,22 @@ impl<V: Vfs> ScriptFiles for VfsScriptFiles<V> {
         names.sort();
         names
     }
+
+    fn list_files(&self, dir: &str) -> Vec<String> {
+        let Ok(dir) = VfsPath::new(dir) else {
+            return Vec::new();
+        };
+        let mut names: Vec<String> = self
+            .vfs
+            .list(&dir)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|entry| entry.kind == EntryKind::File)
+            .filter_map(|entry| entry.path.file_name().map(str::to_owned))
+            .collect();
+        names.sort();
+        names
+    }
 }
 
 #[cfg(test)]
@@ -89,6 +105,8 @@ mod tests {
             .unwrap();
         let files = VfsScriptFiles::new(vfs);
         assert_eq!(files.list_dirs("plugins"), ["alpha", "zeta"]);
+        assert_eq!(files.list_files("plugins"), ["notes.txt"]);
+        assert_eq!(files.list_files("plugins/zeta"), ["plugin.toml"]);
         assert!(files.list_dirs("missing").is_empty());
     }
 }

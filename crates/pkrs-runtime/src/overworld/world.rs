@@ -9,11 +9,12 @@ use std::cell::{Ref, RefCell, RefMut};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::rc::Rc;
 
+use pkrs_core::is_action_name;
 use pkrs_core::{Direction, GridPos};
 use pkrs_script::{ApiError, ApiResult, CameraCommand, ScriptValue, ScriptWorld, TileInfo};
 use pkrs_world::{
-    GridStepper, LogicalGrid, Map, MovementConfig, ObjectKind, PathProgress, ScriptedPath,
-    TerrainRuleRegistry,
+    FieldState, GridStepper, LogicalGrid, Map, MovementConfig, ObjectKind, PathProgress,
+    ScriptedPath, TerrainRules,
 };
 
 /// A dialogue or choice a script asked for (`ui.say`, `ui.choose`, `ui.yes_no`).
@@ -125,8 +126,15 @@ impl Default for WorldModel {
     }
 }
 
-/// Field states `player.set_field_state` accepts.
+/// Built-in field states `player.set_field_state` accepts. Plugins may also use any
+/// namespaced state (`plugin_id:state`), e.g. one granted by a field action (§9.4).
 pub const FIELD_STATES: &[&str] = &["surf"];
+
+/// `true` for a state `player.set_field_state` accepts.
+#[must_use]
+pub fn is_field_state(name: &str) -> bool {
+    FIELD_STATES.contains(&name) || (name.contains(':') && is_action_name(name))
+}
 
 impl WorldModel {
     /// Replaces the map-dependent state with `map`'s NPCs and grid, the player standing on
@@ -167,6 +175,23 @@ impl WorldModel {
             .collect();
     }
 
+    /// The active field states as the movement rules see them (§6.3).
+    #[must_use]
+    pub fn field_state(&self) -> FieldState {
+        let mut field = FieldState::default();
+        for (name, on) in &self.field_states {
+            field.set(name, *on);
+        }
+        field
+    }
+
+    /// Terrain name of tile `pos` on the active map, if any.
+    #[must_use]
+    pub fn terrain_at(&self, pos: GridPos) -> Option<String> {
+        let cell = self.grid.as_ref()?.cell(pos)?;
+        cell.terrain.as_ref().map(|t| t.name().to_owned())
+    }
+
     /// The NPC with script id `id`.
     #[must_use]
     pub fn npc(&self, id: &str) -> Option<&NpcState> {
@@ -196,7 +221,7 @@ impl WorldModel {
     }
 
     /// Advances every NPC on a scripted path by one tick; returns the ids whose path ended.
-    pub fn tick_npcs(&mut self, rules: &TerrainRuleRegistry) -> Vec<String> {
+    pub fn tick_npcs(&mut self, rules: &dyn TerrainRules) -> Vec<String> {
         let Some(grid) = self.grid.as_ref() else {
             return Vec::new();
         };
@@ -410,9 +435,9 @@ impl ScriptWorld for SharedWorld {
     }
 
     fn set_field_state(&mut self, name: &str, value: bool) -> ApiResult<()> {
-        if !FIELD_STATES.contains(&name) {
+        if !is_field_state(name) {
             return Err(ApiError::new(format!(
-                "unknown field state `{name}` (known: {})",
+                "unknown field state `{name}` (known: {}; plugins use `plugin_id:state`)",
                 FIELD_STATES.join(", ")
             )));
         }
@@ -489,7 +514,7 @@ mod tests {
             .unwrap();
         assert!(world.npc_move("keeper", &[Direction::Up]).is_err());
         assert!(world.npc_face("keeper", Direction::Up).is_ok());
-        let rules = TerrainRuleRegistry::new();
+        let rules = pkrs_world::TerrainRuleRegistry::new();
         let mut finished = Vec::new();
         for _ in 0..200 {
             finished.extend(world.get_mut().tick_npcs(&rules));
@@ -517,6 +542,10 @@ mod tests {
         assert_eq!(world.map_var("x"), ScriptValue::Int(1));
         assert!(world.set_field_state("fly", true).is_err());
         assert!(world.set_field_state("surf", true).is_ok());
+        assert!(world.set_field_state("mud:boots", true).is_ok());
+        assert!(world.set_field_state("Mud:boots", true).is_err());
+        let field = world.get().field_state();
+        assert!(field.surf && field.is_active("mud:boots"));
         let w = world.get();
         assert_eq!(w.ui_requests.len(), 2);
         assert_eq!(w.warp_request.as_ref().unwrap().map, "house");

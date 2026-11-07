@@ -1,5 +1,6 @@
 //! `pkrs check` (§2.3): validates `pkrs.toml` and the plugin set; with `--plugins` it also
-//! loads the plugins in a sandboxed script host and returns the resolved hook table (§9.4).
+//! merges the content `data/` folders and loads the plugins in a sandboxed script host, and
+//! returns the resolved hook table and any content errors (§9.4).
 //!
 //! Further checks (RON data, Tiled maps, Lua syntax of game scripts) arrive with M7.
 
@@ -9,8 +10,8 @@ use std::path::Path;
 use pkrs_assets::{EntryKind, FolderVfs, Vfs, VfsPath};
 use pkrs_core::{ManifestError, Pcg64Rng, ProjectManifest, Version};
 use pkrs_script::{
-    HookTable, LuaScriptHost, PluginErrors, PluginInitError, ScriptError, ScriptFiles,
-    ScriptLimits, load_plugins, plan_plugins,
+    ContentError, HookTable, LuaScriptHost, PluginErrors, PluginInitError, ScriptError,
+    ScriptFiles, ScriptLimits, load_plugins, plan_plugins,
 };
 
 /// Scripting API levels this CLI checks against (same as the runtime, §9.7).
@@ -46,6 +47,9 @@ pub struct CheckReport {
     pub load_order: Vec<String>,
     /// Plugins whose `init.lua` failed (only with `--plugins`).
     pub failed: Vec<PluginInitError>,
+    /// Problems in `data/` folders: duplicate ids without `override`, parse and schema
+    /// errors (only with `--plugins`, §9.4).
+    pub content_errors: Vec<ContentError>,
     /// The resolved hook table (only with `--plugins`).
     pub hooks: Option<HookTable>,
 }
@@ -54,7 +58,7 @@ impl CheckReport {
     /// `true` when nothing failed.
     #[must_use]
     pub fn is_ok(&self) -> bool {
-        self.failed.is_empty()
+        self.failed.is_empty() && self.content_errors.is_empty()
     }
 }
 
@@ -78,6 +82,7 @@ pub fn check_project(dir: &Path, plugins: bool) -> Result<CheckReport, CheckErro
         )?;
         let loaded = load_plugins(&mut host, &files, &plan);
         report.failed = loaded.failed;
+        report.content_errors = loaded.content_errors;
         report.hooks = Some(host.hook_table());
     }
     Ok(report)
@@ -114,6 +119,22 @@ impl ScriptFiles for FolderScripts {
             .unwrap_or_default()
             .into_iter()
             .filter(|entry| entry.kind == EntryKind::Dir)
+            .filter_map(|entry| entry.path.file_name().map(str::to_owned))
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn list_files(&self, dir: &str) -> Vec<String> {
+        let Ok(dir) = VfsPath::new(dir) else {
+            return Vec::new();
+        };
+        let mut names: Vec<String> = self
+            .0
+            .list(&dir)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|entry| entry.kind == EntryKind::File)
             .filter_map(|entry| entry.path.file_name().map(str::to_owned))
             .collect();
         names.sort();

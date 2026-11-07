@@ -7,16 +7,20 @@ mod ai;
 pub(crate) mod battle;
 mod camera;
 mod convert;
+mod data;
 mod dialogue;
 mod events;
 mod facade;
 mod game;
 mod hook_order;
+mod input;
 mod log;
 mod map;
 mod npc;
+mod overworld;
 mod player;
 mod plugin;
+mod registry;
 mod sandbox;
 mod time;
 mod ui;
@@ -84,6 +88,7 @@ impl LuaScriptHost {
         lua.set_app_data(battle::Registry::default());
         lua.set_app_data(events::EventRegistry::default());
         lua.set_app_data(facade::WorldSlot::default());
+        lua.set_app_data(registry::Registrations::default());
         time::init(&lua);
         npc::init(&lua).map_err(engine)?;
 
@@ -566,7 +571,8 @@ impl ScriptHost for LuaScriptHost {
     }
 }
 
-/// Installs the API v0 tables (§9.1) into a new environment. `time` and the `ui` screen
+/// Installs the API v0 tables (§9.1) and the plugin registration tables (`data`, `world`,
+/// `input`, §9.4) into a new environment. `time` and the `ui` screen
 /// functions are installed by their own modules first.
 fn install_api_v0(lua: &Lua, env: &Table, owner: &ScriptOwner) -> mlua::Result<()> {
     game::install(lua, env)?;
@@ -575,7 +581,10 @@ fn install_api_v0(lua: &Lua, env: &Table, owner: &ScriptOwner) -> mlua::Result<(
     dialogue::install(lua, env)?;
     camera::install(lua, env)?;
     log::install(lua, env, owner)?;
-    events::install(lua, env, owner)
+    events::install(lua, env, owner)?;
+    data::install(lua, env, owner)?;
+    overworld::install(lua, env, owner)?;
+    input::install(lua, env, owner)
 }
 
 /// Reads what a yielded task waits for; `battle.start_*` yields a `{ wait = "battle" }` table,

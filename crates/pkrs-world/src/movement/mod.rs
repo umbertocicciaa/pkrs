@@ -16,4 +16,6 @@ pub use lock::{LockHolder, PlayerLock};
 pub use occupancy::Occupancy;
 pub use path::{PathProgress, ScriptedPath};
 pub use stepper::{GridStepper, LinkCrossing};
-pub use terrain::{TerrainRuleFn, TerrainRuleRegistry, TerrainStepVerdict};
+pub use terrain::{
+    TerrainQuery, TerrainRuleFn, TerrainRuleRegistry, TerrainRules, TerrainStepVerdict,
+};

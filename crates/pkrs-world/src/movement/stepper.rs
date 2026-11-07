@@ -10,7 +10,9 @@ use super::config::MovementConfig;
 use super::events::StepEvent;
 use super::field::FieldState;
 use super::occupancy::Occupancy;
-use super::terrain::{TerrainRuleRegistry, TerrainStepVerdict};
+#[cfg(test)]
+use super::terrain::TerrainRuleRegistry;
+use super::terrain::{TerrainQuery, TerrainRules, TerrainStepVerdict};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Motion {
@@ -105,6 +107,12 @@ impl GridStepper {
         self.foot
     }
 
+    /// Field state (Surf, plugin states, …).
+    #[must_use]
+    pub fn field(&self) -> &FieldState {
+        &self.field
+    }
+
     /// Mutable field state (Surf, …).
     pub fn field_mut(&mut self) -> &mut FieldState {
         &mut self.field
@@ -149,13 +157,13 @@ impl GridStepper {
 
     /// One simulation tick. Returns movement events (`StepCompleted` drives `on_step`).
     ///
-    /// `rules` holds plugin [`Terrain::Custom`] handlers (§6.3).
+    /// `rules` decides steps onto [`Terrain::Custom`] tiles (§6.3).
     pub fn tick<O: Occupancy>(
         &mut self,
         dir: Option<Direction>,
         grid: &LogicalGrid,
         occupancy: &O,
-        rules: &TerrainRuleRegistry,
+        rules: &dyn TerrainRules,
         links: Option<&LinkCrossing<'_>>,
     ) -> Vec<StepEvent> {
         if !self.is_idle() {
@@ -190,7 +198,7 @@ impl GridStepper {
         dir: Option<Direction>,
         grid: &LogicalGrid,
         occupancy: &O,
-        rules: &TerrainRuleRegistry,
+        rules: &dyn TerrainRules,
         links: Option<&LinkCrossing<'_>>,
     ) -> Vec<StepEvent> {
         let Some(dir) = dir else {
@@ -246,7 +254,7 @@ impl GridStepper {
         &mut self,
         grid: &LogicalGrid,
         occupancy: &O,
-        rules: &TerrainRuleRegistry,
+        rules: &dyn TerrainRules,
         links: Option<&LinkCrossing<'_>>,
     ) -> Vec<StepEvent> {
         let total = match self.motion {
@@ -312,7 +320,7 @@ fn plan_step<O: Occupancy>(
     dir: Direction,
     grid: &LogicalGrid,
     field: &FieldState,
-    rules: &TerrainRuleRegistry,
+    rules: &dyn TerrainRules,
     occupancy: &O,
     links: Option<&LinkCrossing<'_>>,
 ) -> StepPlan {
@@ -389,16 +397,23 @@ fn terrain_allows_at(
     dir: Direction,
     grid: &LogicalGrid,
     field: &FieldState,
-    rules: &TerrainRuleRegistry,
+    rules: &dyn TerrainRules,
 ) -> bool {
     let Some(terrain) = grid.terrain(dest) else {
         return true;
     };
     match terrain {
         Terrain::Water if !field.surf => false,
-        Terrain::Custom(name) => rules
-            .get(name)
-            .is_none_or(|rule| rule(field, from, dir) != TerrainStepVerdict::Block),
+        Terrain::Custom(name) => {
+            let query = TerrainQuery {
+                terrain: name,
+                field,
+                from,
+                to: dest,
+                dir,
+            };
+            rules.verdict(&query) != TerrainStepVerdict::Block
+        }
         _ => true,
     }
 }

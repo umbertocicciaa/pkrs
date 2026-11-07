@@ -1,5 +1,6 @@
 //! `LuaBattleHooks`: implements the battle [`BattleHooks`] port by dispatching to Lua handlers
-//! registered with `battle.on(...)` (§7.4, §9.1), plus `battle.start_wild` / `start_trainer`.
+//! registered with `battle.on(...)` (§7.4, §9.1), plus `battle.register_action` (custom
+//! fight-menu actions, §9.4) and `battle.start_wild` / `start_trainer`.
 //!
 //! **Calling convention** (mirrors §7.4's Lua hook list): every handler gets `ctx` first, then
 //! hook-specific arguments. Returning `nil` leaves the value unchanged; returning a value
@@ -23,6 +24,8 @@ use pkrs_battle::{
 };
 use pkrs_data::BattlePack;
 
+use super::facade::{check, fail, name, type_of};
+use super::registry::{check_id, with_regs};
 use super::{LuaScriptHost, hook_order};
 use crate::chain::{HookChain, Step, run_chain};
 use crate::host::ScriptOwner;
@@ -104,10 +107,121 @@ end
 return start_wild, start_trainer
 "#;
 
+/// Adds `func` to `hook`'s chain for `owner`; returns the handler id.
+fn add_handler(
+    lua: &Lua,
+    owner: &ScriptOwner,
+    hook: &'static str,
+    func: Function,
+    priority: i64,
+) -> mlua::Result<u64> {
+    let key = hook_order::chain_key(lua, owner, priority);
+    let mut reg = lua
+        .app_data_mut::<Registry>()
+        .ok_or_else(|| mlua::Error::runtime("battle registry unavailable"))?;
+    reg.chains.entry(hook).or_default().insert(
+        key,
+        Handler {
+            id: key.seq,
+            owner: owner.clone(),
+            func,
+            failures: 0,
+            disabled: false,
+        },
+    );
+    Ok(key.seq)
+}
+
+/// Builds the `on_action_menu` / `on_custom_action` pair behind `battle.register_action`.
+const ACTION_FNS: &str = r#"
+local id, label, available, run = ...
+local function menu(ctx, side, options)
+  if available == nil or available(ctx, side) then
+    options[#options + 1] = { id = id, label = label }
+  end
+  return options
+end
+local function exec(ctx, action_id, payload)
+  if action_id ~= id then return nil end
+  local handled = run(ctx, payload)
+  if handled == nil then return true end
+  return handled
+end
+return menu, exec
+"#;
+
+/// `battle.register_action(id, { label?, available?(ctx, side), run(ctx, payload),
+/// priority? })`: a new fight-menu entry and its execution, as sugar over `on_action_menu`
+/// and `on_custom_action` (§9.4). `run` returning `nil` counts as handled.
+fn register_action(
+    lua: &Lua,
+    owner: &ScriptOwner,
+    (id, def): (Value, Value),
+) -> mlua::Result<String> {
+    const FUNC: &str = "battle.register_action";
+    let id = check(lua, name(FUNC, "action id", &id))?;
+    check(lua, check_id(FUNC, "action id", &id, owner))?;
+    if ActionMenu::builtin(SlotRef::new(SideId::Player, 0)).contains(&id) {
+        return Err(fail(
+            lua,
+            format!("{FUNC}: `{id}` is a built-in menu entry"),
+        ));
+    }
+    let Value::Table(def) = def else {
+        return Err(fail(
+            lua,
+            format!("{FUNC}: definition must be a table (got {})", type_of(&def)),
+        ));
+    };
+    let run = match def.raw_get::<Value>("run")? {
+        Value::Function(f) => f,
+        other => {
+            return Err(fail(
+                lua,
+                format!("{FUNC}: `run` must be a function (got {})", type_of(&other)),
+            ));
+        }
+    };
+    let available = match def.raw_get::<Value>("available")? {
+        Value::Nil => None,
+        Value::Function(f) => Some(f),
+        other => {
+            return Err(fail(
+                lua,
+                format!(
+                    "{FUNC}: `available` must be a function (got {})",
+                    type_of(&other)
+                ),
+            ));
+        }
+    };
+    let label = match def.raw_get::<Value>("label")? {
+        Value::Nil => id.clone(),
+        v => check(lua, name(FUNC, "`label`", &v))?,
+    };
+    let priority = hook_order::parse_priority(Some(&def))
+        .map_err(|_| fail(lua, format!("{FUNC}: `priority` must be an integer")))?;
+    let fresh = with_regs(lua, |r| r.battle_actions.insert(id.clone()))?;
+    if !fresh {
+        return Err(fail(
+            lua,
+            format!("{FUNC}: battle action `{id}` is already registered"),
+        ));
+    }
+    let (menu, exec): (Function, Function) = lua
+        .load(ACTION_FNS)
+        .set_name("=pkrs-battle-action")
+        .call((id.as_str(), label, available, run))?;
+    add_handler(lua, owner, "on_action_menu", menu, priority)?;
+    add_handler(lua, owner, "on_custom_action", exec, priority)?;
+    Ok(id)
+}
+
 /// Installs the `battle` module into `env`.
 pub(super) fn install(lua: &Lua, env: &Table, owner: &ScriptOwner) -> mlua::Result<()> {
     let battle = lua.create_table()?;
     let owner = owner.clone();
+    let on_owner = owner.clone();
     let on = lua.create_function(
         move |lua, (name, func, opts): (String, Function, Option<Table>)| {
             let Some(hook) = HOOK_NAMES.iter().find(|h| **h == name).copied() else {
@@ -116,24 +230,17 @@ pub(super) fn install(lua: &Lua, env: &Table, owner: &ScriptOwner) -> mlua::Resu
                 )));
             };
             let priority = hook_order::parse_priority(opts.as_ref())?;
-            let key = hook_order::chain_key(lua, &owner, priority);
-            let mut reg = lua
-                .app_data_mut::<Registry>()
-                .ok_or_else(|| mlua::Error::runtime("battle registry unavailable"))?;
-            reg.chains.entry(hook).or_default().insert(
-                key,
-                Handler {
-                    id: key.seq,
-                    owner: owner.clone(),
-                    func,
-                    failures: 0,
-                    disabled: false,
-                },
-            );
-            Ok(key.seq)
+            add_handler(lua, &on_owner, hook, func, priority)
         },
     )?;
     battle.raw_set("on", on)?;
+    let action_owner = owner.clone();
+    battle.raw_set(
+        "register_action",
+        lua.create_function(move |lua, args: (Value, Value)| {
+            register_action(lua, &action_owner, args)
+        })?,
+    )?;
     let co: Table = env.raw_get("coroutine")?;
     let (wild, trainer): (Function, Function) =
         lua.load(START_FNS).set_name("=pkrs-battle").call((

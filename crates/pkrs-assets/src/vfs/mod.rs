@@ -6,9 +6,11 @@
 
 mod folder;
 mod memory;
+mod sub;
 
 pub use folder::FolderVfs;
 pub use memory::MemoryVfs;
+pub use sub::SubVfs;
 
 use crate::error::Result;
 use crate::path::VfsPath;

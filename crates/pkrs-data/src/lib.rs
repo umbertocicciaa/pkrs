@@ -1,9 +1,11 @@
 //! Data-driven content: RON schemas, loading, validation and cross-reference checks.
 //!
-//! See `docs/design.md` §7.3 for battle-related schemas (full content pipeline in M6).
+//! See `docs/design.md` §7.3 for battle-related schemas (full content pipeline in M6) and
+//! [`content`] for the merged content database plugins register into (§8.1, §9.4).
 
 mod battle_pack;
 mod battle_rules;
+pub mod content;
 mod error;
 mod move_def;
 mod species;
@@ -14,6 +16,11 @@ pub use battle_pack::BattlePack;
 pub use battle_rules::{
     BattleRules, ResidualKind, StatusDef, StatusKind, WeatherDef, residual_amount,
     status_blocked_by_types, weather_chip_blocked,
+};
+pub use content::{
+    AbilityDef, ContentDb, ContentDef, ContentEntry, ContentKind, ContentOverride, ContentSource,
+    ContentValue, ContentValueError, EffectDef, ItemDef, Record, TerrainDef, is_content_id,
+    parse_content,
 };
 pub use error::{DataError, Result};
 pub use move_def::{EffectTarget, MoveCategory, MoveDef, MoveEffect, StatId};

@@ -7,7 +7,7 @@ use crate::cache::{Asset, AssetStore};
 use crate::error::{AssetsError, Result};
 use crate::handle::Handle;
 use crate::path::{AssetPath, VfsPath, is_mount_id};
-use crate::vfs::{EntryKind, Vfs};
+use crate::vfs::{EntryKind, SubVfs, Vfs};
 
 /// One entry returned by [`Assets::list`].
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -87,6 +87,18 @@ impl Assets {
         }
         self.mounts.insert(prefix.to_owned(), Box::new(vfs));
         Ok(())
+    }
+
+    /// Mounts plugin `id`'s `plugins/<id>/assets/` folder of `project` under `id:` (§9.4,
+    /// §13), so `id:ui/icon.png` reads `plugins/<id>/assets/ui/icon.png`. A plugin without an
+    /// `assets/` folder is not mounted; returns whether it was.
+    pub fn mount_plugin_assets<V: Vfs + 'static>(&mut self, id: &str, project: V) -> Result<bool> {
+        let dir = VfsPath::new(&format!("plugins/{id}/assets"))?;
+        if project.list(&dir).is_err() {
+            return Ok(false);
+        }
+        self.mount(id, SubVfs::new(project, dir))?;
+        Ok(true)
     }
 
     /// Removes a mount; returns `true` if it existed. Cached assets are kept until evicted.

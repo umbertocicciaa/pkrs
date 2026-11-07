@@ -10,6 +10,11 @@
 //!    the object's own script, or an item pickup) and [`tick_npcs`](OverworldScripts::tick_npcs) (NPC paths).
 //! 3. [`flush_events`](OverworldScripts::flush_events): start every queued event's listeners.
 //!
+//! Field actions (§9.4) run from the party menu ([`use_field_action`](OverworldScripts::use_field_action))
+//! or when Confirm finds nothing but a tile whose terrain an action is bound to; they run as
+//! interact tasks. Custom input actions pressed this tick emit the `action` event
+//! ([`emit_action`](OverworldScripts::emit_action)).
+//!
 //! Map changes go through [`exit_map`](OverworldScripts::exit_map) (dispatch `map_exit`, then
 //! unload the map script's handlers) and [`enter_map`](OverworldScripts::enter_map) (load
 //! `scripts/maps/<id>.lua` into its own environment, queue `map_enter`).
@@ -20,17 +25,17 @@ mod world;
 pub use overlay::{CHARS_PER_TICK, ScreenFade, ScriptOverlay};
 pub use world::{
     EntityKind, FIELD_STATES, InteractionTarget, MapEntity, NpcState, SharedWorld, UiRequest,
-    WarpRequest, WorldModel,
+    WarpRequest, WorldModel, is_field_state,
 };
 
 use std::collections::BTreeSet;
 
 use pkrs_core::{Direction, GridPos};
 use pkrs_script::{
-    CameraCommand, DispatchReport, LuaScriptHost, Scheduler, ScriptEvent, ScriptHost, ScriptOwner,
-    ScriptValue, TaskKind, WakeSignal,
+    CameraCommand, DispatchReport, FieldActionInfo, FieldActionSource, FieldContext, LuaScriptHost,
+    Scheduler, ScriptEvent, ScriptHost, ScriptOwner, ScriptValue, TaskKind, WakeSignal,
 };
-use pkrs_world::{Map, TerrainRuleRegistry};
+use pkrs_world::{Map, TerrainRules};
 
 /// Game script run once when the game starts (if the project has one).
 pub const MAIN_SCRIPT: &str = "scripts/main.lua";
@@ -65,6 +70,12 @@ impl OverworldScripts {
             game_files: BTreeSet::new(),
             map_owner: None,
         }
+    }
+
+    /// The script host (read-only: content, terrain rules, registrations).
+    #[must_use]
+    pub fn host(&self) -> &LuaScriptHost {
+        &self.host
     }
 
     /// The script host.
@@ -228,8 +239,71 @@ impl OverworldScripts {
                     (None, None) => {}
                 }
             }
-            InteractionTarget::Tile => self.host.emit_event(ScriptEvent::interact_tile(tile)),
+            InteractionTarget::Tile => {
+                self.host.emit_event(ScriptEvent::interact_tile(tile));
+                let ctx = self.field_context(FieldActionSource::FacingTile);
+                if let Some(action) = self.host.available_field_actions(&ctx).into_iter().next() {
+                    self.start_field_action(&action.id, &ctx);
+                }
+            }
         }
+    }
+
+    /// Where the player stands and what they face, for field actions.
+    #[must_use]
+    pub fn field_context(&self, source: FieldActionSource) -> FieldContext {
+        let w = self.world.get();
+        let target = w.player_pos.neighbour(w.player_facing);
+        FieldContext {
+            source,
+            player: w.player_pos,
+            facing: w.player_facing,
+            target_terrain: w.terrain_at(target),
+        }
+    }
+
+    /// Field actions the party menu offers right now (§9.4).
+    #[must_use]
+    pub fn party_field_actions(&self) -> Vec<FieldActionInfo> {
+        self.host
+            .available_field_actions(&self.field_context(FieldActionSource::PartyMenu))
+    }
+
+    /// Uses field action `id` from the party menu; `false` when it is not available here.
+    pub fn use_field_action(&mut self, id: &str) -> bool {
+        let ctx = self.field_context(FieldActionSource::PartyMenu);
+        let available = self
+            .host
+            .available_field_actions(&ctx)
+            .iter()
+            .any(|a| a.id == id);
+        if available {
+            self.start_field_action(id, &ctx);
+        }
+        available
+    }
+
+    fn start_field_action(&mut self, id: &str, ctx: &FieldContext) {
+        self.host.set_tick(self.scheduler.tick());
+        match self.host.start_field_action(id, ctx) {
+            Ok((info, task, status)) => {
+                tracing::debug!(target: "script", action = id, source = ctx.source.name(), "field action");
+                self.scheduler
+                    .adopt(&info.owner, id, TaskKind::Interact, task, status);
+            }
+            Err(err) => {
+                tracing::warn!(target: "script", action = id, "field action failed: {err}");
+            }
+        }
+    }
+
+    /// Queues the `action { action = name }` event for a custom input action pressed this
+    /// tick (§10).
+    pub fn emit_action(&mut self, name: &str) {
+        let mut payload = std::collections::BTreeMap::new();
+        payload.insert("action".to_owned(), ScriptValue::from(name));
+        self.host
+            .emit_event(ScriptEvent::new("action", ScriptValue::Map(payload)));
     }
 
     /// Scene entities that disappeared (picked-up items) since the last call.
@@ -238,7 +312,7 @@ impl OverworldScripts {
     }
 
     /// Advances NPC paths; finished paths wake their `npc:move` next tick.
-    pub fn tick_npcs(&mut self, rules: &TerrainRuleRegistry) {
+    pub fn tick_npcs(&mut self, rules: &dyn TerrainRules) {
         let finished = self.world.get_mut().tick_npcs(rules);
         self.wakes.extend(
             finished

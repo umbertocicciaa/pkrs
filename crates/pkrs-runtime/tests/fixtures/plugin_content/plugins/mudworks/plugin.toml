@@ -1,0 +1,6 @@
+[plugin]
+id          = "mudworks"
+name        = "Mudworks"
+version     = "1.0.0"
+api         = 1
+description = "Mud flats: a mud terrain, waders to cross it and a mud move."

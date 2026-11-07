@@ -3,6 +3,7 @@
 //! The only place the harness reads game state; it goes through the host's public accessors,
 //! so changes to how the overworld stores state stay local to this file.
 
+use pkrs_script::ScriptValue;
 use pkrs_script::scenario::{Placement, ScenarioSnapshot};
 
 use crate::overworld::UiRequest;
@@ -60,9 +61,14 @@ pub fn snapshot(host: &ProjectHost, dialogues_opened: u64) -> ScenarioSnapshot {
     if let Some(scripts) = host.scripts() {
         snap.player_locked = scripts.player_locked();
         let world = scripts.world().get();
-        snap.flags.clone_from(&world.flags);
-        snap.vars.clone_from(&world.vars);
-        snap.items.clone_from(&world.bag);
+        snap.flags.clone_from(world.state.flags());
+        snap.vars = world
+            .state
+            .vars()
+            .iter()
+            .map(|(k, v)| (k.clone(), ScriptValue::from_save_value(Some(v))))
+            .collect();
+        snap.items.clone_from(world.state.bag());
         snap.npcs = world
             .npcs
             .iter()

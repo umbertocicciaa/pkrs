@@ -33,6 +33,21 @@ pub enum DataError {
         /// Duplicate id.
         id: String,
     },
+    /// A content id is defined twice and the later record does not declare `override`
+    /// (§8.1, §9.4).
+    #[error(
+        "duplicate {kind} `{id}`: already defined by {existing}; {by} must declare `override: true` to replace it"
+    )]
+    DuplicateContent {
+        /// Kind of content (`move`, `terrain`, …).
+        kind: String,
+        /// The repeated id.
+        id: String,
+        /// Who defined it first.
+        existing: String,
+        /// Who tried to define it again.
+        by: String,
+    },
     /// Invalid field value in content data.
     #[error("invalid {field} in `{context}`: {message}")]
     InvalidField {

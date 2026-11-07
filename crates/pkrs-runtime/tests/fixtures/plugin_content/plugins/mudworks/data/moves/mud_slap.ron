@@ -1,0 +1,13 @@
+// Merged into the content database before init.lua runs (§9.4 step 4).
+(
+    id: "mud_slap",
+    type: "ground",
+    category: special,
+    power: 20,
+    accuracy: 100,
+    priority: 0,
+    effects: [
+        (effect: "damage"),
+        (effect: "stat_stage", stat: "accuracy", stages: -1, target: "target"),
+    ],
+)

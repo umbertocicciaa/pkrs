@@ -25,6 +25,13 @@
 //! - **Plugins:** [`plugin`] discovers `plugins/*/plugin.toml`, validates the enabled set and
 //!   sorts it ([`plan_plugins`]), then runs each `init.lua` in its own `_ENV`
 //!   ([`load_plugins`]) with `plugin.define()` bound to the manifest (§9.4, §9.7).
+//! - **Plugin registration (§9.4):** `data.register_*` adds content to the merged
+//!   [`ContentDb`](pkrs_data::ContentDb) (data folders are merged first, [`merge_content`]),
+//!   `world.register_terrain` / `world.register_field_action`, `battle.register_action` and
+//!   `input.register_action` register terrain rules and field, battle and input actions, and
+//!   `plugin.save` is the plugin's save namespace. The engine reads them through
+//!   [`LuaScriptHost`] ([`FieldContext`], [`InputActionRequest`]); the host is also a
+//!   `pkrs_world::TerrainRules`.
 //! - **Hook chains:** [`chain`] orders handlers by priority, then plugin load order, then
 //!   registration order, threads the value through them and stops on cancel (§9.4).
 //!   [`LuaScriptHost::hook_table`] returns the resolved [`HookTable`].
@@ -39,6 +46,7 @@ mod host;
 pub mod input_bridge;
 mod lua;
 pub mod plugin;
+pub mod registry;
 pub mod scenario;
 mod scheduler;
 mod world;
@@ -59,9 +67,10 @@ pub use lua::{
     LuaScenario, LuaScriptHost, SCENARIO_API, UiScreenMethod,
 };
 pub use plugin::{
-    PluginError, PluginErrors, PluginHost, PluginInitError, PluginLoadReport, PluginPlan,
-    load_plugins, plan_plugins,
+    ContentError, PluginError, PluginErrors, PluginHost, PluginInitError, PluginLoadReport,
+    PluginPlan, load_plugins, merge_content, plan_plugins,
 };
+pub use registry::{FieldActionInfo, FieldActionSource, FieldContext, InputActionRequest};
 pub use scheduler::{
     PendingUiPush, Scheduler, StepReport, TaskKind, TaskOutcome, WaitCondition, WakeSignal,
 };

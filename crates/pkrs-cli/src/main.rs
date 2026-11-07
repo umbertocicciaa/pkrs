@@ -144,6 +144,9 @@ fn execute(cli: Cli) -> anyhow::Result<ExitCode> {
             let project = project_root(project)?;
             let report = check::check_project(&project, plugins)?;
             print!("{report}");
+            for err in &report.content_errors {
+                eprintln!("error: {err}");
+            }
             for failed in &report.failed {
                 eprintln!("error: {failed}");
             }

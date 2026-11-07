@@ -1,7 +1,8 @@
 //! Assets facade: virtual file system (loose folder or `.pak`), handles and caching (§13).
 //!
 //! - **Port:** [`Vfs`] (`read`, `exists`, `list`) over normalised [`VfsPath`]s.
-//! - **Adapters:** [`FolderVfs`] (loose files, `pkrs run`) and [`MemoryVfs`] (tests, headless).
+//! - **Adapters:** [`FolderVfs`] (loose files, `pkrs run`) and [`MemoryVfs`] (tests, headless);
+//!   [`SubVfs`] serves one folder of another VFS (plugin `assets/` mounts).
 //!   `PakVfs` (zip) lands with `.pak` support (M7).
 //! - **Facade:** [`Assets`] routes `plugin_id:` prefixes through a mount table and caches
 //!   decoded assets per type in [`AssetStore`]s, handing out generational [`Handle`]s with
@@ -20,7 +21,7 @@ pub use cache::{Asset, AssetStore, RawBytes, Text};
 pub use error::{AssetsError, Result};
 pub use handle::{Handle, SlotMap};
 pub use path::{AssetPath, VfsPath};
-pub use vfs::{EntryKind, FolderVfs, MemoryVfs, Vfs, VfsEntry};
+pub use vfs::{EntryKind, FolderVfs, MemoryVfs, SubVfs, Vfs, VfsEntry};
 
 #[cfg(test)]
 mod tests {

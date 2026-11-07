@@ -1,13 +1,15 @@
 name: Documentation task
-description: A focused documentation task (guide, reference, example, docs site or release docs). Does not need to follow the design doc.
+description: A focused task for the user-facing docs site (tutorials, guides, concepts, reference for the engine, the CLI and the editor UI). Does not need to follow the design doc.
 title: "docs: <short imperative summary>"
 labels: ["documentation", "type:task", "area:docs"]
 body:
   - type: markdown
     attributes:
       value: |
+        The docs site explains to **users and customers how to use pkrs**: the engine, the `pkrs` CLI, the editor UI (when it ships) and anything else about using the product. Think "Learn Rust / Getting started", not internal notes.
+        Contributor material (rustdoc, design doc, internal architecture) does **not** belong here; open an engine task instead.
         One task = one PR. Docs describe **what actually ships**: the code and the current release are the source of truth, not the design doc.
-        Docs tasks are tracked under the **[Epic] M8 · Documentation** epic.
+        Docs tasks are tracked under the **[Epic] M8 · Documentation** epic. Everything in this repo is written in **English**.
 
   - type: textarea
     id: summary
@@ -21,7 +23,7 @@ body:
     id: motivation
     attributes:
       label: Motivation
-      description: Who needs this and what they can't do (or keep getting wrong) without it.
+      description: Which user need this answers and what users can't do (or keep getting wrong) without it.
     validations:
       required: true
 
@@ -31,10 +33,26 @@ body:
       label: Audience
       multiple: true
       options:
+        - New users (evaluating / first game)
         - Game authors (no Rust)
         - Plugin authors (Lua)
-        - Engine contributors (Rust)
-        - Maintainers / release
+        - Players of games made with pkrs
+    validations:
+      required: true
+
+  - type: dropdown
+    id: product-area
+    attributes:
+      label: Product area
+      multiple: true
+      options:
+        - Engine / runtime (game features)
+        - CLI (`pkrs`)
+        - Editor UI (future)
+        - Lua scripting & plugins
+        - Distribution & platforms
+        - Docs site (structure, navigation, deploy)
+        - Release notes / README
     validations:
       required: true
 
@@ -44,14 +62,14 @@ body:
       label: Kind of docs
       multiple: true
       options:
-        - Getting started / tutorial
-        - How-to guide
-        - Reference (config keys, CLI, Lua API)
+        - Tutorial (learning by doing)
+        - How-to guide (task-oriented)
+        - Concepts (explanation)
+        - Reference (CLI, config keys, Lua API, data formats)
         - Example walkthrough
-        - Explanation / concepts
-        - Docs site & CI/CD (MkDocs, GitHub Pages)
-        - README / CHANGELOG / release notes
-        - Rustdoc (API comments)
+        - Troubleshooting / FAQ
+        - Release notes / README
+        - Docs site infrastructure
     validations:
       required: true
 
@@ -59,7 +77,7 @@ body:
     id: pages
     attributes:
       label: Pages affected
-      description: Files or site pages to add or change, and where they go in the `mkdocs.yml` nav.
+      description: Files or site pages to add or change, and where they go in the `mkdocs.yml` nav (Get started, Guides, Concepts, Reference, Examples, Help).
       placeholder: |
         - docs/getting-started/install.md (new, nav: Getting started → Install)
         - README.md
@@ -120,5 +138,7 @@ body:
           required: true
         - label: No third-party franchise names or assets; images and assets have a recorded license
           required: true
-        - label: Written in English, in neutral engine terminology (creature, species, move, trainer)
+        - label: Written in English for users of the product (no internal/contributor details), following the docs style guide
+          required: true
+        - label: Uses neutral engine terminology (creature, species, move, trainer) and the glossary terms
           required: true

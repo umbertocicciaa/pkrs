@@ -137,6 +137,12 @@ impl MapScene {
         &self.map
     }
 
+    /// Takes the map and its uploaded tile textures (for neighbour cache reuse, §6.4).
+    pub fn detach(self) -> (Map, Vec<TextureHandle>) {
+        let textures = self.sheets.iter().map(|s| s.texture).collect();
+        (self.map, textures)
+    }
+
     /// Camera behaviour (`pan_to`, `follow`, `shake`).
     pub fn camera_mut(&mut self) -> &mut CameraController {
         &mut self.camera
@@ -207,7 +213,7 @@ impl MapScene {
         &mut self,
         renderer: &mut Renderer,
         alpha: f32,
-        neighbors: &[NeighborBackdrop],
+        neighbors: &[&NeighborBackdrop],
     ) -> (i32, i32) {
         let view = renderer.view_size();
         let target = match self.camera.target() {
@@ -307,7 +313,7 @@ impl MapScene {
 }
 
 #[must_use]
-fn extended_camera_bounds(map: &Map, neighbors: &[NeighborBackdrop]) -> CameraBounds {
+fn extended_camera_bounds(map: &Map, neighbors: &[&NeighborBackdrop]) -> CameraBounds {
     let (tw, th) = (map.tile_width, map.tile_height);
     let (mut min_x, mut min_y) = (0f32, 0f32);
     let (mut max_x, mut max_y) = (map.width as f32 * tw as f32, map.height as f32 * th as f32);

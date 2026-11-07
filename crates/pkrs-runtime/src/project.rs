@@ -15,7 +15,8 @@ use pkrs_platform::{
 use pkrs_render::{Rect, Renderer, TextureHandle};
 use pkrs_world::{
     GridStepper, LinkCrossing, Map, MapImporter, MovementConfig, StepEvent, TerrainRuleRegistry,
-    TiledImporter, Transition as WarpTransition, Warp, WorldLayout, neighbor_pixel_offset,
+    TiledImporter, Transition as WarpTransition, WORLD_RON, Warp, WorldLayout,
+    neighbor_pixel_offset,
 };
 
 use crate::main_loop::SimulationHost;
@@ -261,9 +262,35 @@ impl CrossingContext {
 
 /// Cached neighbour map ready for edge-strip drawing.
 struct NeighborCache {
+    dir: Direction,
+    map: Map,
+    textures: Vec<TextureHandle>,
+    backdrop: NeighborBackdrop,
+}
+
+fn neighbor_cache(
+    dir: Direction,
     map: Map,
     textures: Vec<TextureHandle>,
     offset_px: (f32, f32),
+) -> NeighborCache {
+    let sheets: Vec<_> = map
+        .tilesets
+        .iter()
+        .zip(&textures)
+        .map(|(ts, &tex)| tile_sheet(ts, tex))
+        .collect();
+    let backdrop = NeighborBackdrop {
+        map: map.clone(),
+        sheets,
+        offset_px,
+    };
+    NeighborCache {
+        dir,
+        map,
+        textures,
+        backdrop,
+    }
 }
 
 /// The overworld of a loaded project: map scene, player and input.
@@ -279,6 +306,7 @@ pub struct ProjectHost {
     warp_phase: WarpPhase,
     crossing: Option<CrossingContext>,
     neighbors: Vec<NeighborCache>,
+    active_textures: Vec<TextureHandle>,
 }
 
 impl ProjectHost {
@@ -321,9 +349,16 @@ impl ProjectHost {
             warp_phase: WarpPhase::None,
             crossing: None,
             neighbors: Vec::new(),
+            active_textures: textures,
         };
         host.bootstrap_world_layout()?;
         Ok(host)
+    }
+
+    /// `true` while a warp fade is running (for integration tests).
+    #[must_use]
+    pub fn is_warping(&self) -> bool {
+        !matches!(self.warp_phase, WarpPhase::None)
     }
 
     /// The scene (map, entities, camera).
@@ -409,37 +444,73 @@ impl ProjectHost {
             false,
         );
         self.scene = scene;
+        self.active_textures = textures;
         self.walker = GridStepper::new(pending.to, facing);
         tracing::info!(map = %self.scene.map().id, pos = %pending.to, "map_enter (warp)");
         self.refresh_neighbors()?;
         Ok(())
     }
 
+    fn collect_layout_sizes(
+        project: &Project,
+        layout: &WorldLayout,
+    ) -> Result<BTreeMap<String, (u32, u32)>, ProjectError> {
+        let mut sizes = BTreeMap::new();
+        let mut queue: Vec<String> = layout.map_ids().map(str::to_owned).collect();
+        while let Some(id) = queue.pop() {
+            if sizes.contains_key(&id) {
+                continue;
+            }
+            let map = project.load_map_by_id(&id)?;
+            sizes.insert(id.clone(), (map.width, map.height));
+            if let Some(links) = layout.links_for(&id) {
+                for neighbor in [
+                    links.north.as_ref(),
+                    links.south.as_ref(),
+                    links.east.as_ref(),
+                    links.west.as_ref(),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    if !sizes.contains_key(&neighbor.map) {
+                        queue.push(neighbor.map.clone());
+                    }
+                }
+            }
+        }
+        Ok(sizes)
+    }
+
     fn bootstrap_world_layout(&mut self) -> Result<(), ProjectError> {
         let layout = WorldLayout::load_optional(&self.project.vfs)?;
-        self.crossing = layout.map(|layout| {
+        self.crossing = if let Some(layout) = layout {
+            let sizes = Self::collect_layout_sizes(&self.project, &layout)?;
+            layout.validate_layout(WORLD_RON, &sizes)?;
             let map = self.scene.map();
-            CrossingContext {
+            Some(CrossingContext {
                 layout,
                 map_id: map.id.clone(),
                 map_size: (map.width, map.height),
                 neighbor_sizes: BTreeMap::new(),
-            }
-        });
+            })
+        } else {
+            None
+        };
         self.refresh_neighbors()?;
         Ok(())
     }
 
     fn refresh_neighbors(&mut self) -> Result<(), ProjectError> {
+        let mut reuse = self.drain_neighbor_reuse();
+        self.neighbors.clear();
         let Some(crossing) = self.crossing.as_mut() else {
-            self.neighbors.clear();
             return Ok(());
         };
         let map = self.scene.map();
         crossing.map_id = map.id.clone();
         crossing.map_size = (map.width, map.height);
         crossing.neighbor_sizes.clear();
-        self.neighbors.clear();
 
         let links = crossing
             .layout
@@ -447,59 +518,73 @@ impl ProjectHost {
             .cloned()
             .unwrap_or_default();
         let main_size = crossing.map_size;
-        let mut loaded = Vec::new();
         for (dir, link) in [
-            (pkrs_core::Direction::Up, links.north),
-            (pkrs_core::Direction::Down, links.south),
-            (pkrs_core::Direction::Left, links.west),
-            (pkrs_core::Direction::Right, links.east),
+            (Direction::Up, links.north),
+            (Direction::Down, links.south),
+            (Direction::Left, links.west),
+            (Direction::Right, links.east),
         ] {
             let Some(link) = link else { continue };
-            let map = self.project.load_map_by_id(&link.map)?;
-            let textures = upload_map_textures(&self.project, &mut self.renderer, &map)?;
-            loaded.push((dir, link, map, textures));
-        }
-        for (dir, link, map, textures) in loaded {
+            let (neighbor_map, neighbor_textures) = if let Some(cached) = reuse.remove(&link.map) {
+                cached
+            } else {
+                let neighbor_map = self.project.load_map_by_id(&link.map)?;
+                let neighbor_textures =
+                    upload_map_textures(&self.project, &mut self.renderer, &neighbor_map)?;
+                (neighbor_map, neighbor_textures)
+            };
             crossing
                 .neighbor_sizes
-                .insert(link.map.clone(), (map.width, map.height));
+                .insert(link.map.clone(), (neighbor_map.width, neighbor_map.height));
             let offset_px = neighbor_pixel_offset(
                 dir,
                 main_size,
-                (map.width, map.height),
-                (map.tile_width, map.tile_height),
+                (neighbor_map.width, neighbor_map.height),
+                (neighbor_map.tile_width, neighbor_map.tile_height),
                 link.offset,
             );
-            self.neighbors.push(NeighborCache {
-                map,
-                textures,
+            self.neighbors.push(neighbor_cache(
+                dir,
+                neighbor_map,
+                neighbor_textures,
                 offset_px,
-            });
+            ));
         }
         Ok(())
     }
 
-    fn neighbor_backdrops(&self) -> Vec<NeighborBackdrop> {
-        self.neighbors
-            .iter()
-            .map(|n| NeighborBackdrop {
-                map: n.map.clone(),
-                sheets: n
-                    .map
-                    .tilesets
-                    .iter()
-                    .zip(&n.textures)
-                    .map(|(ts, &tex)| tile_sheet(ts, tex))
-                    .collect(),
-                offset_px: n.offset_px,
-            })
-            .collect()
+    fn drain_neighbor_reuse(&mut self) -> BTreeMap<String, (Map, Vec<TextureHandle>)> {
+        let mut reuse = BTreeMap::new();
+        for n in self.neighbors.drain(..) {
+            reuse.insert(n.map.id.clone(), (n.map, n.textures));
+        }
+        reuse
     }
 
-    fn apply_seamless_cross(&mut self, to_map: &str, entry: GridPos) -> Result<(), ProjectError> {
-        let facing = self.walker.facing();
-        let map = self.project.load_map_by_id(to_map)?;
-        let textures = upload_map_textures(&self.project, &mut self.renderer, &map)?;
+    fn apply_seamless_cross(
+        &mut self,
+        to_map: &str,
+        entry: GridPos,
+        via: Direction,
+    ) -> Result<(), ProjectError> {
+        let old_map = self.scene.map().clone();
+        let old_textures = std::mem::take(&mut self.active_textures);
+        let old_id = old_map.id.clone();
+
+        let promoted = self
+            .neighbors
+            .iter()
+            .position(|n| n.dir == via && n.map.id == to_map)
+            .map(|idx| self.neighbors.remove(idx));
+
+        let (map, textures) = if let Some(cache) = promoted {
+            (cache.map, cache.textures)
+        } else {
+            let map = self.project.load_map_by_id(to_map)?;
+            let textures = upload_map_textures(&self.project, &mut self.renderer, &map)?;
+            (map, textures)
+        };
+
         if !map.grid.in_bounds(entry) {
             return Err(ProjectError::StartOutOfBounds {
                 map: map.id.clone(),
@@ -517,10 +602,70 @@ impl ProjectHost {
             false,
         );
         self.scene = scene;
-        self.walker = GridStepper::new(entry, facing);
+        self.active_textures = textures;
+        self.walker.relocate(entry);
         tracing::info!(map = %self.scene.map().id, pos = %entry, "map_enter (seamless)");
-        self.refresh_neighbors()?;
+
+        let mut reuse = self.drain_neighbor_reuse();
+        reuse.insert(old_id, (old_map, old_textures));
+        if let Some(crossing) = self.crossing.as_mut() {
+            let new_id = self.scene.map().id.clone();
+            crossing.map_id = new_id.clone();
+            crossing.map_size = (self.scene.map().width, self.scene.map().height);
+            crossing.neighbor_sizes.clear();
+            let links = crossing
+                .layout
+                .links_for(&new_id)
+                .cloned()
+                .unwrap_or_default();
+            let main_size = crossing.map_size;
+            self.neighbors.clear();
+            for (dir, link) in [
+                (Direction::Up, links.north),
+                (Direction::Down, links.south),
+                (Direction::Left, links.west),
+                (Direction::Right, links.east),
+            ] {
+                let Some(link) = link else { continue };
+                let (neighbor_map, neighbor_textures) =
+                    if let Some(cached) = reuse.remove(&link.map) {
+                        cached
+                    } else {
+                        let neighbor_map = self.project.load_map_by_id(&link.map)?;
+                        let neighbor_textures =
+                            upload_map_textures(&self.project, &mut self.renderer, &neighbor_map)?;
+                        (neighbor_map, neighbor_textures)
+                    };
+                crossing
+                    .neighbor_sizes
+                    .insert(link.map.clone(), (neighbor_map.width, neighbor_map.height));
+                let offset_px = neighbor_pixel_offset(
+                    dir,
+                    main_size,
+                    (neighbor_map.width, neighbor_map.height),
+                    (neighbor_map.tile_width, neighbor_map.tile_height),
+                    link.offset,
+                );
+                self.neighbors.push(neighbor_cache(
+                    dir,
+                    neighbor_map,
+                    neighbor_textures,
+                    offset_px,
+                ));
+            }
+        }
         Ok(())
+    }
+
+    fn on_step_completed(&mut self, pos: GridPos) {
+        tracing::trace!(%pos, "step");
+        let grid = &self.scene.map().grid;
+        if grid.in_bounds(pos) {
+            let warp = self.scene.map().warp_at(pos).cloned();
+            if let Some(warp) = warp {
+                self.begin_warp(&warp);
+            }
+        }
     }
 
     fn sync_player_sprite(&mut self) {
@@ -627,18 +772,17 @@ impl SimulationHost for ProjectHost {
         {
             match event {
                 StepEvent::StepCompleted { pos, .. } => {
-                    tracing::trace!(%pos, "step");
-                    if grid.in_bounds(pos) {
-                        let warp = self.scene.map().warp_at(pos).cloned();
-                        if let Some(warp) = warp {
-                            self.begin_warp(&warp);
-                            break;
-                        }
+                    self.on_step_completed(pos);
+                    if !matches!(self.warp_phase, WarpPhase::None) {
+                        break;
                     }
                 }
                 StepEvent::CrossedMap { to_map, entry, .. } => {
-                    if let Err(e) = self.apply_seamless_cross(&to_map, entry) {
+                    let via = self.walker.facing();
+                    if let Err(e) = self.apply_seamless_cross(&to_map, entry, via) {
                         tracing::error!(%e, "seamless crossing failed");
+                    } else {
+                        self.on_step_completed(entry);
                     }
                     break;
                 }
@@ -652,7 +796,8 @@ impl SimulationHost for ProjectHost {
     fn render(&mut self, platform: &Platform, alpha: f32) {
         let (w, h) = platform.window_size();
         self.renderer.begin_frame(w, h);
-        let backdrops = self.neighbor_backdrops();
+        let backdrops: Vec<&NeighborBackdrop> =
+            self.neighbors.iter().map(|n| &n.backdrop).collect();
         self.scene.render(&mut self.renderer, alpha, &backdrops);
         self.renderer.end_frame();
     }

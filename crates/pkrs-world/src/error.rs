@@ -29,4 +29,12 @@ pub enum WorldError {
         /// Parser message.
         message: String,
     },
+    /// `maps/world.ron` failed validation.
+    #[error("invalid world layout in `{file}`: {message}")]
+    LayoutInvalid {
+        /// Source file.
+        file: String,
+        /// Validation failure.
+        message: String,
+    },
 }

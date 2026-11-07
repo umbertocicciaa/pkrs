@@ -109,6 +109,15 @@ impl GridStepper {
         self.running = running;
     }
 
+    /// Moves to `pos` after a map swap, keeping held direction and field state (§6.4).
+    pub fn relocate(&mut self, pos: GridPos) {
+        self.pos = pos;
+        self.from = pos;
+        self.pending_crossing = None;
+        self.motion = Motion::Idle;
+        self.progress = self.step_ticks();
+    }
+
     /// Fractional tile position for rendering interpolation.
     #[must_use]
     pub fn tile_position(&self) -> (f32, f32) {
@@ -244,7 +253,7 @@ impl GridStepper {
         if let Some((to_map, entry)) = self.pending_crossing.take() {
             let exit = self.pos;
             self.motion = Motion::Idle;
-            self.progress = self.config.walk_step_ticks;
+            self.progress = self.step_ticks();
             return vec![StepEvent::CrossedMap {
                 to_map,
                 entry,
@@ -270,7 +279,7 @@ impl GridStepper {
         }
 
         self.motion = Motion::Idle;
-        self.progress = self.config.walk_step_ticks;
+        self.progress = self.step_ticks();
         vec![event]
     }
 }

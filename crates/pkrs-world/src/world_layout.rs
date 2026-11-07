@@ -77,13 +77,124 @@ impl WorldLayout {
 
     /// Parses RON source (implicit Some for optional neighbour fields).
     pub fn parse(source: &str, file: &str) -> Result<Self> {
-        ron::Options::default()
+        let layout: Self = ron::Options::default()
             .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
             .from_str(source)
             .map_err(|e| WorldError::LayoutParse {
                 file: file.into(),
                 message: e.to_string(),
-            })
+            })?;
+        layout.validate_layout(file, &BTreeMap::new())?;
+        Ok(layout)
+    }
+
+    /// Validates reciprocity, map ids, offsets, and entry tiles (§6.4).
+    pub fn validate_layout(
+        &self,
+        file: &str,
+        map_sizes: &BTreeMap<String, (u32, u32)>,
+    ) -> Result<()> {
+        for (map_id, links) in &self.maps {
+            if map_id.is_empty() {
+                return Err(WorldError::LayoutInvalid {
+                    file: file.into(),
+                    message: "map id must not be empty".into(),
+                });
+            }
+            if map_sizes.contains_key(map_id) {
+                validate_links_for_map(map_id, links, file, map_sizes)?;
+            }
+            for (dir, link) in cardinals(links) {
+                let Some(link) = link else { continue };
+                if link.map.is_empty() {
+                    return Err(WorldError::LayoutInvalid {
+                        file: file.into(),
+                        message: format!("map `{map_id}` {:?}: destination id is empty", dir),
+                    });
+                }
+                if link.map == *map_id {
+                    return Err(WorldError::LayoutInvalid {
+                        file: file.into(),
+                        message: format!("map `{map_id}` {:?}: self-link", dir),
+                    });
+                }
+                if !offset_along_edge_only(dir, link.offset) {
+                    return Err(WorldError::LayoutInvalid {
+                        file: file.into(),
+                        message: format!(
+                            "map `{map_id}` {:?}: offset {:?} has a non-zero perpendicular component",
+                            dir, link.offset
+                        ),
+                    });
+                }
+                if let Some(to_size) = map_sizes.get(&link.map) {
+                    if !sample_entry_in_map(dir, link.offset, *to_size) {
+                        return Err(WorldError::LayoutInvalid {
+                            file: file.into(),
+                            message: format!(
+                                "map `{map_id}` {:?} → `{}`: offset {:?} puts no seam tile in bounds",
+                                dir, link.map, link.offset
+                            ),
+                        });
+                    }
+                }
+                if let (Some(from_size), Some(to_size)) =
+                    (map_sizes.get(map_id), map_sizes.get(&link.map))
+                {
+                    let reverse = self.maps.get(&link.map);
+                    let reciprocal = reverse.and_then(|l| l.link(dir.opposite()));
+                    match reciprocal {
+                        None => {
+                            return Err(WorldError::LayoutInvalid {
+                                file: file.into(),
+                                message: format!(
+                                    "map `{map_id}` {:?} → `{}` but `{}` has no {:?} link back",
+                                    dir,
+                                    link.map,
+                                    link.map,
+                                    dir.opposite()
+                                ),
+                            });
+                        }
+                        Some(back) if back.map != *map_id => {
+                            return Err(WorldError::LayoutInvalid {
+                                file: file.into(),
+                                message: format!(
+                                    "map `{map_id}` {:?} → `{}` but `{}` {:?} points to `{}`",
+                                    dir,
+                                    link.map,
+                                    link.map,
+                                    dir.opposite(),
+                                    back.map
+                                ),
+                            });
+                        }
+                        Some(back) if back.offset != link.offset => {
+                            return Err(WorldError::LayoutInvalid {
+                                file: file.into(),
+                                message: format!(
+                                    "map `{map_id}` {:?} → `{}` offset {:?} does not match `{}` {:?} offset {:?}",
+                                    dir,
+                                    link.map,
+                                    link.offset,
+                                    link.map,
+                                    dir.opposite(),
+                                    back.offset
+                                ),
+                            });
+                        }
+                        Some(_) => {}
+                    }
+                    let _ = (from_size, to_size);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Map ids declared in this layout.
+    pub fn map_ids(&self) -> impl Iterator<Item = &str> {
+        self.maps.keys().map(String::as_str)
     }
 
     /// Links declared for `map_id`, if any.
@@ -160,12 +271,75 @@ pub fn translate_entry(
     let max_y = i32::try_from(h.saturating_sub(1)).ok()?;
     let (ox, oy) = offset;
     let entry = match dir {
-        Direction::Up => GridPos::new(exit.x + ox, max_y + oy),
-        Direction::Down => GridPos::new(exit.x + ox, oy),
-        Direction::Left => GridPos::new(max_x + ox, exit.y + oy),
-        Direction::Right => GridPos::new(ox, exit.y + oy),
+        Direction::Up => {
+            let x = exit.x.checked_sub(ox)?;
+            GridPos::new(x, max_y.checked_sub(oy)?)
+        }
+        Direction::Down => {
+            let x = exit.x.checked_sub(ox)?;
+            GridPos::new(x, oy)
+        }
+        Direction::Left => {
+            let y = exit.y.checked_sub(oy)?;
+            GridPos::new(max_x.checked_sub(ox)?, y)
+        }
+        Direction::Right => {
+            let y = exit.y.checked_sub(oy)?;
+            GridPos::new(ox, y)
+        }
     };
     in_map(entry, to_size).then_some(entry)
+}
+
+fn cardinals(links: &MapLinks) -> [(Direction, Option<NeighborLink>); 4] {
+    [
+        (Direction::Up, links.north.clone()),
+        (Direction::Down, links.south.clone()),
+        (Direction::Left, links.west.clone()),
+        (Direction::Right, links.east.clone()),
+    ]
+}
+
+fn offset_along_edge_only(dir: Direction, offset: (i32, i32)) -> bool {
+    let (ox, oy) = offset;
+    match dir {
+        Direction::Up | Direction::Down => oy == 0,
+        Direction::Left | Direction::Right => ox == 0,
+    }
+}
+
+fn sample_entry_in_map(dir: Direction, offset: (i32, i32), to_size: (u32, u32)) -> bool {
+    let (w, h) = to_size;
+    if w == 0 || h == 0 {
+        return false;
+    }
+    let max_x = i32::try_from(w - 1).unwrap_or(i32::MAX);
+    let max_y = i32::try_from(h - 1).unwrap_or(i32::MAX);
+    let sample = match dir {
+        Direction::Up => GridPos::new(max_x / 2, max_y),
+        Direction::Down => GridPos::new(max_x / 2, 0),
+        Direction::Left => GridPos::new(max_x, max_y / 2),
+        Direction::Right => GridPos::new(0, max_y / 2),
+    };
+    translate_entry(sample, dir, offset, to_size).is_some()
+}
+
+fn validate_links_for_map(
+    map_id: &str,
+    links: &MapLinks,
+    file: &str,
+    map_sizes: &BTreeMap<String, (u32, u32)>,
+) -> Result<bool> {
+    for (dir, link) in cardinals(links) {
+        let Some(link) = link else { continue };
+        if !map_sizes.contains_key(&link.map) {
+            return Err(WorldError::LayoutInvalid {
+                file: file.into(),
+                message: format!("map `{map_id}` {:?} → unknown map `{}`", dir, link.map),
+            });
+        }
+    }
+    Ok(true)
 }
 
 fn in_map(pos: GridPos, size: (u32, u32)) -> bool {
@@ -237,8 +411,41 @@ mod tests {
         let pos = GridPos::new(3, 0);
         assert_eq!(
             translate_entry(pos, Direction::Up, (2, 0), (10, 8)).unwrap(),
-            GridPos::new(5, 7)
+            GridPos::new(1, 7)
         );
+    }
+
+    #[test]
+    fn entry_offset_matches_neighbor_placement() {
+        let exit = GridPos::new(3, 0);
+        let offset = (2, 0);
+        let main_size = (20u32, 14);
+        let neighbor_size = (20u32, 6);
+        let entry = translate_entry(exit, Direction::Up, offset, neighbor_size).unwrap();
+        let (ox_px, oy_px) =
+            neighbor_pixel_offset(Direction::Up, main_size, neighbor_size, (16, 16), offset);
+        let tw = 16f32;
+        let main_px_x = exit.x as f32 * tw;
+        let neighbor_entry_px_x = ox_px + entry.x as f32 * tw;
+        assert!(
+            (main_px_x - neighbor_entry_px_x).abs() < f32::EPSILON,
+            "visual alignment: main x={main_px_x}, neighbour entry x={neighbor_entry_px_x}"
+        );
+        let _ = oy_px;
+    }
+
+    #[test]
+    fn translate_entry_checked_on_overflow() {
+        assert!(
+            translate_entry(GridPos::new(0, 0), Direction::Up, (i32::MAX, 0), (10, 8)).is_none()
+        );
+    }
+
+    #[test]
+    fn validation_rejects_self_link() {
+        let bad = r#"{ route_a: ( north: (map: "route_a") ) }"#;
+        let err = WorldLayout::parse(bad, "world.ron").unwrap_err();
+        assert!(matches!(err, WorldError::LayoutInvalid { .. }));
     }
 
     #[test]

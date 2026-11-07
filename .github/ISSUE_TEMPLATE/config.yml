@@ -3,3 +3,6 @@ contact_links:
   - name: Engine design document
     url: https://github.com/umbertocicciaa/pkrs/blob/main/docs/design.md
     about: Read the approved architecture before opening an implementation task.
+  - name: Documentation epic
+    url: https://github.com/umbertocicciaa/pkrs/issues/109
+    about: Docs tasks live under the M8 · Documentation epic.

@@ -891,6 +891,7 @@ dependencies = [
 name = "pkrs-script"
 version = "0.0.0"
 dependencies = [
+ "insta",
  "mlua",
  "pkrs-audio",
  "pkrs-battle",

@@ -1,15 +1,20 @@
 //! The `events` module (§9.1, §9.2): `events.on(name, fn, opts?)`, `events.off(id)` and
 //! `events.emit(name, payload?)`.
 //!
-//! Listeners are kept in registration order per host; `events.emit` only **queues** the event
-//! (see [`crate::events`]): the engine flushes the queue in the events phase and starts each
-//! listener as a scheduler task. The optional `opts` table (`{ priority = n }`) is accepted
-//! and currently ignored: listeners run in registration order.
+//! Listeners of one event form a priority-ordered hook chain (§9.4): ascending
+//! `opts.priority` (default `0`), then plugin load order, then registration order, with keys
+//! built by [`hook_order::chain_key`] exactly like `battle.on`. `events.emit` only **queues**
+//! the event (see [`crate::events`]): the engine flushes the queue in the events phase and
+//! starts each listener, in chain order, as a scheduler task.
+
+use std::collections::BTreeMap;
 
 use mlua::{Function, Lua, Table, Value};
 
 use super::convert;
 use super::facade::{check, fail, name, type_of};
+use super::hook_order;
+use crate::chain::{ChainKey, HookChain};
 use crate::events::{ListenerId, ListenerInfo, ScriptEvent};
 use crate::host::ScriptOwner;
 
@@ -17,6 +22,7 @@ struct Listener {
     id: ListenerId,
     event: String,
     owner: ScriptOwner,
+    key: ChainKey,
     func: Function,
 }
 
@@ -46,20 +52,35 @@ pub(super) fn take(lua: &Lua) -> Vec<ScriptEvent> {
         .unwrap_or_default()
 }
 
-/// Listeners of `event`, in registration order.
+/// Listeners of `event`, in chain order (priority, load order, registration).
 pub(super) fn listeners(lua: &Lua, event: &str) -> Vec<ListenerInfo> {
-    lua.app_data_ref::<EventRegistry>()
-        .map(|reg| {
-            reg.listeners
-                .iter()
-                .filter(|l| l.event == event)
-                .map(|l| ListenerInfo {
-                    id: l.id,
-                    owner: l.owner.clone(),
-                })
-                .collect()
+    let Some(reg) = lua.app_data_ref::<EventRegistry>() else {
+        return Vec::new();
+    };
+    let mut found: Vec<&Listener> = reg.listeners.iter().filter(|l| l.event == event).collect();
+    found.sort_by_key(|l| l.key);
+    found
+        .into_iter()
+        .map(|l| ListenerInfo {
+            id: l.id,
+            owner: l.owner.clone(),
         })
-        .unwrap_or_default()
+        .collect()
+}
+
+/// Every event's listeners as a chain of `(owner, priority)`, by event name (for the resolved
+/// hook table).
+pub(super) fn chains(lua: &Lua) -> BTreeMap<String, HookChain<(ScriptOwner, i64)>> {
+    let mut chains: BTreeMap<String, HookChain<(ScriptOwner, i64)>> = BTreeMap::new();
+    if let Some(reg) = lua.app_data_ref::<EventRegistry>() {
+        for l in &reg.listeners {
+            chains
+                .entry(l.event.clone())
+                .or_default()
+                .insert(l.key, (l.owner.clone(), l.key.priority));
+        }
+    }
+    chains
 }
 
 /// The function of listener `id`.
@@ -98,15 +119,22 @@ pub(super) fn install(lua: &Lua, env: &Table, owner: &ScriptOwner) -> mlua::Resu
                     ),
                 ));
             };
-            if !matches!(opts, Value::Nil | Value::Table(_)) {
-                return Err(fail(
-                    lua,
-                    format!(
-                        "events.on: options must be a table like {{ priority = 0 }} (got {})",
-                        type_of(&opts)
-                    ),
-                ));
-            }
+            let opts = match opts {
+                Value::Nil => None,
+                Value::Table(t) => Some(t),
+                other => {
+                    return Err(fail(
+                        lua,
+                        format!(
+                            "events.on: options must be a table like {{ priority = 0 }} (got {})",
+                            type_of(&other)
+                        ),
+                    ));
+                }
+            };
+            let priority = hook_order::parse_priority(opts.as_ref())
+                .map_err(|_| fail(lua, "events.on: options.priority must be an integer"))?;
+            let key = hook_order::chain_key(lua, &owner, priority);
             let mut reg = lua
                 .app_data_mut::<EventRegistry>()
                 .ok_or_else(registry_error)?;
@@ -116,6 +144,7 @@ pub(super) fn install(lua: &Lua, env: &Table, owner: &ScriptOwner) -> mlua::Resu
                 id,
                 event,
                 owner: owner.clone(),
+                key,
                 func,
             });
             Ok(id)

@@ -4,7 +4,8 @@
 //! **Calling convention** (mirrors §7.4's Lua hook list): every handler gets `ctx` first, then
 //! hook-specific arguments. Returning `nil` leaves the value unchanged; returning a value
 //! replaces it; cancellable hooks return `{ cancel = true, message = "text:…" }`, which also
-//! stops the chain. Handlers run in ascending `priority` (default 0), then registration order.
+//! stops the chain. Handlers run in ascending `priority` (default 0), then plugin load order,
+//! then registration order (the [`crate::chain`] engine, §9.4).
 //!
 //! **Failure policy** (§9.6): a handler that errors (or returns a malformed value) is skipped
 //! for that call — the value passes through unchanged and any `ctx` changes it made are rolled
@@ -22,7 +23,8 @@ use pkrs_battle::{
 };
 use pkrs_data::BattlePack;
 
-use super::LuaScriptHost;
+use super::{LuaScriptHost, hook_order};
+use crate::chain::{HookChain, Step, run_chain};
 use crate::host::ScriptOwner;
 
 /// Hook names accepted by `battle.on` (API level 1, §7.4).
@@ -51,19 +53,33 @@ pub const DEFAULT_MAX_FAILURES: u32 = 3;
 
 pub(super) struct Handler {
     id: u64,
-    hook: &'static str,
-    owner: String,
+    owner: ScriptOwner,
     func: Function,
-    priority: i64,
     failures: u32,
     disabled: bool,
 }
 
-/// App data: every registered battle handler.
+impl Handler {
+    pub(super) fn owner(&self) -> &ScriptOwner {
+        &self.owner
+    }
+
+    pub(super) fn is_disabled(&self) -> bool {
+        self.disabled
+    }
+}
+
+/// App data: every registered battle handler, one priority-ordered chain per hook.
 #[derive(Default)]
 pub(super) struct Registry {
-    handlers: Vec<Handler>,
-    next_id: u64,
+    chains: BTreeMap<&'static str, HookChain<Handler>>,
+}
+
+impl Registry {
+    /// Hook name → chain, sorted by hook name.
+    pub(super) fn chains(&self) -> impl Iterator<Item = (&'static str, &HookChain<Handler>)> {
+        self.chains.iter().map(|(k, c)| (*k, c))
+    }
 }
 
 /// `battle.start_wild` / `battle.start_trainer`: yield a battle request to the engine and
@@ -91,7 +107,7 @@ return start_wild, start_trainer
 /// Installs the `battle` module into `env`.
 pub(super) fn install(lua: &Lua, env: &Table, owner: &ScriptOwner) -> mlua::Result<()> {
     let battle = lua.create_table()?;
-    let owner_name = owner.to_string();
+    let owner = owner.clone();
     let on = lua.create_function(
         move |lua, (name, func, opts): (String, Function, Option<Table>)| {
             let Some(hook) = HOOK_NAMES.iter().find(|h| **h == name).copied() else {
@@ -99,25 +115,22 @@ pub(super) fn install(lua: &Lua, env: &Table, owner: &ScriptOwner) -> mlua::Resu
                     "battle.on: unknown hook '{name}'"
                 )));
             };
-            let priority = match opts {
-                Some(t) => t.raw_get::<Option<i64>>("priority")?.unwrap_or(0),
-                None => 0,
-            };
+            let priority = hook_order::parse_priority(opts.as_ref())?;
+            let key = hook_order::chain_key(lua, &owner, priority);
             let mut reg = lua
                 .app_data_mut::<Registry>()
                 .ok_or_else(|| mlua::Error::runtime("battle registry unavailable"))?;
-            let id = reg.next_id;
-            reg.next_id += 1;
-            reg.handlers.push(Handler {
-                id,
-                hook,
-                owner: owner_name.clone(),
-                func,
-                priority,
-                failures: 0,
-                disabled: false,
-            });
-            Ok(id)
+            reg.chains.entry(hook).or_default().insert(
+                key,
+                Handler {
+                    id: key.seq,
+                    owner: owner.clone(),
+                    func,
+                    failures: 0,
+                    disabled: false,
+                },
+            );
+            Ok(key.seq)
         },
     )?;
     battle.raw_set("on", on)?;
@@ -529,18 +542,20 @@ impl<'h> LuaBattleHooks<'h> {
         self
     }
 
+    /// Enabled handlers of `hook`, in chain order. Copied out so no registry borrow is held
+    /// while Lua runs (a handler may call `battle.on`).
     fn handlers(&self, hook: &str) -> Vec<(u64, Function, String)> {
         let Some(reg) = self.host.lua.app_data_ref::<Registry>() else {
             return Vec::new();
         };
-        let mut list: Vec<&Handler> = reg
-            .handlers
+        let Some(chain) = reg.chains.get(hook) else {
+            return Vec::new();
+        };
+        chain
             .iter()
-            .filter(|h| h.hook == hook && !h.disabled)
-            .collect();
-        list.sort_by_key(|h| (h.priority, h.id));
-        list.into_iter()
-            .map(|h| (h.id, h.func.clone(), h.owner.clone()))
+            .map(|(_, h)| h)
+            .filter(|h| !h.disabled)
+            .map(|h| (h.id, h.func.clone(), h.owner.to_string()))
             .collect()
     }
 
@@ -548,7 +563,12 @@ impl<'h> LuaBattleHooks<'h> {
         let Some(mut reg) = self.host.lua.app_data_mut::<Registry>() else {
             return;
         };
-        let Some(h) = reg.handlers.iter_mut().find(|h| h.id == id) else {
+        let Some(h) = reg
+            .chains
+            .values_mut()
+            .flat_map(HookChain::handlers_mut)
+            .find(|h| h.id == id)
+        else {
             return;
         };
         let Some(err) = error else {
@@ -575,8 +595,10 @@ impl<'h> LuaBattleHooks<'h> {
         }
     }
 
-    /// Runs every handler of `hook` in order. `call` invokes one handler with the ctx table
-    /// and applies its result; returning [`Flow::Stop`] ends the chain.
+    /// Runs the chain of `hook` ([`run_chain`]). `call` invokes one handler with the ctx table
+    /// and applies its result to the payload in place (so the value threads through the chain;
+    /// a `nil` return leaves it unchanged); returning [`Flow::Stop`] cancels the rest of the
+    /// chain. A failing handler passes through with its `ctx` changes rolled back.
     fn dispatch(
         &mut self,
         hook: &'static str,
@@ -590,7 +612,8 @@ impl<'h> LuaBattleHooks<'h> {
         // Arguments are built from a snapshot so no `ctx` borrow is held while Lua runs
         // (handlers call back into `ctx.set_*`).
         let view = ctx.view().clone();
-        for (id, func, owner) in handlers {
+        // The payload is mutated in place by `call`, so the threaded chain value is `()`.
+        let _ = run_chain(handlers, (), |(id, func, owner), ()| {
             let checkpoint = ctx.checkpoint();
             let result = {
                 let cell = RefCell::new(&mut *ctx);
@@ -605,16 +628,18 @@ impl<'h> LuaBattleHooks<'h> {
             match result {
                 Ok(flow) => {
                     self.record(id, hook, &owner, None);
-                    if matches!(flow, Flow::Stop) {
-                        return;
+                    match flow {
+                        Flow::Continue => Step::Pass,
+                        Flow::Stop => Step::Cancel(None),
                     }
                 }
                 Err(err) => {
                     ctx.rollback(checkpoint);
                     self.record(id, hook, &owner, Some(&err));
+                    Step::Pass
                 }
             }
-        }
+        });
     }
 
     fn simple(&mut self, hook: &'static str, ctx: &mut BattleHookCtx<'_>) {

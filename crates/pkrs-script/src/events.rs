@@ -3,16 +3,23 @@
 //!
 //! Events are **queued**, never dispatched mid-call: scripts and the engine append to one FIFO
 //! queue ([`ScriptHost::emit_event`]), and the engine flushes it once per tick in the events
-//! phase (§3.3 step 5) with [`Scheduler::dispatch_events`]. Each event starts every listener
-//! registered for its name as a scheduler task, in **emission order** and then registration
-//! order, so a listener may yield (`ui.say`, `wait`, …) like any cutscene (§9.3). Events
-//! emitted while flushing are dispatched in the same flush, after the ones already queued.
+//! phase (§3.3 step 5) with [`Scheduler::dispatch_events`]. Events are handled in **emission
+//! order**; each one runs its listeners as a priority-ordered hook chain (§9.4: ascending
+//! `priority`, then plugin load order, then registration), starting every listener as a
+//! scheduler task so it may yield (`ui.say`, `wait`, …) like any cutscene (§9.3).
+//!
+//! A listener that **returns** before its first yield takes part in the chain: a non-`nil`
+//! return value replaces the payload for the listeners after it, and `{ cancel = true }`
+//! stops the chain (later listeners of that event are not started). A listener that yields,
+//! fails or returns `nil` leaves the payload unchanged. Events emitted while flushing are
+//! dispatched in the same flush, after the ones already queued.
 
 use std::collections::BTreeMap;
 
 use pkrs_core::{Direction, GridPos};
 
 use crate::ScriptError;
+use crate::chain::Step;
 use crate::host::{ScriptHost, ScriptOwner, ScriptValue, TaskId};
 use crate::scheduler::{Scheduler, TaskKind, TaskOutcome};
 
@@ -181,12 +188,31 @@ pub struct DispatchReport {
     pub failures: Vec<ScriptError>,
     /// Events left queued because the flush hit [`MAX_EVENTS_PER_FLUSH`].
     pub deferred: usize,
+    /// Events whose listener chain a listener stopped with `{ cancel = true }`, in order.
+    pub cancelled: Vec<String>,
+}
+
+/// How a listener's return value takes part in its event's chain (§9.4): `nil` passes,
+/// `{ cancel = true, message = … }` cancels, anything else replaces the payload.
+fn chain_step(value: &ScriptValue) -> Step<ScriptValue> {
+    match value {
+        ScriptValue::Nil => Step::Pass,
+        ScriptValue::Map(m) if matches!(m.get("cancel"), Some(ScriptValue::Bool(true))) => {
+            let reason = match m.get("message") {
+                Some(ScriptValue::String(s)) => Some(s.clone()),
+                _ => None,
+            };
+            Step::Cancel(reason)
+        }
+        other => Step::Replace(other.clone()),
+    }
 }
 
 impl Scheduler {
-    /// Flushes the host's event queue (§3.3 step 5): every listener of every queued event is
-    /// started as a task, in emission order then registration order. Listener failures are
-    /// logged and reported; they never stop the other listeners (§9.6).
+    /// Flushes the host's event queue (§3.3 step 5): events in emission order, and each
+    /// event's listeners as a hook chain in [`ScriptHost::listeners`] order (see the module
+    /// docs for payload threading and `{ cancel = true }`). Listener failures are logged and
+    /// reported; they never stop the other listeners (§9.6).
     pub fn dispatch_events(&mut self, host: &mut (impl ScriptHost + ?Sized)) -> DispatchReport {
         let mut report = DispatchReport::default();
         host.set_tick(self.tick());
@@ -207,11 +233,24 @@ impl Scheduler {
             }
             let kind = event.task_kind();
             let name = format!("events:{}", event.name);
+            let mut payload = event.payload.clone();
             for listener in host.listeners(&event.name) {
-                match host.start_listener(listener.id, std::slice::from_ref(&event.payload)) {
+                match host.start_listener(listener.id, std::slice::from_ref(&payload)) {
                     Ok((id, status)) => {
                         let outcome = self.adopt(&listener.owner, &name, kind, id, status);
+                        let step = match &outcome {
+                            TaskOutcome::Finished(value) => chain_step(value),
+                            _ => Step::Pass,
+                        };
                         report.started.push((id, outcome));
+                        match step {
+                            Step::Pass => {}
+                            Step::Replace(next) => payload = next,
+                            Step::Cancel(_) => {
+                                report.cancelled.push(event.name.clone());
+                                break;
+                            }
+                        }
                     }
                     Err(err) => {
                         tracing::warn!(

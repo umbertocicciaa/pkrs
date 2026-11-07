@@ -25,7 +25,11 @@
 //! - **Plugins:** [`plugin`] discovers `plugins/*/plugin.toml`, validates the enabled set and
 //!   sorts it ([`plan_plugins`]), then runs each `init.lua` in its own `_ENV`
 //!   ([`load_plugins`]) with `plugin.define()` bound to the manifest (§9.4, §9.7).
+//! - **Hook chains:** [`chain`] orders handlers by priority, then plugin load order, then
+//!   registration order, threads the value through them and stops on cancel (§9.4).
+//!   [`LuaScriptHost::hook_table`] returns the resolved [`HookTable`].
 
+pub mod chain;
 mod error;
 pub mod events;
 mod host;
@@ -35,6 +39,10 @@ pub mod plugin;
 mod scheduler;
 mod world;
 
+pub use chain::{
+    ChainKey, ChainOutcome, HookChain, HookKind, HookTable, HookTableEntry, LoadOrder, Step,
+    run_chain,
+};
 pub use error::{Result, ScriptError, split_location};
 pub use events::{DispatchReport, ENGINE_EVENTS, ListenerId, ListenerInfo, ScriptEvent};
 pub use host::{

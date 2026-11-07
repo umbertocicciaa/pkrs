@@ -11,6 +11,7 @@ mod dialogue;
 mod events;
 mod facade;
 mod game;
+mod hook_order;
 mod log;
 mod map;
 mod npc;

@@ -1,6 +1,7 @@
 //! The `pkrs` command-line tool (§2.3).
 //!
-//! Implemented: `pkrs new` (one-shot template) and `pkrs run`. `check`, `build`, `upgrade` and
+//! Implemented: `pkrs new` (one-shot template), `pkrs run` and a first `pkrs check` (manifest
+//! and plugin set; `--plugins` prints the resolved hook table, §9.4). `build`, `upgrade` and
 //! `plugin` arrive with their milestones (M5–M7).
 
 use std::path::PathBuf;
@@ -8,6 +9,7 @@ use std::process::ExitCode;
 
 use anyhow::Context as _;
 use clap::{Parser, Subcommand, ValueEnum};
+use pkrs_cli::check;
 use pkrs_cli::run::{self, RUNTIME_ENV, RunRequest};
 use pkrs_cli::template::{self, Template, TemplateVars};
 use tracing_subscriber::EnvFilter;
@@ -73,6 +75,15 @@ enum Command {
         #[arg(long)]
         ticks: Option<u64>,
     },
+    /// Validate the project (manifest and plugin set). Non-zero exit on errors.
+    Check {
+        /// Also load the enabled plugins and print the resolved hook table.
+        #[arg(long)]
+        plugins: bool,
+        /// Project folder (default: the nearest folder with a pkrs.toml).
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
 }
 
 fn parse_warp_arg(raw: &str) -> Result<(u32, u32), String> {
@@ -111,6 +122,27 @@ fn execute(cli: Cli) -> anyhow::Result<ExitCode> {
             println!("Next: cd {} && pkrs run", dest.display());
             Ok(ExitCode::SUCCESS)
         }
+        Command::Check { plugins, project } => {
+            let project = project_root(project)?;
+            let report = check::check_project(&project, plugins)?;
+            if report.load_order.is_empty() {
+                println!("plugins: none enabled");
+            } else {
+                println!("plugins (load order): {}", report.load_order.join(", "));
+            }
+            if let Some(hooks) = &report.hooks {
+                print!("{hooks}");
+            }
+            for failed in &report.failed {
+                eprintln!("error: {failed}");
+            }
+            Ok(if report.is_ok() {
+                println!("check passed");
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            })
+        }
         Command::Run {
             map,
             warp,
@@ -119,11 +151,7 @@ fn execute(cli: Cli) -> anyhow::Result<ExitCode> {
             headless,
             ticks,
         } => {
-            let start = match project {
-                Some(p) => p,
-                None => std::env::current_dir().context("cannot read the current directory")?,
-            };
-            let project = run::find_project_root(&start)?;
+            let project = project_root(project)?;
             let exe = std::env::current_exe().context("cannot locate the pkrs executable")?;
             let runtime =
                 run::locate_runtime(std::env::var_os(RUNTIME_ENV).map(PathBuf::from), &exe)?;
@@ -151,6 +179,15 @@ fn execute(cli: Cli) -> anyhow::Result<ExitCode> {
             })
         }
     }
+}
+
+/// `--project` if given, else the nearest folder at or above the current one with a pkrs.toml.
+fn project_root(project: Option<PathBuf>) -> anyhow::Result<PathBuf> {
+    let start = match project {
+        Some(p) => p,
+        None => std::env::current_dir().context("cannot read the current directory")?,
+    };
+    Ok(run::find_project_root(&start)?)
 }
 
 /// Installs a `tracing` subscriber that writes to stderr (§15.1).
@@ -237,6 +274,24 @@ mod tests {
             Cli::try_parse_from(["pkrs"]).is_err(),
             "a subcommand is required"
         );
+    }
+
+    #[test]
+    fn parses_check_flags() {
+        let cli = Cli::try_parse_from(["pkrs", "check", "--plugins"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Check {
+                plugins: true,
+                project: None
+            }
+        ));
+        let cli = Cli::try_parse_from(["pkrs", "check", "--project", "game"]).unwrap();
+        let Command::Check { plugins, project } = cli.command else {
+            panic!("expected check")
+        };
+        assert!(!plugins);
+        assert_eq!(project, Some(PathBuf::from("game")));
     }
 
     #[test]

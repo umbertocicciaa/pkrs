@@ -1,0 +1,23 @@
+---
+source: crates/pkrs-script/tests/hook_chains.rs
+expression: rendered
+---
+hook table:
+battle hooks:
+  on_damage_taken
+      -5  shield
+      10  crit-boost
+world events:
+  (none)
+
+events:
+BattleStarted
+TurnStarted { turn: 1 }
+ActionsLocked
+OrderResolved { order: [(Player, 0), (Opponent, 0)] }
+ActionCommitted { side: Player, slot: 0, action: Fight { move_slot: 0, target_side: Opponent, target_slot: 0 } }
+MoveUsed { user_side: Player, user_slot: 0, move_id: "tackle", target_side: Opponent, target_slot: 0 }
+Damage { target_side: Opponent, target_slot: 0, amount: 30, remaining_hp: 0 }
+Fainted { side: Opponent, slot: 0, party_index: 0 }
+BattleEnded { outcome: PlayerWin }
+result: Some(BattleResult { outcome: PlayerWin, turns: 1, exp: 0, money: 0 })

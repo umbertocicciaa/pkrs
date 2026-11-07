@@ -351,7 +351,8 @@ pub trait ScriptHost {
         Vec::new()
     }
 
-    /// Listeners registered for `event` with `events.on`, in registration order.
+    /// Listeners registered for `event` with `events.on`, in hook-chain order (§9.4:
+    /// priority, then plugin load order, then registration order).
     fn listeners(&mut self, _event: &str) -> Vec<ListenerInfo> {
         Vec::new()
     }

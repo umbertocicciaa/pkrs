@@ -136,6 +136,24 @@ impl ScriptEvent {
         )
     }
 
+    /// `interact { kind = "item", id, item, count, x, y }`: the player picked up an item ball
+    /// (`id` is the object's persistent key, §6.5).
+    #[must_use]
+    pub fn interact_item(id: &str, item: &str, count: u32, pos: GridPos) -> Self {
+        let [x, y] = pos_entries(pos);
+        Self::new(
+            "interact",
+            payload([
+                ("kind", ScriptValue::from("item")),
+                ("id", ScriptValue::from(id)),
+                ("item", ScriptValue::from(item)),
+                ("count", ScriptValue::Int(i64::from(count))),
+                x,
+                y,
+            ]),
+        )
+    }
+
     /// `interact { kind = "tile", x, y }`: the player pressed Confirm facing a plain tile.
     #[must_use]
     pub fn interact_tile(pos: GridPos) -> Self {

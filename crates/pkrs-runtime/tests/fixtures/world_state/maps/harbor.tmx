@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<map version="1.10" tiledversion="1.10.2" orientation="orthogonal" renderorder="right-down" width="10" height="10" tilewidth="16" tileheight="16" infinite="0" nextlayerid="3" nextobjectid="6">
+ <tileset firstgid="1" source="../tilesets/overworld.tsx"/>
+ <layer id="1" name="ground" width="10" height="10">
+  <data encoding="csv">
+1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1
+</data>
+ </layer>
+ <objectgroup id="2" name="objects">
+  <object id="1" name="sailor" type="npc" x="80" y="48" width="16" height="16">
+   <properties>
+    <property name="facing" value="down"/>
+    <property name="script" value="maps/harbor.lua:sailor"/>
+   </properties>
+  </object>
+  <object id="2" name="ghost" type="npc" x="128" y="128" width="16" height="16">
+   <properties>
+    <property name="facing" value="up"/>
+   </properties>
+  </object>
+  <object id="3" type="item" x="32" y="64" width="16" height="16">
+   <properties>
+    <property name="item" value="potion"/>
+    <property name="uid" value="harbor_potion"/>
+   </properties>
+  </object>
+  <object id="4" name="dock_hint" type="trigger" x="32" y="96" width="16" height="16">
+   <properties>
+    <property name="on_enter" value="dock_hint"/>
+    <property name="once" type="bool" value="true"/>
+   </properties>
+  </object>
+  <object id="5" name="board" type="sign" x="112" y="64" width="16" height="16">
+   <properties>
+    <property name="text" value="text:harbor.board"/>
+   </properties>
+  </object>
+ </objectgroup>
+</map>

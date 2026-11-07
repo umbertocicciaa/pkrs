@@ -3,6 +3,7 @@
 //!
 //! Further checks (RON data, Tiled maps, Lua syntax of game scripts) arrive with M7.
 
+use std::fmt;
 use std::ops::RangeInclusive;
 use std::path::Path;
 
@@ -55,6 +56,32 @@ impl CheckReport {
     #[must_use]
     pub fn is_ok(&self) -> bool {
         self.failed.is_empty()
+    }
+}
+
+/// The stdout part of `pkrs check`: the resolved load order, then (with `--plugins`) the hook
+/// table. Failures are not included; the CLI prints them to stderr.
+///
+/// ```text
+/// plugins (load order): shield, crit
+/// battle hooks:
+///   on_damage_taken
+///       -5  shield
+///       10  crit
+/// world events:
+///   (none)
+/// ```
+impl fmt::Display for CheckReport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.load_order.is_empty() {
+            writeln!(f, "plugins: none enabled")?;
+        } else {
+            writeln!(f, "plugins (load order): {}", self.load_order.join(", "))?;
+        }
+        match &self.hooks {
+            Some(hooks) => write!(f, "{hooks}"),
+            None => Ok(()),
+        }
     }
 }
 
@@ -183,6 +210,55 @@ mod tests {
             "battle hooks:\n  on_damage_taken\n       0  b\n       5  a\n  on_turn_start\n      -1  b\n\
              world events:\n  (none)\n"
         );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn report_formatting() {
+        let empty = CheckReport::default();
+        assert_eq!(empty.to_string(), "plugins: none enabled\n");
+
+        let order_only = CheckReport {
+            load_order: vec!["b".into(), "a".into()],
+            ..CheckReport::default()
+        };
+        assert_eq!(order_only.to_string(), "plugins (load order): b, a\n");
+
+        let dir = temp_project(
+            "fmt",
+            &[
+                ("pkrs.toml", &manifest("\"a\"")),
+                ("plugins/a/plugin.toml", &plugin("a")),
+                (
+                    "plugins/a/init.lua",
+                    "events.on('map_enter', function() end, { priority = 2 })",
+                ),
+            ],
+        );
+        let report = check_project(&dir, true).unwrap();
+        assert_eq!(
+            report.to_string(),
+            "plugins (load order): a\nbattle hooks:\n  (none)\nworld events:\n  map_enter\n       2  a\n"
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn scaffolded_plugin_passes_check_without_edits() {
+        let dir = temp_project("scaffold", &[("pkrs.toml", &manifest("\"my-plugin\""))]);
+        let vars = crate::plugin::PluginVars::for_plugin("My Plugin").unwrap();
+        let out = crate::plugin::new_plugin(&dir, &vars).unwrap();
+        assert!(out.enable_hint.is_none(), "already enabled");
+        let report = check_project(&dir, true).unwrap();
+        assert!(report.is_ok(), "{:?}", report.failed);
+        assert_eq!(report.load_order, ["my-plugin"]);
+        let table = report.hooks.unwrap().to_string();
+        for line in [
+            "  on_damage_calc\n       0  my-plugin\n",
+            "  map_enter\n       0  my-plugin\n",
+        ] {
+            assert!(table.contains(line), "{table}");
+        }
         std::fs::remove_dir_all(dir).ok();
     }
 

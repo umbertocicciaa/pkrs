@@ -4,6 +4,9 @@
 //! `include_dir`, so `pkrs new` works offline. Text files (`.toml`, `.md`, `.lua`, `.txt`,
 //! `_gitignore`) have `{{name}}`, `{{id}}` and `{{engine_version}}` substituted; everything else
 //! is copied byte for byte. A file named `_gitignore` is written as `.gitignore`.
+//!
+//! The plugin template used by `pkrs plugin new` lives in [`crate::plugin`] and shares the
+//! writer.
 
 use std::fmt;
 use std::fs;
@@ -51,6 +54,11 @@ pub enum TemplateError {
     /// The destination exists and is not empty.
     #[error("`{0}` already exists and is not empty")]
     DestinationNotEmpty(PathBuf),
+    /// The plugin name does not give a valid plugin id (`pkrs plugin new`).
+    #[error(
+        "invalid plugin name `{0}`: use 1-64 ASCII letters, digits, spaces, `_` or `-`, starting with a letter"
+    )]
+    InvalidPluginName(String),
     /// The template is not shipped yet.
     #[error("the `{0}` template is not available yet (it ships with the sample projects, M8)")]
     Unavailable(&'static str),
@@ -106,7 +114,7 @@ pub fn pinned_engine_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-fn valid_name(name: &str) -> bool {
+pub(crate) fn valid_name(name: &str) -> bool {
     (1..=64).contains(&name.len())
         && name.starts_with(|c: char| c.is_ascii_alphanumeric())
         && name
@@ -159,6 +167,17 @@ pub fn scaffold(
     let dir = template
         .dir()
         .ok_or(TemplateError::Unavailable(template.name()))?;
+    write_tree(dir, dest, |text| render(text, vars))
+}
+
+/// Writes every file of `dir` into `dest` (created if missing; must be empty if it exists),
+/// passing text files through `render`. Returns the files written, relative to `dest`, in a
+/// stable order.
+pub(crate) fn write_tree(
+    dir: &Dir<'_>,
+    dest: &Path,
+    render: impl Fn(&str) -> String,
+) -> Result<Vec<PathBuf>, TemplateError> {
     let io = |path: &Path| {
         let path = path.to_path_buf();
         move |source| TemplateError::Io { path, source }
@@ -183,7 +202,7 @@ pub fn scaffold(
         }
         let bytes = if is_text(file.path()) {
             match file.contents_utf8() {
-                Some(text) => render(text, vars).into_bytes(),
+                Some(text) => render(text).into_bytes(),
                 None => file.contents().to_vec(),
             }
         } else {

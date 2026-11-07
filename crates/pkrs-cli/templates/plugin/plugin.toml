@@ -1,0 +1,17 @@
+# Plugin manifest (docs/design.md §9.4). The folder name must match `plugin.id`.
+
+[plugin]
+id          = "{{id}}"
+name        = "{{name}}"
+version     = "0.1.0"
+api         = {{api}}   # scripting API level this plugin targets (§9.7)
+description = "Describe what {{name}} adds to the game."
+
+# Other plugins this one needs, as semver requirements:
+# [dependencies]
+# "status-pack" = "^1.0"
+
+# Soft ordering hints (no dependency) and plugins that must not be enabled alongside this one:
+# [load]
+# after     = ["day-night"]
+# conflicts = ["overdrive"]

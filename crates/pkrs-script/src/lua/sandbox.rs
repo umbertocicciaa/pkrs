@@ -11,7 +11,7 @@ use pkrs_core::GameRng;
 use crate::host::{ScriptFiles, ScriptOwner};
 
 /// Base-library functions copied into every environment.
-const SAFE_BASE: &[&str] = &[
+pub(super) const SAFE_BASE: &[&str] = &[
     "assert",
     "error",
     "getmetatable",
@@ -33,7 +33,7 @@ const SAFE_BASE: &[&str] = &[
 ];
 
 /// Library tables copied (shallowly) into every environment.
-const SAFE_LIBS: &[&str] = &["string", "table", "math", "utf8", "coroutine"];
+pub(super) const SAFE_LIBS: &[&str] = &["string", "table", "math", "utf8", "coroutine"];
 
 /// Globals removed from the real global table as defence in depth.
 const STRIPPED_GLOBALS: &[&str] = &[
@@ -81,7 +81,7 @@ pub(super) fn located_error(lua: &Lua, message: impl AsRef<str>) -> mlua::Error 
     mlua::Error::runtime(format!("{}{}", caller_location(lua), message.as_ref()))
 }
 
-fn copy_table(lua: &Lua, source: &Table) -> mlua::Result<Table> {
+pub(super) fn copy_table(lua: &Lua, source: &Table) -> mlua::Result<Table> {
     let copy = lua.create_table()?;
     for pair in source.pairs::<Value, Value>() {
         let (k, v) = pair?;

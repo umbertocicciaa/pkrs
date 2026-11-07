@@ -18,11 +18,13 @@ mod npc;
 mod player;
 mod plugin;
 mod sandbox;
+mod scenario;
 mod time;
 mod ui;
 
 pub use ai::{DEFAULT_AI_MAX_FAILURES, LuaAi};
 pub use battle::{DEFAULT_MAX_FAILURES, HOOK_NAMES, LuaBattleHooks};
+pub use scenario::{LuaScenario, SCENARIO_API};
 pub use ui::GfxOp;
 
 use std::cell::Cell;

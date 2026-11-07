@@ -57,8 +57,10 @@ jobs:
       - name: cargo build
         run: cargo build --workspace --locked
 
-  # §14.4 smoke test: the runtime runs headless (Null adapters, no GPU) for 600 ticks and
-  # must exit 0. Any error or panic yields a non-zero status and fails the job.
+  # §14.4 smoke test: the runtime runs a fixture project headless (Null adapters, no GPU)
+  # driven by the scripted-input scenario `tests/smoke.lua` (§15.2), capped at 600 ticks, and
+  # must exit 0. A failed expectation, error or panic yields a non-zero status and fails the
+  # job. The full scenario suite runs in `cargo test` (crates/pkrs-runtime/tests/scenarios.rs).
   smoke:
     name: smoke (${{ matrix.os }})
     strategy:
@@ -87,12 +89,12 @@ jobs:
 
       - name: Headless smoke run (Linux, under xvfb)
         if: runner.os == 'Linux'
-        run: xvfb-run -a ./target/debug/pkrs-runtime --headless --ticks 600
+        run: xvfb-run -a ./target/debug/pkrs-runtime --headless --ticks 600 --project tests/fixtures/projects/scenario-town --script tests/smoke.lua
 
       - name: Headless smoke run
         if: runner.os != 'Linux'
         shell: bash
-        run: ./target/debug/pkrs-runtime --headless --ticks 600
+        run: ./target/debug/pkrs-runtime --headless --ticks 600 --project tests/fixtures/projects/scenario-town --script tests/smoke.lua
 
   deny:
     name: cargo-deny

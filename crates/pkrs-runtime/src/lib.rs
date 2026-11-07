@@ -11,6 +11,7 @@ pub mod project;
 pub mod scene;
 pub mod scripts;
 mod state;
+pub mod test_harness;
 mod tick;
 mod ui_assets;
 mod ui_theme;

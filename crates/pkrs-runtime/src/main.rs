@@ -66,11 +66,11 @@ fn main() -> anyhow::Result<()> {
 fn run_project_headless(opts: &ProjectOptions, config: RuntimeLoopConfig) -> anyhow::Result<()> {
     let project = Project::open(opts)
         .with_context(|| format!("cannot open project `{}`", opts.dir.display()))?;
-    // Kept alive for the whole run; the loop does not drive scripts yet.
-    let (_scripts, _plugins) =
+    let (scripts, _plugins) =
         start_project_scripts(&project, script_rng()).context("cannot load plugins")?;
     let (renderer, _log) = headless_renderer(project.display());
-    let mut host = ProjectHost::new(&project, renderer).context("cannot start the project")?;
+    let mut host = ProjectHost::with_scripts(&project, renderer, scripts)
+        .context("cannot start the project")?;
     let mut platform = Platform::new(
         Box::new(NullPlatform::new()),
         Box::new(project.paths.clone()),
@@ -93,7 +93,7 @@ fn run_project_windowed(opts: &ProjectOptions, config: RuntimeLoopConfig) -> any
             Box::new(project.paths.clone()),
             PlatformConfig::default(),
         );
-        let _scripts = match start_project_scripts(&project, script_rng()) {
+        let scripts = match start_project_scripts(&project, script_rng()) {
             Ok((scripts, _plugins)) => scripts,
             Err(err) => {
                 tracing::error!(%err, "cannot load plugins");
@@ -105,7 +105,7 @@ fn run_project_windowed(opts: &ProjectOptions, config: RuntimeLoopConfig) -> any
             display,
             RendererConfig::default(),
         );
-        let mut host = match ProjectHost::new(&project, renderer) {
+        let mut host = match ProjectHost::with_scripts(&project, renderer, scripts) {
             Ok(host) => host,
             Err(err) => {
                 tracing::error!(%err, "cannot start the project");

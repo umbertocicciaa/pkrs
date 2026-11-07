@@ -2,7 +2,9 @@
 
 use pkrs_core::{Direction, GridPos};
 
-use crate::{LogicalGrid, Terrain};
+use std::collections::BTreeMap;
+
+use crate::{LogicalGrid, Terrain, WorldLayout};
 
 use super::config::MovementConfig;
 use super::events::StepEvent;
@@ -16,6 +18,18 @@ enum Motion {
     Stepping { total_ticks: u32 },
     LedgeHop { total_ticks: u32 },
     IceSlide { total_ticks: u32 },
+}
+
+/// Resolves seamless map edge crossings (§6.4).
+pub struct LinkCrossing<'a> {
+    /// Parsed `maps/world.ron`.
+    pub layout: &'a WorldLayout,
+    /// Active map id.
+    pub map_id: &'a str,
+    /// Active map size in tiles.
+    pub map_size: (u32, u32),
+    /// Cached neighbour map sizes by id.
+    pub neighbor_sizes: &'a BTreeMap<String, (u32, u32)>,
 }
 
 /// Player/NPC grid movement with tap-to-turn, run speed, terrain and occupancy rules.
@@ -32,6 +46,7 @@ pub struct GridStepper {
     hold_ticks: u32,
     foot: u8,
     running: bool,
+    pending_crossing: Option<(String, GridPos)>,
 }
 
 impl GridStepper {
@@ -56,6 +71,7 @@ impl GridStepper {
             hold_ticks: 0,
             foot: 0,
             running: false,
+            pending_crossing: None,
         }
     }
 
@@ -119,15 +135,16 @@ impl GridStepper {
         grid: &LogicalGrid,
         occupancy: &O,
         rules: &TerrainRuleRegistry,
+        links: Option<&LinkCrossing<'_>>,
     ) -> Vec<StepEvent> {
         if !self.is_idle() {
             if dir.is_none() {
                 self.hold_dir = None;
                 self.hold_ticks = 0;
             }
-            return self.advance_motion(grid, occupancy, rules);
+            return self.advance_motion(grid, occupancy, rules, links);
         }
-        self.tick_idle(dir, grid, occupancy, rules)
+        self.tick_idle(dir, grid, occupancy, rules, links)
     }
 
     fn step_ticks(&self) -> u32 {
@@ -153,6 +170,7 @@ impl GridStepper {
         grid: &LogicalGrid,
         occupancy: &O,
         rules: &TerrainRuleRegistry,
+        links: Option<&LinkCrossing<'_>>,
     ) -> Vec<StepEvent> {
         let Some(dir) = dir else {
             self.hold_dir = None;
@@ -178,7 +196,7 @@ impl GridStepper {
             return Vec::new();
         }
 
-        match plan_step(self.pos, dir, grid, &self.field, rules, occupancy) {
+        match plan_step(self.pos, dir, grid, &self.field, rules, occupancy, links) {
             StepPlan::Blocked => Vec::new(),
             StepPlan::Normal(to) => {
                 let ticks = self.step_ticks();
@@ -190,6 +208,16 @@ impl GridStepper {
                 self.start_motion(to, Motion::LedgeHop { total_ticks: ticks }, dir);
                 Vec::new()
             }
+            StepPlan::ExitMap {
+                to,
+                dest_map,
+                entry,
+            } => {
+                let ticks = self.step_ticks();
+                self.pending_crossing = Some((dest_map, entry));
+                self.start_motion(to, Motion::Stepping { total_ticks: ticks }, dir);
+                Vec::new()
+            }
         }
     }
 
@@ -198,6 +226,7 @@ impl GridStepper {
         grid: &LogicalGrid,
         occupancy: &O,
         rules: &TerrainRuleRegistry,
+        links: Option<&LinkCrossing<'_>>,
     ) -> Vec<StepEvent> {
         let total = match self.motion {
             Motion::Stepping { total_ticks }
@@ -212,6 +241,17 @@ impl GridStepper {
 
         self.progress = total;
         self.foot ^= 1;
+        if let Some((to_map, entry)) = self.pending_crossing.take() {
+            let exit = self.pos;
+            self.motion = Motion::Idle;
+            self.progress = self.config.walk_step_ticks;
+            return vec![StepEvent::CrossedMap {
+                to_map,
+                entry,
+                exit,
+            }];
+        }
+
         let event = StepEvent::StepCompleted {
             pos: self.pos,
             facing: self.facing,
@@ -221,7 +261,7 @@ impl GridStepper {
         if matches!(grid.terrain(self.pos), Some(Terrain::Ice)) {
             let dir = self.facing;
             if let StepPlan::Normal(to) =
-                plan_step(self.pos, dir, grid, &self.field, rules, occupancy)
+                plan_step(self.pos, dir, grid, &self.field, rules, occupancy, links)
             {
                 let ticks = self.step_ticks();
                 self.start_motion(to, Motion::IceSlide { total_ticks: ticks }, dir);
@@ -239,6 +279,11 @@ enum StepPlan {
     Blocked,
     Normal(GridPos),
     LedgeHop(GridPos),
+    ExitMap {
+        to: GridPos,
+        dest_map: String,
+        entry: GridPos,
+    },
 }
 
 fn plan_step<O: Occupancy>(
@@ -248,12 +293,43 @@ fn plan_step<O: Occupancy>(
     field: &FieldState,
     rules: &TerrainRuleRegistry,
     occupancy: &O,
+    links: Option<&LinkCrossing<'_>>,
 ) -> StepPlan {
     if !grid.in_bounds(from) {
         return StepPlan::Blocked;
     }
 
     let to = from.neighbour(dir);
+
+    if !grid.in_bounds(to) {
+        if let Some(link) = links {
+            let Some(edge) = link.layout.links_for(link.map_id) else {
+                return StepPlan::Blocked;
+            };
+            let Some(neighbor) = edge.link(dir) else {
+                return StepPlan::Blocked;
+            };
+            let Some(to_size) = link.neighbor_sizes.get(&neighbor.map).copied() else {
+                return StepPlan::Blocked;
+            };
+            if let Some((_, entry)) =
+                link.layout
+                    .crossing(link.map_id, from, dir, link.map_size, to_size)
+            {
+                let can_exit = grid
+                    .cell(from)
+                    .is_some_and(|c| !c.blocked_edges.blocks(dir));
+                if can_exit {
+                    return StepPlan::ExitMap {
+                        to,
+                        dest_map: neighbor.map.clone(),
+                        entry,
+                    };
+                }
+            }
+        }
+        return StepPlan::Blocked;
+    }
 
     if let Some(Terrain::Ledge(ledge_dir)) = grid.terrain(to) {
         if dir != *ledge_dir {
@@ -312,7 +388,7 @@ mod tests {
 
     fn finish_step(s: &mut GridStepper, grid: &LogicalGrid, rules: &TerrainRuleRegistry) {
         while !s.is_idle() {
-            s.tick(None, grid, &(), rules);
+            s.tick(None, grid, &(), rules, None);
         }
     }
 
@@ -328,12 +404,12 @@ mod tests {
                 ..MovementConfig::default()
             },
         );
-        let events = s.tick(Some(Direction::Up), &grid, &(), &rules);
+        let events = s.tick(Some(Direction::Up), &grid, &(), &rules, None);
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], StepEvent::Turned { .. }));
         assert_eq!(s.pos(), GridPos::new(1, 1));
         for _ in 0..2 {
-            s.tick(Some(Direction::Up), &grid, &(), &rules);
+            s.tick(Some(Direction::Up), &grid, &(), &rules, None);
         }
         assert_eq!(s.pos(), GridPos::new(1, 1));
     }
@@ -351,8 +427,8 @@ mod tests {
                 ..MovementConfig::default()
             },
         );
-        s.tick(Some(Direction::Up), &grid, &(), &rules);
-        s.tick(Some(Direction::Up), &grid, &(), &rules);
+        s.tick(Some(Direction::Up), &grid, &(), &rules, None);
+        s.tick(Some(Direction::Up), &grid, &(), &rules, None);
         assert!(!s.is_idle());
         finish_step(&mut s, &grid, &rules);
         assert_eq!(s.pos(), GridPos::new(1, 0));
@@ -372,13 +448,13 @@ mod tests {
                 ..MovementConfig::default()
             },
         );
-        s.tick(Some(Direction::Up), &grid, &(), &rules);
-        s.tick(Some(Direction::Up), &grid, &(), &rules);
+        s.tick(Some(Direction::Up), &grid, &(), &rules, None);
+        s.tick(Some(Direction::Up), &grid, &(), &rules, None);
         finish_step(&mut s, &grid, &rules);
         assert_eq!(s.pos(), GridPos::new(1, 1));
         s.field_mut().surf = true;
-        s.tick(Some(Direction::Up), &grid, &(), &rules);
-        s.tick(Some(Direction::Up), &grid, &(), &rules);
+        s.tick(Some(Direction::Up), &grid, &(), &rules, None);
+        s.tick(Some(Direction::Up), &grid, &(), &rules, None);
         finish_step(&mut s, &grid, &rules);
         assert_eq!(s.pos(), GridPos::new(1, 0));
     }
@@ -398,8 +474,8 @@ mod tests {
                 ..MovementConfig::default()
             },
         );
-        s.tick(Some(Direction::Down), &grid, &(), &rules);
-        s.tick(Some(Direction::Down), &grid, &(), &rules);
+        s.tick(Some(Direction::Down), &grid, &(), &rules, None);
+        s.tick(Some(Direction::Down), &grid, &(), &rules, None);
         finish_step(&mut s, &grid, &rules);
         assert_eq!(s.pos(), GridPos::new(2, 3));
     }
@@ -418,8 +494,8 @@ mod tests {
                 ..MovementConfig::default()
             },
         );
-        s.tick(Some(Direction::Up), &grid, &(), &rules);
-        s.tick(Some(Direction::Up), &grid, &(), &rules);
+        s.tick(Some(Direction::Up), &grid, &(), &rules, None);
+        s.tick(Some(Direction::Up), &grid, &(), &rules, None);
         finish_step(&mut s, &grid, &rules);
         assert_eq!(s.pos(), GridPos::new(2, 3));
     }
@@ -441,8 +517,8 @@ mod tests {
                 ..MovementConfig::default()
             },
         );
-        s.tick(Some(Direction::Right), &grid, &(), &rules);
-        s.tick(Some(Direction::Right), &grid, &(), &rules);
+        s.tick(Some(Direction::Right), &grid, &(), &rules, None);
+        s.tick(Some(Direction::Right), &grid, &(), &rules, None);
         finish_step(&mut s, &grid, &rules);
         assert_eq!(s.pos(), GridPos::new(3, 0));
     }
@@ -470,17 +546,17 @@ mod tests {
             },
         );
         // Into mud at (1,0) from (1,1): verdict uses step direction (Up) → block.
-        s.tick(Some(Direction::Up), &grid, &(), &rules);
-        s.tick(Some(Direction::Up), &grid, &(), &rules);
+        s.tick(Some(Direction::Up), &grid, &(), &rules, None);
+        s.tick(Some(Direction::Up), &grid, &(), &rules, None);
         finish_step(&mut s, &grid, &rules);
         assert_eq!(s.pos(), GridPos::new(1, 1));
         // Into mud at (2,1) from (1,1): direction Right → allow.
-        s.tick(Some(Direction::Right), &grid, &(), &rules);
-        s.tick(Some(Direction::Right), &grid, &(), &rules);
+        s.tick(Some(Direction::Right), &grid, &(), &rules, None);
+        s.tick(Some(Direction::Right), &grid, &(), &rules, None);
         finish_step(&mut s, &grid, &rules);
         assert_eq!(s.pos(), GridPos::new(2, 1));
-        s.tick(Some(Direction::Right), &grid, &(), &rules);
-        s.tick(Some(Direction::Right), &grid, &(), &rules);
+        s.tick(Some(Direction::Right), &grid, &(), &rules, None);
+        s.tick(Some(Direction::Right), &grid, &(), &rules, None);
         finish_step(&mut s, &grid, &rules);
         assert_eq!(s.pos(), GridPos::new(3, 1));
     }
@@ -498,7 +574,7 @@ mod tests {
         let mut t = 0u32;
         let target_x = 3i32;
         while s.pos().x < target_x {
-            s.tick(Some(Direction::Right), &grid, &(), &rules);
+            s.tick(Some(Direction::Right), &grid, &(), &rules, None);
             t += 1;
             assert!(t < 200, "loop runaway");
         }

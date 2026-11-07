@@ -919,6 +919,8 @@ dependencies = [
  "pkrs-assets",
  "pkrs-core",
  "pkrs-data",
+ "ron",
+ "serde",
  "thiserror",
  "tiled",
 ]

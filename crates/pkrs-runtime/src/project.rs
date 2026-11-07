@@ -4,6 +4,7 @@
 //! with the Tiled adapter and draws it with the player at the start position. Dev saves go to
 //! `<project>/saves/` (§12).
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use pkrs_assets::{FolderVfs, Vfs, VfsPath};
@@ -13,12 +14,12 @@ use pkrs_platform::{
 };
 use pkrs_render::{Rect, Renderer, TextureHandle};
 use pkrs_world::{
-    GridStepper, Map, MapImporter, MovementConfig, StepEvent, TerrainRuleRegistry, TiledImporter,
-    Transition as WarpTransition, Warp,
+    GridStepper, LinkCrossing, Map, MapImporter, MovementConfig, StepEvent, TerrainRuleRegistry,
+    TiledImporter, Transition as WarpTransition, Warp, WorldLayout, neighbor_pixel_offset,
 };
 
 use crate::main_loop::SimulationHost;
-use crate::scene::{MapScene, PLAYER_ENTITY};
+use crate::scene::{MapScene, NeighborBackdrop, PLAYER_ENTITY, tile_sheet};
 
 /// Scripting API levels this runtime supports (§9.7).
 pub const SUPPORTED_API: std::ops::RangeInclusive<u32> = 1..=1;
@@ -41,6 +42,9 @@ pub enum ProjectError {
     /// The start map failed to load.
     #[error(transparent)]
     Map(#[from] pkrs_world::MapError),
+    /// World layout or connection error.
+    #[error(transparent)]
+    World(#[from] pkrs_world::WorldError),
     /// A texture could not be decoded or uploaded.
     #[error(transparent)]
     Render(#[from] pkrs_render::RenderError),
@@ -236,6 +240,32 @@ fn transition_ticks_in(transition: WarpTransition) -> u32 {
     }
 }
 
+/// Tile sizes for neighbours and the `LinkCrossing` helper (§6.4).
+struct CrossingContext {
+    layout: WorldLayout,
+    map_id: String,
+    map_size: (u32, u32),
+    neighbor_sizes: BTreeMap<String, (u32, u32)>,
+}
+
+impl CrossingContext {
+    fn link_crossing(&self) -> LinkCrossing<'_> {
+        LinkCrossing {
+            layout: &self.layout,
+            map_id: &self.map_id,
+            map_size: self.map_size,
+            neighbor_sizes: &self.neighbor_sizes,
+        }
+    }
+}
+
+/// Cached neighbour map ready for edge-strip drawing.
+struct NeighborCache {
+    map: Map,
+    textures: Vec<TextureHandle>,
+    offset_px: (f32, f32),
+}
+
 /// The overworld of a loaded project: map scene, player and input.
 pub struct ProjectHost {
     project: Project,
@@ -247,6 +277,8 @@ pub struct ProjectHost {
     player_sprite: (TextureHandle, Rect),
     ticks: u64,
     warp_phase: WarpPhase,
+    crossing: Option<CrossingContext>,
+    neighbors: Vec<NeighborCache>,
 }
 
 impl ProjectHost {
@@ -277,7 +309,7 @@ impl ProjectHost {
         );
         let input = Input::from_manifest(InputFacadeConfig::default(), &project.manifest.input)
             .unwrap_or_else(|_| Input::new(InputFacadeConfig::default()));
-        Ok(Self {
+        let mut host = Self {
             project: project.clone(),
             renderer,
             scene,
@@ -287,7 +319,11 @@ impl ProjectHost {
             player_sprite,
             ticks: 0,
             warp_phase: WarpPhase::None,
-        })
+            crossing: None,
+            neighbors: Vec::new(),
+        };
+        host.bootstrap_world_layout()?;
+        Ok(host)
     }
 
     /// The scene (map, entities, camera).
@@ -375,6 +411,115 @@ impl ProjectHost {
         self.scene = scene;
         self.walker = GridStepper::new(pending.to, facing);
         tracing::info!(map = %self.scene.map().id, pos = %pending.to, "map_enter (warp)");
+        self.refresh_neighbors()?;
+        Ok(())
+    }
+
+    fn bootstrap_world_layout(&mut self) -> Result<(), ProjectError> {
+        let layout = WorldLayout::load_optional(&self.project.vfs)?;
+        self.crossing = layout.map(|layout| {
+            let map = self.scene.map();
+            CrossingContext {
+                layout,
+                map_id: map.id.clone(),
+                map_size: (map.width, map.height),
+                neighbor_sizes: BTreeMap::new(),
+            }
+        });
+        self.refresh_neighbors()?;
+        Ok(())
+    }
+
+    fn refresh_neighbors(&mut self) -> Result<(), ProjectError> {
+        let Some(crossing) = self.crossing.as_mut() else {
+            self.neighbors.clear();
+            return Ok(());
+        };
+        let map = self.scene.map();
+        crossing.map_id = map.id.clone();
+        crossing.map_size = (map.width, map.height);
+        crossing.neighbor_sizes.clear();
+        self.neighbors.clear();
+
+        let links = crossing
+            .layout
+            .links_for(&map.id)
+            .cloned()
+            .unwrap_or_default();
+        let main_size = crossing.map_size;
+        let mut loaded = Vec::new();
+        for (dir, link) in [
+            (pkrs_core::Direction::Up, links.north),
+            (pkrs_core::Direction::Down, links.south),
+            (pkrs_core::Direction::Left, links.west),
+            (pkrs_core::Direction::Right, links.east),
+        ] {
+            let Some(link) = link else { continue };
+            let map = self.project.load_map_by_id(&link.map)?;
+            let textures = upload_map_textures(&self.project, &mut self.renderer, &map)?;
+            loaded.push((dir, link, map, textures));
+        }
+        for (dir, link, map, textures) in loaded {
+            crossing
+                .neighbor_sizes
+                .insert(link.map.clone(), (map.width, map.height));
+            let offset_px = neighbor_pixel_offset(
+                dir,
+                main_size,
+                (map.width, map.height),
+                (map.tile_width, map.tile_height),
+                link.offset,
+            );
+            self.neighbors.push(NeighborCache {
+                map,
+                textures,
+                offset_px,
+            });
+        }
+        Ok(())
+    }
+
+    fn neighbor_backdrops(&self) -> Vec<NeighborBackdrop> {
+        self.neighbors
+            .iter()
+            .map(|n| NeighborBackdrop {
+                map: n.map.clone(),
+                sheets: n
+                    .map
+                    .tilesets
+                    .iter()
+                    .zip(&n.textures)
+                    .map(|(ts, &tex)| tile_sheet(ts, tex))
+                    .collect(),
+                offset_px: n.offset_px,
+            })
+            .collect()
+    }
+
+    fn apply_seamless_cross(&mut self, to_map: &str, entry: GridPos) -> Result<(), ProjectError> {
+        let facing = self.walker.facing();
+        let map = self.project.load_map_by_id(to_map)?;
+        let textures = upload_map_textures(&self.project, &mut self.renderer, &map)?;
+        if !map.grid.in_bounds(entry) {
+            return Err(ProjectError::StartOutOfBounds {
+                map: map.id.clone(),
+                pos: entry,
+                width: map.width,
+                height: map.height,
+            });
+        }
+        let mut scene = MapScene::new(map, &textures)?;
+        scene.place_entity(
+            PLAYER_ENTITY,
+            entry,
+            self.player_sprite.0,
+            self.player_sprite.1,
+            false,
+        );
+        self.scene = scene;
+        self.walker = GridStepper::new(entry, facing);
+        tracing::info!(map = %self.scene.map().id, pos = %entry, "map_enter (seamless)");
+        self.refresh_neighbors()?;
         Ok(())
     }
 
@@ -475,14 +620,29 @@ impl SimulationHost for ProjectHost {
         let running = self.input.down(Action::Builtin(BuiltinAction::Run));
         self.walker.set_running(running);
         let grid = &self.scene.map().grid;
-        for event in self.walker.tick(dir, grid, &(), &self.terrain_rules) {
-            if let StepEvent::StepCompleted { pos, .. } = event {
-                tracing::trace!(%pos, "step");
-                let warp = self.scene.map().warp_at(pos).cloned();
-                if let Some(warp) = warp {
-                    self.begin_warp(&warp);
+        let link_crossing = self.crossing.as_ref().map(CrossingContext::link_crossing);
+        for event in self
+            .walker
+            .tick(dir, grid, &(), &self.terrain_rules, link_crossing.as_ref())
+        {
+            match event {
+                StepEvent::StepCompleted { pos, .. } => {
+                    tracing::trace!(%pos, "step");
+                    if grid.in_bounds(pos) {
+                        let warp = self.scene.map().warp_at(pos).cloned();
+                        if let Some(warp) = warp {
+                            self.begin_warp(&warp);
+                            break;
+                        }
+                    }
+                }
+                StepEvent::CrossedMap { to_map, entry, .. } => {
+                    if let Err(e) = self.apply_seamless_cross(&to_map, entry) {
+                        tracing::error!(%e, "seamless crossing failed");
+                    }
                     break;
                 }
+                StepEvent::Turned { .. } => {}
             }
         }
         self.sync_player_sprite();
@@ -492,7 +652,8 @@ impl SimulationHost for ProjectHost {
     fn render(&mut self, platform: &Platform, alpha: f32) {
         let (w, h) = platform.window_size();
         self.renderer.begin_frame(w, h);
-        self.scene.render(&mut self.renderer, alpha);
+        let backdrops = self.neighbor_backdrops();
+        self.scene.render(&mut self.renderer, alpha, &backdrops);
         self.renderer.end_frame();
     }
 }
@@ -513,22 +674,22 @@ mod tests {
             ..MovementConfig::default()
         };
         let mut w = GridStepper::with_config(GridPos::new(0, 0), Direction::Down, cfg);
-        w.tick(Some(Direction::Right), &grid, &(), &rules);
-        w.tick(Some(Direction::Right), &grid, &(), &rules);
+        w.tick(Some(Direction::Right), &grid, &(), &rules, None);
+        w.tick(Some(Direction::Right), &grid, &(), &rules, None);
         assert_eq!(w.pos(), GridPos::new(1, 0));
         assert_eq!(w.facing(), Direction::Right);
         assert!(!w.is_idle());
         for _ in 0..STEP_TICKS - 1 {
-            w.tick(None, &grid, &(), &rules);
+            w.tick(None, &grid, &(), &rules, None);
         }
         assert!(w.is_idle());
         assert_eq!(w.tile_position(), (1.0, 0.0));
-        w.tick(Some(Direction::Right), &grid, &(), &rules);
+        w.tick(Some(Direction::Right), &grid, &(), &rules, None);
         assert_eq!(w.pos(), GridPos::new(1, 0));
-        w.tick(Some(Direction::Up), &grid, &(), &rules);
-        w.tick(Some(Direction::Up), &grid, &(), &rules);
+        w.tick(Some(Direction::Up), &grid, &(), &rules, None);
+        w.tick(Some(Direction::Up), &grid, &(), &rules, None);
         while !w.is_idle() {
-            w.tick(None, &grid, &(), &rules);
+            w.tick(None, &grid, &(), &rules, None);
         }
         assert_eq!((w.pos(), w.facing()), (GridPos::new(1, 0), Direction::Up));
     }
@@ -543,10 +704,10 @@ mod tests {
             ..MovementConfig::default()
         };
         let mut w = GridStepper::with_config(GridPos::new(0, 0), Direction::Down, cfg);
-        w.tick(Some(Direction::Right), &grid, &(), &rules);
-        w.tick(Some(Direction::Right), &grid, &(), &rules);
+        w.tick(Some(Direction::Right), &grid, &(), &rules, None);
+        w.tick(Some(Direction::Right), &grid, &(), &rules, None);
         for _ in 0..7 {
-            w.tick(None, &grid, &(), &rules);
+            w.tick(None, &grid, &(), &rules, None);
         }
         assert_eq!(w.tile_position(), (0.5, 0.0));
     }

@@ -143,6 +143,41 @@ fn the_template_map_is_walkable_with_collision() {
 }
 
 #[test]
+fn walking_north_across_seam_swaps_map_without_transition() {
+    let dir = new_project("seamless");
+    let mut host = host(&dir);
+    assert_eq!(host.scene().map().id, "start");
+
+    // Stand on the north edge; one more step crosses into `maps/north.tmx` (template `world.ron`).
+    let project = Project::open(&ProjectOptions {
+        dir: dir.clone(),
+        warp: Some(GridPos::new(5, 0)),
+        ..ProjectOptions::default()
+    })
+    .unwrap();
+    let renderer = Renderer::new(
+        Box::new(NullRenderer::new()),
+        project.display(),
+        RendererConfig::default(),
+    );
+    host = ProjectHost::new(&project, renderer).unwrap();
+    assert_eq!(host.walker().pos(), GridPos::new(5, 0));
+
+    hold(&mut host, &dir, Key::Up, 1);
+    assert_eq!(
+        host.scene().map().id,
+        "north",
+        "seamless crossing should swap the active map"
+    );
+    assert_eq!(
+        host.walker().pos(),
+        GridPos::new(5, 5),
+        "entry tile on the north map"
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn stepping_onto_warp_changes_map_after_fade() {
     let dir = new_project("warp-step");
     let mut host = host(&dir);

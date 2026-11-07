@@ -13,5 +13,5 @@ pub use events::StepEvent;
 pub use field::FieldState;
 pub use lock::{LockHolder, PlayerLock};
 pub use occupancy::Occupancy;
-pub use stepper::GridStepper;
+pub use stepper::{GridStepper, LinkCrossing};
 pub use terrain::{TerrainRuleFn, TerrainRuleRegistry, TerrainStepVerdict};

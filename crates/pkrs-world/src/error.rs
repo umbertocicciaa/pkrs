@@ -21,4 +21,12 @@ pub enum WorldError {
     /// Error from `pkrs-assets`.
     #[error(transparent)]
     Assets(#[from] pkrs_assets::AssetsError),
+    /// `maps/world.ron` failed to parse.
+    #[error("failed to parse `{file}`: {message}")]
+    LayoutParse {
+        /// Source file.
+        file: String,
+        /// Parser message.
+        message: String,
+    },
 }

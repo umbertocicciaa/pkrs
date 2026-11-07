@@ -89,6 +89,16 @@ pub enum SceneError {
     },
 }
 
+/// A neighbouring map drawn around the active map (§6.4 edge strips).
+pub struct NeighborBackdrop {
+    /// Neighbour map.
+    pub map: Map,
+    /// Uploaded tilesets matching [`Map::tilesets`].
+    pub sheets: Vec<TileSheet>,
+    /// Pixel offset from the active map's origin.
+    pub offset_px: (f32, f32),
+}
+
 /// A loaded map plus its entities and camera.
 pub struct MapScene {
     map: Map,
@@ -193,19 +203,59 @@ impl MapScene {
 
     /// Queues the whole map into `renderer` for this frame (between `begin_frame` and
     /// `end_frame`). Returns the camera origin used.
-    pub fn render(&mut self, renderer: &mut Renderer, alpha: f32) -> (i32, i32) {
+    pub fn render(
+        &mut self,
+        renderer: &mut Renderer,
+        alpha: f32,
+        neighbors: &[NeighborBackdrop],
+    ) -> (i32, i32) {
         let view = renderer.view_size();
         let target = match self.camera.target() {
             CameraTarget::Player => self.entity_centre(PLAYER_ENTITY, alpha),
             CameraTarget::Entity(id) => self.entity_centre(id, alpha),
             CameraTarget::Fixed { .. } => None,
         };
-        let (map_w, map_h) = self.map.pixel_size();
-        let camera = self
-            .camera
-            .resolve(target, alpha, view, CameraBounds::map(map_w, map_h));
+        let bounds = extended_camera_bounds(self.map(), neighbors);
+        let camera = self.camera.resolve(target, alpha, view, bounds);
         let origin = camera.origin(view);
         let tile = (self.map.tile_width, self.map.tile_height);
+
+        let draw_map = |renderer: &mut Renderer,
+                        map: &Map,
+                        sheets: &[TileSheet],
+                        offset: (f32, f32),
+                        origin: (i32, i32),
+                        kinds: &[VisualLayerKind]| {
+            let tile = (map.tile_width, map.tile_height);
+            let layer_origin = (
+                origin.0 + offset.0.round() as i32,
+                origin.1 + offset.1.round() as i32,
+            );
+            for layer in map
+                .layers
+                .iter()
+                .filter(|l| l.visible && kinds.contains(&l.kind))
+            {
+                renderer.draw_tile_layer(
+                    &WorldTileGrid(layer),
+                    sheets,
+                    tile,
+                    layer_for(layer.kind),
+                    layer_origin,
+                );
+            }
+        };
+
+        for neighbor in neighbors {
+            draw_map(
+                renderer,
+                &neighbor.map,
+                &neighbor.sheets,
+                neighbor.offset_px,
+                origin,
+                &[VisualLayerKind::Ground, VisualLayerKind::GroundDecor],
+            );
+        }
 
         for layer in self.map.layers.iter().filter(|l| l.visible) {
             renderer.draw_tile_layer(
@@ -241,7 +291,39 @@ impl MapScene {
             })
             .collect();
         renderer.draw_entities(&mut sprites);
+
+        for neighbor in neighbors {
+            draw_map(
+                renderer,
+                &neighbor.map,
+                &neighbor.sheets,
+                neighbor.offset_px,
+                origin,
+                &[VisualLayerKind::Overhead],
+            );
+        }
         origin
+    }
+}
+
+#[must_use]
+fn extended_camera_bounds(map: &Map, neighbors: &[NeighborBackdrop]) -> CameraBounds {
+    let (tw, th) = (map.tile_width, map.tile_height);
+    let (mut min_x, mut min_y) = (0f32, 0f32);
+    let (mut max_x, mut max_y) = (map.width as f32 * tw as f32, map.height as f32 * th as f32);
+    for n in neighbors {
+        let (nx, ny) = n.offset_px;
+        let (nw, nh) = n.map.pixel_size();
+        min_x = min_x.min(nx);
+        min_y = min_y.min(ny);
+        max_x = max_x.max(nx + nw as f32);
+        max_y = max_y.max(ny + nh as f32);
+    }
+    CameraBounds {
+        x: min_x,
+        y: min_y,
+        width: max_x - min_x,
+        height: max_y - min_y,
     }
 }
 
@@ -321,7 +403,7 @@ mod tests {
         let mut player_screen = Vec::new();
         for i in 0..=8 {
             renderer.begin_frame(240, 160);
-            scene.render(&mut renderer, i as f32 / 8.0);
+            scene.render(&mut renderer, i as f32 / 8.0, &[]);
             renderer.end_frame();
             let draws = log.draws();
             let player = draws.iter().find(|d| d.layer == Layer::Entities).unwrap();

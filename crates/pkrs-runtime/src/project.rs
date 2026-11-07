@@ -455,6 +455,12 @@ impl ProjectHost {
         &self.walker
     }
 
+    /// The input facade (bindings for scripted input, §15.2).
+    #[must_use]
+    pub fn input(&self) -> &Input {
+        &self.input
+    }
+
     /// Shared custom-terrain rule registry (§6.3).
     pub fn terrain_rules_mut(&mut self) -> &mut TerrainRuleRegistry {
         &mut self.terrain_rules

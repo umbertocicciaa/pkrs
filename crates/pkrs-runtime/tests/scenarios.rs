@@ -1,0 +1,164 @@
+//! Integration (§15.2): runs every `tests/*.lua` scenario of every fixture project under
+//! `tests/fixtures/projects/` headless, with scripted input, and fails listing each failure.
+//! The acceptance scenario "talk to NPC -> dialogue -> choice -> back to overworld" also runs
+//! as its own test.
+
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
+use std::path::{Path, PathBuf};
+
+use pkrs_runtime::project::{Project, ProjectOptions};
+use pkrs_runtime::test_harness::{
+    ScenarioOptions, ScenarioOutcome, discover_scenarios, run_project_scenarios, run_scenario,
+    run_scenario_source,
+};
+
+fn fixture_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/projects")
+}
+
+fn town() -> PathBuf {
+    fixture_root().join("scenario-town")
+}
+
+fn open(dir: &Path) -> Project {
+    Project::open(&ProjectOptions {
+        dir: dir.to_path_buf(),
+        ..ProjectOptions::default()
+    })
+    .unwrap()
+}
+
+/// Fixture projects that ship scenarios.
+fn projects_with_scenarios() -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = std::fs::read_dir(fixture_root())
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| !discover_scenarios(p).unwrap().is_empty())
+        .collect();
+    dirs.sort();
+    dirs
+}
+
+#[test]
+fn every_fixture_scenario_passes() {
+    let projects = projects_with_scenarios();
+    assert!(projects.contains(&town()), "{projects:?}");
+    let mut ran = 0;
+    let mut failures = Vec::new();
+    for dir in projects {
+        let reports =
+            run_project_scenarios(&open(&dir), &dir, &ScenarioOptions::default()).unwrap();
+        for report in reports {
+            println!("{}: {report}", dir.display());
+            ran += 1;
+            if !report.passed() {
+                failures.push(format!("{}: {report}", dir.display()));
+            }
+        }
+    }
+    assert!(ran >= 4, "expected the scenario-town suite, ran {ran}");
+    assert!(
+        failures.is_empty(),
+        "{} scenario(s) failed:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn acceptance_talk_to_npc_dialogue_choice_back_to_overworld() {
+    let dir = town();
+    let report = run_scenario(
+        &open(&dir),
+        &dir.join("tests/talk_to_npc.lua"),
+        "tests/talk_to_npc.lua",
+        &ScenarioOptions::default(),
+    )
+    .unwrap();
+    assert!(report.passed(), "{report}");
+}
+
+#[test]
+fn scenario_runs_are_deterministic() {
+    let dir = town();
+    let run = || {
+        run_scenario(
+            &open(&dir),
+            &dir.join("tests/warp.lua"),
+            "tests/warp.lua",
+            &ScenarioOptions::default(),
+        )
+        .unwrap()
+    };
+    let (a, b) = (run(), run());
+    assert!(a.passed(), "{a}");
+    assert_eq!(a, b);
+}
+
+#[test]
+fn failed_expectation_reports_location_tick_and_values() {
+    let source = "expect_state('Overworld')\npress('confirm')\nexpect_state('Dialogue')\n";
+    let report = run_scenario_source(
+        &open(&town()),
+        "tests/x.lua",
+        source,
+        &ScenarioOptions::default(),
+    )
+    .unwrap();
+    let failure = report.failure().expect("must fail");
+    assert_eq!(failure.check, "expect_state");
+    assert_eq!(
+        failure.location.as_ref().unwrap().to_string(),
+        "tests/x.lua:3"
+    );
+    assert_eq!(failure.tick, 2);
+    assert_eq!(failure.expected.as_deref(), Some("Dialogue"));
+    assert_eq!(failure.actual.as_deref(), Some("Overworld"));
+    assert!(
+        report.to_string().starts_with(
+            "FAIL tests/x.lua (2 ticks)\n  tests/x.lua:3: expect_state failed at tick 2"
+        ),
+        "{report}"
+    );
+}
+
+#[test]
+fn tick_limit_and_load_errors_fail() {
+    let options = ScenarioOptions {
+        max_ticks: 10,
+        ..ScenarioOptions::default()
+    };
+    let report =
+        run_scenario_source(&open(&town()), "tests/x.lua", "wait_ticks(11)", &options).unwrap();
+    assert_eq!(report.ticks, 10);
+    assert!(matches!(&report.outcome, ScenarioOutcome::Failed(f) if f.check == "tick limit"));
+
+    let report = run_scenario_source(
+        &open(&town()),
+        "tests/x.lua",
+        "expect(",
+        &ScenarioOptions::default(),
+    )
+    .unwrap();
+    assert!(matches!(&report.outcome, ScenarioOutcome::Failed(f) if f.check == "load"));
+}
+
+#[test]
+fn walking_into_a_wall_fails_walk_with_positions() {
+    // The guide stands at (5, 4): walking up three tiles stops at (5, 5).
+    let report = run_scenario_source(
+        &open(&town()),
+        "tests/x.lua",
+        "walk('up', 3)",
+        &ScenarioOptions::default(),
+    )
+    .unwrap();
+    let failure = report.failure().expect("must fail");
+    assert_eq!(failure.check, "walk");
+    assert_eq!(failure.expected.as_deref(), Some("player at (5, 4)"));
+    assert!(
+        failure.actual.as_deref().unwrap().starts_with("(5, 5)"),
+        "{failure}"
+    );
+}

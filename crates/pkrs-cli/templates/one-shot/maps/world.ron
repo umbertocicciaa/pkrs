@@ -1,0 +1,8 @@
+{
+    start: (
+        north: (map: "north", offset: (0, 0)),
+    ),
+    north: (
+        south: (map: "start", offset: (0, 0)),
+    ),
+}

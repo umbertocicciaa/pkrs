@@ -132,12 +132,50 @@ fn the_template_map_is_walkable_with_collision() {
     assert_eq!(host.walker().pos(), GridPos::new(7, 7));
     assert_eq!(host.walker().facing(), Direction::Right);
 
-    // Walking up eventually hits the solid tree border, so the player stops on row 1.
-    hold(&mut host, &dir, Key::Up, 10);
+    // Walking up six steps reaches row 1; row 0 is open only as the north seam (§6.4).
+    hold(&mut host, &dir, Key::Up, 6);
     assert_eq!(
         host.walker().pos(),
         GridPos::new(7, 1),
         "blocked by the tree border"
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn walking_north_across_seam_swaps_map_without_transition() {
+    let dir = new_project("seamless");
+    let project = Project::open(&ProjectOptions {
+        dir: dir.clone(),
+        warp: Some(GridPos::new(5, 1)),
+        ..ProjectOptions::default()
+    })
+    .unwrap();
+    let renderer = Renderer::new(
+        Box::new(NullRenderer::new()),
+        project.display(),
+        RendererConfig::default(),
+    );
+    let mut host = ProjectHost::new(&project, renderer).unwrap();
+    assert_eq!(host.scene().map().id, "start");
+    assert_eq!(host.walker().pos(), GridPos::new(5, 1));
+    assert!(!host.is_warping());
+
+    hold(&mut host, &dir, Key::Up, 2);
+
+    assert!(
+        !host.is_warping(),
+        "seamless cross must not start warp fade"
+    );
+    assert_eq!(
+        host.scene().map().id,
+        "north",
+        "seamless crossing should swap the active map"
+    );
+    assert_eq!(
+        host.walker().pos(),
+        GridPos::new(5, 5),
+        "entry tile on the north map"
     );
     std::fs::remove_dir_all(&dir).unwrap();
 }

@@ -55,7 +55,7 @@ fn fixture_map_draws_in_layer_and_y_order() {
 
     let (mut renderer, log) = headless_renderer(DisplaySettings::default());
     renderer.begin_frame(240, 160);
-    let origin = scene.render(&mut renderer, 0.0);
+    let origin = scene.render(&mut renderer, 0.0, &[]);
     renderer.end_frame();
 
     // The 96×64 town is smaller than the 240×160 view, so it is centred.
@@ -119,7 +119,7 @@ fn same_row_order_is_stable_across_frames() {
     let mut orders = Vec::new();
     for _ in 0..3 {
         renderer.begin_frame(240, 160);
-        scene.render(&mut renderer, 0.5);
+        scene.render(&mut renderer, 0.5, &[]);
         renderer.end_frame();
         let xs: Vec<_> = log
             .draws()

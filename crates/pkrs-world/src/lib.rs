@@ -14,6 +14,7 @@ mod importer;
 mod map;
 pub mod movement;
 pub mod raw;
+pub mod world_layout;
 
 pub use conventions::{ConventionViolation, ViolationKind, ViolationLocation, build_map};
 pub use error::{Result, WorldError};
@@ -26,8 +27,12 @@ pub use map::{
     VisualLayerKind, Warp,
 };
 pub use movement::{
-    FieldState, GridStepper, LockHolder, MovementConfig, Occupancy, PathProgress, PlayerLock,
-    ScriptedPath, StepEvent, TerrainRuleFn, TerrainRuleRegistry, TerrainStepVerdict,
+    FieldState, GridStepper, LinkCrossing, LockHolder, MovementConfig, Occupancy, PathProgress,
+    PlayerLock, ScriptedPath, StepEvent, TerrainRuleFn, TerrainRuleRegistry, TerrainStepVerdict,
+};
+pub use world_layout::{
+    MapLinks, NeighborLink, WORLD_RON, WorldLayout, neighbor_pixel_offset, on_departure_edge,
+    translate_entry,
 };
 
 #[cfg(test)]

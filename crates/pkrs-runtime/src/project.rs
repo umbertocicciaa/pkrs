@@ -4,6 +4,7 @@
 //! with the Tiled adapter and draws it with the player at the start position. Dev saves go to
 //! `<project>/saves/` (§12).
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use pkrs_assets::{FolderVfs, Vfs, VfsPath};
@@ -14,13 +15,14 @@ use pkrs_platform::{
 use pkrs_render::{CameraTarget, Rect, Renderer, TextureHandle};
 use pkrs_script::{CameraCommand, CameraTarget as ScriptCameraTarget, LuaScriptHost};
 use pkrs_world::{
-    GridStepper, Map, MapImporter, MovementConfig, StepEvent, TerrainRuleRegistry, TiledImporter,
-    Transition as WarpTransition, Warp,
+    GridStepper, LinkCrossing, Map, MapImporter, MovementConfig, StepEvent, TerrainRuleRegistry,
+    TiledImporter, Transition as WarpTransition, WORLD_RON, Warp, WorldLayout,
+    neighbor_pixel_offset,
 };
 
 use crate::main_loop::SimulationHost;
 use crate::overworld::{OverworldScripts, ScreenFade, ScriptOverlay};
-use crate::scene::{MapScene, PLAYER_ENTITY};
+use crate::scene::{MapScene, NeighborBackdrop, PLAYER_ENTITY, tile_sheet};
 use crate::ui_assets::build_test_ui_theme;
 use crate::ui_theme::UiTheme;
 
@@ -45,6 +47,9 @@ pub enum ProjectError {
     /// The start map failed to load.
     #[error(transparent)]
     Map(#[from] pkrs_world::MapError),
+    /// World layout (`world.ron`) failed to load or validate.
+    #[error(transparent)]
+    World(#[from] pkrs_world::WorldError),
     /// A texture could not be decoded or uploaded.
     #[error(transparent)]
     Render(#[from] pkrs_render::RenderError),
@@ -240,6 +245,58 @@ fn transition_ticks_in(transition: WarpTransition) -> u32 {
     }
 }
 
+/// Tile sizes for neighbours and the `LinkCrossing` helper (§6.4).
+struct CrossingContext {
+    layout: WorldLayout,
+    map_id: String,
+    map_size: (u32, u32),
+    neighbor_sizes: BTreeMap<String, (u32, u32)>,
+}
+
+impl CrossingContext {
+    fn link_crossing(&self) -> LinkCrossing<'_> {
+        LinkCrossing {
+            layout: &self.layout,
+            map_id: &self.map_id,
+            map_size: self.map_size,
+            neighbor_sizes: &self.neighbor_sizes,
+        }
+    }
+}
+
+/// Cached neighbour map ready for edge-strip drawing.
+struct NeighborCache {
+    dir: Direction,
+    map: Map,
+    textures: Vec<TextureHandle>,
+    backdrop: NeighborBackdrop,
+}
+
+fn neighbor_cache(
+    dir: Direction,
+    map: Map,
+    textures: Vec<TextureHandle>,
+    offset_px: (f32, f32),
+) -> NeighborCache {
+    let sheets: Vec<_> = map
+        .tilesets
+        .iter()
+        .zip(&textures)
+        .map(|(ts, &tex)| tile_sheet(ts, tex))
+        .collect();
+    let backdrop = NeighborBackdrop {
+        map: map.clone(),
+        sheets,
+        offset_px,
+    };
+    NeighborCache {
+        dir,
+        map,
+        textures,
+        backdrop,
+    }
+}
+
 /// The overworld of a loaded project: map scene, player, NPCs, scripts and input.
 pub struct ProjectHost {
     project: Project,
@@ -258,6 +315,9 @@ pub struct ProjectHost {
     fade: ScreenFade,
     /// Tile the player last stood on between steps (trigger zones fire on entry).
     player_tile: GridPos,
+    crossing: Option<CrossingContext>,
+    neighbors: Vec<NeighborCache>,
+    active_textures: Vec<TextureHandle>,
 }
 
 impl ProjectHost {
@@ -335,7 +395,11 @@ impl ProjectHost {
             overlay: None,
             fade: ScreenFade::default(),
             player_tile: start,
+            crossing: None,
+            neighbors: Vec::new(),
+            active_textures: textures,
         };
+        host.bootstrap_world_layout()?;
         if let Some(scripts) = host.scripts.as_mut() {
             scripts.start_game(host.scene.map(), start, facing);
             host.place_npcs();
@@ -345,6 +409,12 @@ impl ProjectHost {
         }
         host.apply_script_requests();
         Ok(host)
+    }
+
+    /// `true` while a warp fade is running (for integration tests).
+    #[must_use]
+    pub fn is_warping(&self) -> bool {
+        !matches!(self.warp_phase, WarpPhase::None)
     }
 
     /// Overworld scripting, when enabled with [`with_scripts`](Self::with_scripts).
@@ -456,6 +526,7 @@ impl ProjectHost {
             false,
         );
         self.scene = scene;
+        self.active_textures = textures;
         self.walker = GridStepper::new(pending.to, facing);
         self.player_tile = pending.to;
         tracing::info!(map = %self.scene.map().id, pos = %pending.to, "map_enter (warp)");
@@ -463,6 +534,222 @@ impl ProjectHost {
             scripts.enter_map(self.scene.map(), pending.to, facing);
         }
         self.place_npcs();
+        self.refresh_neighbors()?;
+        Ok(())
+    }
+
+    fn collect_layout_sizes(
+        project: &Project,
+        layout: &WorldLayout,
+    ) -> Result<BTreeMap<String, (u32, u32)>, ProjectError> {
+        let mut sizes = BTreeMap::new();
+        let mut queue: Vec<String> = layout.map_ids().map(str::to_owned).collect();
+        while let Some(id) = queue.pop() {
+            if sizes.contains_key(&id) {
+                continue;
+            }
+            let map = project.load_map_by_id(&id)?;
+            sizes.insert(id.clone(), (map.width, map.height));
+            if let Some(links) = layout.links_for(&id) {
+                for neighbor in [
+                    links.north.as_ref(),
+                    links.south.as_ref(),
+                    links.east.as_ref(),
+                    links.west.as_ref(),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    if !sizes.contains_key(&neighbor.map) {
+                        queue.push(neighbor.map.clone());
+                    }
+                }
+            }
+        }
+        Ok(sizes)
+    }
+
+    fn bootstrap_world_layout(&mut self) -> Result<(), ProjectError> {
+        let layout = WorldLayout::load_optional(&self.project.vfs)?;
+        self.crossing = if let Some(layout) = layout {
+            let sizes = Self::collect_layout_sizes(&self.project, &layout)?;
+            layout.validate_layout(WORLD_RON, &sizes)?;
+            let map = self.scene.map();
+            Some(CrossingContext {
+                layout,
+                map_id: map.id.clone(),
+                map_size: (map.width, map.height),
+                neighbor_sizes: BTreeMap::new(),
+            })
+        } else {
+            None
+        };
+        self.refresh_neighbors()?;
+        Ok(())
+    }
+
+    fn refresh_neighbors(&mut self) -> Result<(), ProjectError> {
+        let mut reuse = self.drain_neighbor_reuse();
+        self.neighbors.clear();
+        let Some(crossing) = self.crossing.as_mut() else {
+            return Ok(());
+        };
+        let map = self.scene.map();
+        crossing.map_id = map.id.clone();
+        crossing.map_size = (map.width, map.height);
+        crossing.neighbor_sizes.clear();
+
+        let links = crossing
+            .layout
+            .links_for(&map.id)
+            .cloned()
+            .unwrap_or_default();
+        let main_size = crossing.map_size;
+        for (dir, link) in [
+            (Direction::Up, links.north),
+            (Direction::Down, links.south),
+            (Direction::Left, links.west),
+            (Direction::Right, links.east),
+        ] {
+            let Some(link) = link else { continue };
+            let (neighbor_map, neighbor_textures) = if let Some(cached) = reuse.remove(&link.map) {
+                cached
+            } else {
+                let neighbor_map = self.project.load_map_by_id(&link.map)?;
+                let neighbor_textures =
+                    upload_map_textures(&self.project, &mut self.renderer, &neighbor_map)?;
+                (neighbor_map, neighbor_textures)
+            };
+            crossing
+                .neighbor_sizes
+                .insert(link.map.clone(), (neighbor_map.width, neighbor_map.height));
+            let offset_px = neighbor_pixel_offset(
+                dir,
+                main_size,
+                (neighbor_map.width, neighbor_map.height),
+                (neighbor_map.tile_width, neighbor_map.tile_height),
+                link.offset,
+            );
+            self.neighbors.push(neighbor_cache(
+                dir,
+                neighbor_map,
+                neighbor_textures,
+                offset_px,
+            ));
+        }
+        Ok(())
+    }
+
+    fn drain_neighbor_reuse(&mut self) -> BTreeMap<String, (Map, Vec<TextureHandle>)> {
+        let mut reuse = BTreeMap::new();
+        for n in self.neighbors.drain(..) {
+            reuse.insert(n.map.id.clone(), (n.map, n.textures));
+        }
+        reuse
+    }
+
+    fn apply_seamless_cross(
+        &mut self,
+        to_map: &str,
+        entry: GridPos,
+        via: Direction,
+    ) -> Result<(), ProjectError> {
+        if let Some(scripts) = self.scripts.as_mut() {
+            scripts.exit_map();
+        }
+        let old_map = self.scene.map().clone();
+        let old_textures = std::mem::take(&mut self.active_textures);
+        let old_id = old_map.id.clone();
+
+        let promoted = self
+            .neighbors
+            .iter()
+            .position(|n| n.dir == via && n.map.id == to_map)
+            .map(|idx| self.neighbors.remove(idx));
+
+        let (map, textures) = if let Some(cache) = promoted {
+            (cache.map, cache.textures)
+        } else {
+            let map = self.project.load_map_by_id(to_map)?;
+            let textures = upload_map_textures(&self.project, &mut self.renderer, &map)?;
+            (map, textures)
+        };
+
+        if !map.grid.in_bounds(entry) {
+            return Err(ProjectError::StartOutOfBounds {
+                map: map.id.clone(),
+                pos: entry,
+                width: map.width,
+                height: map.height,
+            });
+        }
+        let facing = self.walker.facing();
+        let mut scene = MapScene::new(map, &textures)?;
+        scene.place_entity(
+            PLAYER_ENTITY,
+            entry,
+            self.player_sprite.0,
+            self.player_sprite.1,
+            false,
+        );
+        self.scene = scene;
+        self.active_textures = textures;
+        self.walker.relocate(entry);
+        self.player_tile = entry;
+        tracing::info!(map = %self.scene.map().id, pos = %entry, "map_enter (seamless)");
+        if let Some(scripts) = self.scripts.as_mut() {
+            scripts.enter_map(self.scene.map(), entry, facing);
+        }
+        self.place_npcs();
+
+        let mut reuse = self.drain_neighbor_reuse();
+        reuse.insert(old_id, (old_map, old_textures));
+        if let Some(crossing) = self.crossing.as_mut() {
+            let new_id = self.scene.map().id.clone();
+            crossing.map_id = new_id.clone();
+            crossing.map_size = (self.scene.map().width, self.scene.map().height);
+            crossing.neighbor_sizes.clear();
+            let links = crossing
+                .layout
+                .links_for(&new_id)
+                .cloned()
+                .unwrap_or_default();
+            let main_size = crossing.map_size;
+            self.neighbors.clear();
+            for (dir, link) in [
+                (Direction::Up, links.north),
+                (Direction::Down, links.south),
+                (Direction::Left, links.west),
+                (Direction::Right, links.east),
+            ] {
+                let Some(link) = link else { continue };
+                let (neighbor_map, neighbor_textures) =
+                    if let Some(cached) = reuse.remove(&link.map) {
+                        cached
+                    } else {
+                        let neighbor_map = self.project.load_map_by_id(&link.map)?;
+                        let neighbor_textures =
+                            upload_map_textures(&self.project, &mut self.renderer, &neighbor_map)?;
+                        (neighbor_map, neighbor_textures)
+                    };
+                crossing
+                    .neighbor_sizes
+                    .insert(link.map.clone(), (neighbor_map.width, neighbor_map.height));
+                let offset_px = neighbor_pixel_offset(
+                    dir,
+                    main_size,
+                    (neighbor_map.width, neighbor_map.height),
+                    (neighbor_map.tile_width, neighbor_map.tile_height),
+                    link.offset,
+                );
+                self.neighbors.push(neighbor_cache(
+                    dir,
+                    neighbor_map,
+                    neighbor_textures,
+                    offset_px,
+                ));
+            }
+        }
         Ok(())
     }
 
@@ -608,29 +895,52 @@ impl ProjectHost {
         };
         let running = self.input.down(Action::Builtin(BuiltinAction::Run));
         self.walker.set_running(running);
+        let link_crossing = self.crossing.as_ref().map(CrossingContext::link_crossing);
         let events = {
             let grid = &self.scene.map().grid;
             match &self.scripts {
                 Some(scripts) => {
                     let world = scripts.world().get();
                     let occupied = |p: GridPos| world.blocks(p);
-                    self.walker.tick(dir, grid, &occupied, &self.terrain_rules)
+                    self.walker.tick(
+                        dir,
+                        grid,
+                        &occupied,
+                        &self.terrain_rules,
+                        link_crossing.as_ref(),
+                    )
                 }
-                None => self.walker.tick(dir, grid, &(), &self.terrain_rules),
+                None => {
+                    self.walker
+                        .tick(dir, grid, &(), &self.terrain_rules, link_crossing.as_ref())
+                }
             }
         };
         for event in events {
-            if let StepEvent::StepCompleted { pos, facing, .. } = event {
-                tracing::trace!(%pos, "step");
-                if let Some(scripts) = self.scripts.as_mut() {
-                    scripts.on_player_step(self.scene.map(), self.player_tile, pos, facing);
+            match event {
+                StepEvent::StepCompleted { pos, facing, .. } => {
+                    tracing::trace!(%pos, "step");
+                    if let Some(scripts) = self.scripts.as_mut() {
+                        scripts.on_player_step(self.scene.map(), self.player_tile, pos, facing);
+                    }
+                    self.player_tile = pos;
+                    let warp = self.scene.map().warp_at(pos).cloned();
+                    if let Some(warp) = warp {
+                        self.begin_warp(&warp);
+                        return;
+                    }
                 }
-                self.player_tile = pos;
-                let warp = self.scene.map().warp_at(pos).cloned();
-                if let Some(warp) = warp {
-                    self.begin_warp(&warp);
+                StepEvent::CrossedMap { to_map, entry, .. } => {
+                    let via = self.walker.facing();
+                    if let Err(e) = self.apply_seamless_cross(&to_map, entry, via) {
+                        tracing::error!(%e, "seamless crossing failed");
+                    } else if let Some(scripts) = self.scripts.as_mut() {
+                        let facing = self.walker.facing();
+                        scripts.on_player_step(self.scene.map(), self.player_tile, entry, facing);
+                    }
                     return;
                 }
+                StepEvent::Turned { .. } => {}
             }
         }
         let confirm = Action::Builtin(BuiltinAction::Confirm);
@@ -777,7 +1087,9 @@ impl SimulationHost for ProjectHost {
     fn render(&mut self, platform: &Platform, alpha: f32) {
         let (w, h) = platform.window_size();
         self.renderer.begin_frame(w, h);
-        self.scene.render(&mut self.renderer, alpha);
+        let backdrops: Vec<&NeighborBackdrop> =
+            self.neighbors.iter().map(|n| &n.backdrop).collect();
+        self.scene.render(&mut self.renderer, alpha, &backdrops);
         if let (Some(overlay), Some(theme)) = (&self.overlay, &self.ui_theme) {
             overlay.render(&mut self.renderer, theme);
         }
@@ -802,22 +1114,23 @@ mod tests {
             ..MovementConfig::default()
         };
         let mut w = GridStepper::with_config(GridPos::new(0, 0), Direction::Down, cfg);
-        w.tick(Some(Direction::Right), &grid, &(), &rules);
-        w.tick(Some(Direction::Right), &grid, &(), &rules);
+        let links = None;
+        w.tick(Some(Direction::Right), &grid, &(), &rules, links);
+        w.tick(Some(Direction::Right), &grid, &(), &rules, links);
         assert_eq!(w.pos(), GridPos::new(1, 0));
         assert_eq!(w.facing(), Direction::Right);
         assert!(!w.is_idle());
         for _ in 0..STEP_TICKS - 1 {
-            w.tick(None, &grid, &(), &rules);
+            w.tick(None, &grid, &(), &rules, links);
         }
         assert!(w.is_idle());
         assert_eq!(w.tile_position(), (1.0, 0.0));
-        w.tick(Some(Direction::Right), &grid, &(), &rules);
+        w.tick(Some(Direction::Right), &grid, &(), &rules, links);
         assert_eq!(w.pos(), GridPos::new(1, 0));
-        w.tick(Some(Direction::Up), &grid, &(), &rules);
-        w.tick(Some(Direction::Up), &grid, &(), &rules);
+        w.tick(Some(Direction::Up), &grid, &(), &rules, links);
+        w.tick(Some(Direction::Up), &grid, &(), &rules, links);
         while !w.is_idle() {
-            w.tick(None, &grid, &(), &rules);
+            w.tick(None, &grid, &(), &rules, links);
         }
         assert_eq!((w.pos(), w.facing()), (GridPos::new(1, 0), Direction::Up));
     }
@@ -832,10 +1145,11 @@ mod tests {
             ..MovementConfig::default()
         };
         let mut w = GridStepper::with_config(GridPos::new(0, 0), Direction::Down, cfg);
-        w.tick(Some(Direction::Right), &grid, &(), &rules);
-        w.tick(Some(Direction::Right), &grid, &(), &rules);
+        let links = None;
+        w.tick(Some(Direction::Right), &grid, &(), &rules, links);
+        w.tick(Some(Direction::Right), &grid, &(), &rules, links);
         for _ in 0..7 {
-            w.tick(None, &grid, &(), &rules);
+            w.tick(None, &grid, &(), &rules, links);
         }
         assert_eq!(w.tile_position(), (0.5, 0.0));
     }

@@ -275,6 +275,8 @@ mod tests {
             "LICENSES.md",
             "maps/start.tmx",
             "maps/dest.tmx",
+            "maps/north.tmx",
+            "maps/world.ron",
             "tilesets/overworld.tsx",
             "tilesets/overworld.png",
             "sprites/player.png",

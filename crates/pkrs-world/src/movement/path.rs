@@ -85,7 +85,7 @@ impl ScriptedPath {
             if walker.is_idle() {
                 return PathProgress::Finished;
             }
-            walker.tick(None, grid, occupancy, rules);
+            walker.tick(None, grid, occupancy, rules, None);
             return if walker.is_idle() {
                 PathProgress::Finished
             } else {
@@ -94,7 +94,7 @@ impl ScriptedPath {
         };
         let was_idle = walker.is_idle();
         let facing_before = walker.facing();
-        let events = walker.tick(Some(dir), grid, occupancy, rules);
+        let events = walker.tick(Some(dir), grid, occupancy, rules, None);
         let completed = events
             .iter()
             .filter(|e| matches!(e, StepEvent::StepCompleted { .. }))

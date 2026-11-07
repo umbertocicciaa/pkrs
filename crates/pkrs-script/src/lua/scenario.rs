@@ -17,12 +17,14 @@
 //!
 //! Waiting: `wait_until(fn [, max_ticks [, what]])`, `wait_for_state(name [, max_ticks])`.
 //!
-//! Helpers: `advance_dialogue([max_ticks])`, `choose(index)`, `answer(yes)`,
-//! `walk(direction [, tiles])`, `face(direction)`.
+//! Helpers: `advance_dialogue([max_ticks])`, `choose(index)` (choice lists and battle menus),
+//! `answer(yes)`, `walk(direction [, tiles])`, `face(direction)`, `advance_battle([max_ticks])`
+//! (confirms battle messages until a battle menu opens or the battle ends).
 //!
 //! Queries: `tick()`, `state()`, `map()`, `player()` (x, y, facing), `idle()`, `locked()`,
 //! `npc(id)` (x, y, facing or nil), `flag(name)`, `var(name)`, `item(id)`, `dialogue()`,
-//! `dialogues_opened()`, `choices()`, `cursor()` (1-based).
+//! `dialogues_opened()`, `choices()`, `cursor()` (1-based), `battle()` (`nil` outside a battle,
+//! else `{ menu, turn, player = { name, level, hp, max_hp }, opponent = { … } }`).
 //!
 //! Expectations: `expect(cond [, message])`, `expect_eq(actual, expected [, message])`,
 //! `expect_state(name)`, `expect_map(id)`, `expect_player_at(x, y [, facing])`,
@@ -48,8 +50,8 @@ use super::{convert, map_error, sandbox};
 use crate::error::{Result, ScriptError};
 use crate::host::{ScriptLimits, ScriptValue};
 use crate::scenario::{
-    DEFAULT_WAIT_TICKS, ScenarioFailure, ScenarioSnapshot, ScenarioStep, SourceLocation,
-    format_placement, format_value, values_equal,
+    BattleSnapshot, BattlerSnapshot, DEFAULT_WAIT_TICKS, ScenarioFailure, ScenarioSnapshot,
+    ScenarioStep, SourceLocation, format_placement, format_value, values_equal,
 };
 
 /// Every global the test API adds to a scenario's environment.
@@ -64,6 +66,7 @@ pub const SCENARIO_API: &[&str] = &[
     "wait_until",
     "wait_for_state",
     "advance_dialogue",
+    "advance_battle",
     "choose",
     "answer",
     "walk",
@@ -82,6 +85,7 @@ pub const SCENARIO_API: &[&str] = &[
     "dialogues_opened",
     "choices",
     "cursor",
+    "battle",
     "expect",
     "expect_eq",
     "expect_state",
@@ -179,7 +183,10 @@ function advance_dialogue(max_ticks)
 end
 
 function choose(index)
-  if state() ~= "Choice" then __fail("choose", "Choice", state()) end
+  local st = state()
+  if st ~= "Choice" and not (st == "Battle" and choices() ~= nil) then
+    __fail("choose", "Choice", st)
+  end
   local options = choices()
   local i = whole(index, "choose", 1)
   if i > #options then
@@ -194,6 +201,19 @@ function choose(index)
     if cursor() < i then press("down") else press("up") end
   end
   press("confirm")
+end
+
+function advance_battle(max_ticks)
+  if state() ~= "Battle" then __fail("advance_battle", "Battle", state()) end
+  local limit = whole(max_ticks or default_wait, "advance_battle", 1)
+  local start = tick()
+  while state() == "Battle" and choices() == nil do
+    if tick() - start >= limit then
+      __fail("advance_battle", "a battle menu or the end of the battle",
+        "still playing after " .. limit .. " ticks")
+    end
+    if dialogue() ~= nil then press("confirm") else wait_ticks(1) end
+  end
 end
 
 function answer(yes)
@@ -757,7 +777,38 @@ fn install_queries(lua: &Lua, env: &Table) -> mlua::Result<()> {
         "cursor",
         lua.create_function(|lua, ()| snapshot(lua, |s| s.cursor.map(|c| c + 1)))?,
     )?;
+    env.raw_set(
+        "battle",
+        lua.create_function(|lua, ()| {
+            let battle = snapshot(lua, |s| s.battle.clone())?;
+            to_lua(lua, &battle.map_or(ScriptValue::Nil, |b| battle_value(&b)))
+        })?,
+    )?;
     Ok(())
+}
+
+/// `battle()`: `{ menu, turn, player = { name, level, hp, max_hp }, opponent = { … } }`.
+fn battle_value(battle: &BattleSnapshot) -> ScriptValue {
+    let battler = |b: &BattlerSnapshot| {
+        let mut map = std::collections::BTreeMap::new();
+        map.insert("name".into(), ScriptValue::String(b.name.clone()));
+        map.insert("level".into(), ScriptValue::Int(i64::from(b.level)));
+        map.insert("hp".into(), ScriptValue::Int(i64::from(b.hp)));
+        map.insert("max_hp".into(), ScriptValue::Int(i64::from(b.max_hp)));
+        ScriptValue::Map(map)
+    };
+    let mut map = std::collections::BTreeMap::new();
+    if let Some(menu) = &battle.menu {
+        map.insert("menu".into(), ScriptValue::String(menu.clone()));
+    }
+    map.insert("turn".into(), ScriptValue::Int(i64::from(battle.turn)));
+    if let Some(p) = &battle.player {
+        map.insert("player".into(), battler(p));
+    }
+    if let Some(o) = &battle.opponent {
+        map.insert("opponent".into(), battler(o));
+    }
+    ScriptValue::Map(map)
 }
 
 fn install_expectations(lua: &Lua, env: &Table) -> mlua::Result<()> {
@@ -1043,6 +1094,52 @@ mod tests {
             ScenarioStep::Failed(f) => f,
             other => panic!("expected a failure, got {other:?}"),
         }
+    }
+
+    fn battle_snap(tick: u64) -> ScenarioSnapshot {
+        ScenarioSnapshot {
+            state: "Battle".into(),
+            choices: vec!["FIGHT".into(), "BAG".into()],
+            cursor: Some(0),
+            battle: Some(BattleSnapshot {
+                menu: Some("action".into()),
+                turn: 2,
+                player: Some(BattlerSnapshot {
+                    name: "Hero".into(),
+                    level: 5,
+                    hp: 12,
+                    max_hp: 20,
+                }),
+                opponent: None,
+            }),
+            ..snap(tick)
+        }
+    }
+
+    #[test]
+    fn battle_query_and_choose_in_a_battle_menu() {
+        let mut sc = scenario(
+            r#"
+            expect(battle().menu == "action" and battle().turn == 2)
+            expect(battle().player.name == "Hero" and battle().player.hp == 12)
+            expect_eq(battle().player.max_hp, 20)
+            expect(battle().opponent == nil)
+            choose(1)
+        "#,
+        );
+        let step = sc.resume(battle_snap(10));
+        assert_eq!(
+            step,
+            ScenarioStep::Advance {
+                ticks: 1,
+                held: vec!["confirm".into()]
+            }
+        );
+        let f = failure("advance_battle()");
+        assert_eq!(f.check, "advance_battle");
+        assert_eq!(f.expected.as_deref(), Some("Battle"));
+        let none = run("expect(battle() == nil)");
+        assert_eq!(none, ScenarioStep::Finished);
     }
 
     #[test]

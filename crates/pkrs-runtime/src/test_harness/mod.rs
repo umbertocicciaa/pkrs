@@ -20,7 +20,7 @@
 mod snapshot;
 
 pub use snapshot::{
-    STATE_CHOICE, STATE_DIALOGUE, STATE_OVERWORLD, STATE_WARP, snapshot, state_name,
+    STATE_BATTLE, STATE_CHOICE, STATE_DIALOGUE, STATE_OVERWORLD, STATE_WARP, snapshot, state_name,
 };
 
 use std::fmt;
@@ -165,7 +165,8 @@ impl ScenarioDriver {
         let (scripts, _plugins) =
             start_project_scripts(project, Box::new(Pcg64Rng::from_seed(seed)))?;
         let (renderer, log) = headless_renderer(project.display());
-        let host = ProjectHost::with_scripts(project, renderer, scripts)?;
+        let mut host = ProjectHost::with_scripts(project, renderer, scripts)?;
+        host.set_battle_seed(seed);
         let last_overlay = host.overlay().map(|o| o.request().clone());
         Ok(Self {
             host,
@@ -184,7 +185,11 @@ impl ScenarioDriver {
     /// What a scenario sees right now.
     #[must_use]
     pub fn snapshot(&self) -> pkrs_script::scenario::ScenarioSnapshot {
-        snapshot(&self.host, self.dialogues_opened)
+        // Battle messages count as text boxes too.
+        let opened = self
+            .dialogues_opened
+            .saturating_add(self.host.battle_texts_shown());
+        snapshot(&self.host, opened)
     }
 
     /// The keys that press `actions` (the first key bound to each). Errors name an action

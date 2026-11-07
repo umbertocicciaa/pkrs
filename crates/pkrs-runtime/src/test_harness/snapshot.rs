@@ -3,9 +3,11 @@
 //! The only place the harness reads game state; it goes through the host's public accessors,
 //! so changes to how the overworld stores state stay local to this file.
 
+use pkrs_battle::SideId;
 use pkrs_script::ScriptValue;
-use pkrs_script::scenario::{Placement, ScenarioSnapshot};
+use pkrs_script::scenario::{BattleSnapshot, BattlerSnapshot, Placement, ScenarioSnapshot};
 
+use crate::battle::BattleScreen;
 use crate::overworld::UiRequest;
 use crate::project::ProjectHost;
 
@@ -17,11 +19,16 @@ pub const STATE_DIALOGUE: &str = "Dialogue";
 pub const STATE_CHOICE: &str = "Choice";
 /// State name during a warp transition.
 pub const STATE_WARP: &str = "Warp";
+/// State name while a battle runs (§7.2).
+pub const STATE_BATTLE: &str = "Battle";
 
-/// The name `state()` / `expect_state` report for `host`: the open dialogue wins, then a
-/// running warp, else the overworld.
+/// The name `state()` / `expect_state` report for `host`: a running battle wins, then the
+/// open dialogue, then a running warp, else the overworld.
 #[must_use]
 pub fn state_name(host: &ProjectHost) -> &'static str {
+    if host.battle().is_some() {
+        return STATE_BATTLE;
+    }
     match host.overlay().map(|o| o.request()) {
         Some(UiRequest::Say(_)) => STATE_DIALOGUE,
         Some(UiRequest::Choose { .. }) => STATE_CHOICE,
@@ -48,7 +55,12 @@ pub fn snapshot(host: &ProjectHost, dialogues_opened: u64) -> ScenarioSnapshot {
         actions: host.input().action_names().into_iter().collect(),
         ..ScenarioSnapshot::default()
     };
-    if let Some(overlay) = host.overlay() {
+    if let Some(battle) = host.battle() {
+        snap.dialogue = battle.text().map(str::to_owned);
+        snap.choices = battle.menu_labels();
+        snap.cursor = battle.menu_cursor();
+        snap.battle = Some(battle_snapshot(battle));
+    } else if let Some(overlay) = host.overlay() {
         match overlay.request() {
             UiRequest::Say(text) => snap.dialogue = Some(text.clone()),
             UiRequest::Choose { prompt, options } => {
@@ -85,4 +97,26 @@ pub fn snapshot(host: &ProjectHost, dialogues_opened: u64) -> ScenarioSnapshot {
             .collect();
     }
     snap
+}
+
+/// What `battle()` reports: open menu, turn and both active creatures as displayed.
+fn battle_snapshot(battle: &BattleScreen) -> BattleSnapshot {
+    let battler = |side: SideId| {
+        battle
+            .displayed()
+            .side(side)
+            .active_member(0)
+            .map(|m| BattlerSnapshot {
+                name: m.name.clone(),
+                level: m.level,
+                hp: m.hp,
+                max_hp: m.max_hp,
+            })
+    };
+    BattleSnapshot {
+        menu: battle.menu().map(|m| m.name().to_owned()),
+        turn: battle.battle().turn(),
+        player: battler(SideId::Player),
+        opponent: battler(SideId::Opponent),
+    }
 }

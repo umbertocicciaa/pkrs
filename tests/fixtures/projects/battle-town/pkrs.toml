@@ -1,0 +1,25 @@
+# Fixture for the battle UI (design §7.2, §15.2): a rival in a small town starts a trainer
+# battle from a script. `tests/*.lua` are its scenarios; `data/trainers/player.ron` is the
+# player's party until the save-backed party lands (§12).
+[game]
+name    = "Battle Town"
+id      = "com.example.battle-town"
+version = "0.1.0"
+
+[engine]
+version = "0.0"
+api     = 1
+
+[display]
+width  = 240
+height = 160
+scale  = 3
+
+[start]
+map      = "town"
+position = [5, 7]
+facing   = "up"
+
+[features]
+battles = true
+party   = true

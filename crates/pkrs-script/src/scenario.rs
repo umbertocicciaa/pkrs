@@ -87,6 +87,38 @@ pub struct ScenarioSnapshot {
     pub npcs: BTreeMap<String, Placement>,
     /// Action names `press` / `hold` accept (`confirm`, `up`, `resonance:toggle`, …).
     pub actions: BTreeSet<String>,
+    /// The battle on screen while the state is `Battle` (§7.2).
+    pub battle: Option<BattleSnapshot>,
+}
+
+/// What a scenario sees of a running battle (`battle()` in the test API).
+///
+/// While a battle message is shown, [`ScenarioSnapshot::dialogue`] holds its text; while a
+/// battle menu is open, [`ScenarioSnapshot::choices`] and [`ScenarioSnapshot::cursor`] hold
+/// its entries and highlighted row, so `choose(i)` works in menus too.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BattleSnapshot {
+    /// Open menu: `action`, `fight`, `bag` or `party` (`None` while events play back).
+    pub menu: Option<String>,
+    /// Current turn (1-based).
+    pub turn: u32,
+    /// The player's active creature, as displayed (HP follows the HP bar animation).
+    pub player: Option<BattlerSnapshot>,
+    /// The opponent's active creature, as displayed.
+    pub opponent: Option<BattlerSnapshot>,
+}
+
+/// One active creature in a [`BattleSnapshot`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BattlerSnapshot {
+    /// Display name.
+    pub name: String,
+    /// Level.
+    pub level: u8,
+    /// HP shown on the bar.
+    pub hp: u32,
+    /// Maximum HP.
+    pub max_hp: u32,
 }
 
 /// What the scenario asks the runtime to do next.

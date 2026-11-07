@@ -1,0 +1,210 @@
+//! Battle menu building: action, fight (moves with PP), bag and party menus (§7.4).
+//!
+//! The action menu comes from [`Battle::action_menu`](pkrs_battle::Battle::action_menu): the
+//! built-in `fight` / `bag` / `party` / `run` entries after every `on_action_menu` hook ran,
+//! so plugins add, remove or reorder entries there. An entry with any other id is a custom
+//! action: picking it submits `BattleAction::Custom { id, payload: [] }`, which the battle
+//! hands to `on_custom_action`.
+
+use std::collections::BTreeMap;
+
+use pkrs_battle::{ActionMenu, CreatureView, MenuOption, PartyIndex, SideView};
+
+use super::content::display_name;
+
+/// What an action-menu entry does.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ActionKind {
+    /// Open the move list.
+    Fight,
+    /// Open the bag.
+    Bag,
+    /// Open the party (voluntary switch).
+    Party,
+    /// Try to run.
+    Run,
+    /// A hook-added entry: submit `BattleAction::Custom` with this id.
+    Custom(String),
+}
+
+/// One row of a battle menu.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MenuEntry<T> {
+    /// Label shown to the player.
+    pub label: String,
+    /// `false` greys the row out; picking it explains why instead of acting.
+    pub enabled: bool,
+    /// What picking the row means.
+    pub value: T,
+}
+
+/// Rows of the action menu, in the order the hooks left them.
+#[must_use]
+pub fn action_entries(menu: &ActionMenu) -> Vec<MenuEntry<ActionKind>> {
+    menu.options.iter().map(action_entry).collect()
+}
+
+fn action_entry(option: &MenuOption) -> MenuEntry<ActionKind> {
+    let (label, value) = match option.id.as_str() {
+        "fight" => ("FIGHT".to_owned(), ActionKind::Fight),
+        "bag" => ("BAG".to_owned(), ActionKind::Bag),
+        "party" => ("PARTY".to_owned(), ActionKind::Party),
+        "run" => ("RUN".to_owned(), ActionKind::Run),
+        id => (custom_label(option), ActionKind::Custom(id.to_owned())),
+    };
+    MenuEntry {
+        label,
+        enabled: true,
+        value,
+    }
+}
+
+/// A custom entry's label: plain labels are shown as written; `text:` keys (not localized
+/// yet, §8) fall back to the readable action id.
+fn custom_label(option: &MenuOption) -> String {
+    if option.label.is_empty() || option.label.starts_with("text:") {
+        display_name(&option.id).to_uppercase()
+    } else {
+        option.label.clone()
+    }
+}
+
+/// Rows of the fight menu: each known move with its PP; moves without PP are disabled.
+/// The value is the move slot (`0..4`).
+#[must_use]
+pub fn fight_entries(creature: &CreatureView) -> Vec<MenuEntry<u8>> {
+    creature
+        .moves
+        .iter()
+        .enumerate()
+        .filter_map(|(i, m)| {
+            let m = m.as_ref()?;
+            Some(MenuEntry {
+                label: format!("{} {}/{}", display_name(&m.id), m.pp, m.max_pp),
+                enabled: m.pp > 0,
+                value: u8::try_from(i).ok()?,
+            })
+        })
+        .collect()
+}
+
+/// Rows of the party menu: every member with level and HP. Fainted and active members are
+/// disabled. The value is the party index.
+#[must_use]
+pub fn party_entries(side: &SideView) -> Vec<MenuEntry<PartyIndex>> {
+    side.party
+        .iter()
+        .map(|c| MenuEntry {
+            label: format!("{} Lv{} {}/{}", c.nickname, c.level, c.hp, c.stats.max_hp),
+            enabled: !c.active && !c.fainted(),
+            value: c.party_index,
+        })
+        .collect()
+}
+
+/// Rows of the bag menu: every item with its count (empty bag: no rows). The value is the
+/// item id.
+#[must_use]
+pub fn bag_entries(bag: &BTreeMap<String, u32>) -> Vec<MenuEntry<String>> {
+    bag.iter()
+        .filter(|(_, n)| **n > 0)
+        .map(|(id, n)| MenuEntry {
+            label: format!("{} x{n}", display_name(id)),
+            enabled: true,
+            value: id.clone(),
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::*;
+    use pkrs_battle::{
+        Battle, BattleInput, NullBattleHooks, RngPolicy, SideId, SlotRef, battle_testkit,
+    };
+
+    fn battle() -> Battle {
+        let mut hooks = NullBattleHooks;
+        let mut setup = battle_testkit::wild_1v1();
+        let mut second = setup.player.party[0].clone();
+        second.nickname = "buddy".into();
+        setup.player.party.push(second);
+        let mut b = Battle::new(
+            setup,
+            battle_testkit::singles_config(),
+            battle_testkit::default_resources(),
+            RngPolicy::Fixed { seed: 7 },
+            &mut hooks,
+        )
+        .unwrap();
+        b.step(BattleInput::default(), &mut hooks).unwrap();
+        b
+    }
+
+    #[test]
+    fn action_menu_has_builtins_then_hook_entries() {
+        let mut menu = ActionMenu::builtin(SlotRef::new(SideId::Player, 0));
+        menu.options.insert(
+            1,
+            MenuOption {
+                id: "resonance:resonate".into(),
+                label: "text:resonance.menu".into(),
+            },
+        );
+        menu.options.push(MenuOption {
+            id: "dance".into(),
+            label: "Dance!".into(),
+        });
+        let entries = action_entries(&menu);
+        let labels: Vec<&str> = entries.iter().map(|e| e.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            ["FIGHT", "RESONATE", "BAG", "PARTY", "RUN", "Dance!"]
+        );
+        assert_eq!(
+            entries[1].value,
+            ActionKind::Custom("resonance:resonate".into())
+        );
+        assert_eq!(entries[4].value, ActionKind::Run);
+        assert!(entries.iter().all(|e| e.enabled));
+    }
+
+    #[test]
+    fn fight_menu_lists_moves_with_pp() {
+        let view = battle().view();
+        let mut hero = view
+            .creature(SlotRef::new(SideId::Player, 0))
+            .unwrap()
+            .clone();
+        let entries = fight_entries(&hero);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].label, "Tackle 35/35");
+        assert!(entries[0].enabled);
+        hero.moves[0].as_mut().unwrap().pp = 0;
+        assert!(!fight_entries(&hero)[0].enabled);
+    }
+
+    #[test]
+    fn party_menu_disables_active_and_fainted_members() {
+        let view = battle().view();
+        let mut side = view.side(SideId::Player).clone();
+        let entries = party_entries(&side);
+        assert_eq!(entries[0].label, "hero Lv5 40/40");
+        assert!(!entries[0].enabled, "active member");
+        assert!(entries[1].enabled);
+        side.party[1].hp = 0;
+        assert!(!party_entries(&side)[1].enabled, "fainted member");
+    }
+
+    #[test]
+    fn bag_menu_lists_items_with_counts() {
+        let bag = BTreeMap::from([("potion".to_owned(), 2), ("empty".to_owned(), 0)]);
+        let entries = bag_entries(&bag);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].label, "Potion x2");
+        assert_eq!(entries[0].value, "potion");
+        assert!(bag_entries(&BTreeMap::new()).is_empty());
+    }
+}

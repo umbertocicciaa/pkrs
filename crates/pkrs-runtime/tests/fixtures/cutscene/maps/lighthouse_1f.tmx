@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<map version="1.10" tiledversion="1.10.2" orientation="orthogonal" renderorder="right-down" width="10" height="10" tilewidth="16" tileheight="16" infinite="0" nextlayerid="3" nextobjectid="4">
+ <tileset firstgid="1" source="../tilesets/overworld.tsx"/>
+ <layer id="1" name="ground" width="10" height="10">
+  <data encoding="csv">
+1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1
+</data>
+ </layer>
+ <objectgroup id="2" name="objects">
+  <object id="1" name="keeper" type="npc" x="80" y="48" width="16" height="16">
+   <properties>
+    <property name="facing" value="down"/>
+    <property name="script" value="maps/lighthouse_1f.lua:old_keeper"/>
+   </properties>
+  </object>
+  <object id="2" name="stairs_hint" type="trigger" x="32" y="112" width="16" height="16">
+   <properties>
+    <property name="on_enter" value="stairs_hint"/>
+    <property name="once" type="bool" value="true"/>
+   </properties>
+  </object>
+  <object id="3" name="to_start" type="warp" x="144" y="144" width="16" height="16">
+   <properties>
+    <property name="to_map" value="start"/>
+    <property name="to_x" type="int" value="5"/>
+    <property name="to_y" type="int" value="7"/>
+   </properties>
+  </object>
+ </objectgroup>
+</map>

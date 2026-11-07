@@ -902,6 +902,7 @@ dependencies = [
  "pkrs-world",
  "thiserror",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

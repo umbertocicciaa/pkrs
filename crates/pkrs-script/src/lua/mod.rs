@@ -5,8 +5,17 @@
 
 mod ai;
 pub(crate) mod battle;
+mod camera;
 mod convert;
+mod dialogue;
+mod events;
+mod facade;
+mod game;
 mod hook_order;
+mod log;
+mod map;
+mod npc;
+mod player;
 mod plugin;
 mod sandbox;
 mod time;
@@ -28,11 +37,13 @@ use pkrs_core::GameRng;
 use pkrs_core::InputBuiltinPressed;
 
 use crate::error::{Result, ScriptError, split_location};
+use crate::events::{ListenerId, ListenerInfo, ScriptEvent};
 use crate::host::{
     BattleRequest, ScriptFiles, ScriptHost, ScriptLimits, ScriptOwner, ScriptValue, TaskId,
     TaskStatus, WaitRequest,
 };
 use crate::input_bridge::{LastScriptInput, ScriptInputSnapshot};
+use crate::world::ScriptWorld;
 
 /// Instructions between two budget checks.
 const HOOK_STRIDE: u32 = 1_000;
@@ -71,7 +82,10 @@ impl LuaScriptHost {
         lua.set_app_data(sandbox::Files(files));
         lua.set_app_data(sandbox::Rng(rng));
         lua.set_app_data(battle::Registry::default());
+        lua.set_app_data(events::EventRegistry::default());
+        lua.set_app_data(facade::WorldSlot::default());
         time::init(&lua);
+        npc::init(&lua).map_err(engine)?;
 
         let budget = Rc::new(Budget {
             limit: limits.instruction_budget,
@@ -124,6 +138,60 @@ impl LuaScriptHost {
     #[must_use]
     pub fn limits(&self) -> ScriptLimits {
         self.limits
+    }
+
+    /// Attaches the engine world the API v0 bindings (`game`, `map`, `npc`, `player`, `ui`,
+    /// `camera`) talk to (§9.1). Until then those calls raise a script error.
+    pub fn set_world(&mut self, world: Box<dyn ScriptWorld>) {
+        self.lua.set_app_data(facade::WorldSlot(Some(world)));
+    }
+
+    /// Detaches and returns the world set with [`set_world`](Self::set_world).
+    pub fn take_world(&mut self) -> Option<Box<dyn ScriptWorld>> {
+        self.lua
+            .app_data_mut::<facade::WorldSlot>()
+            .and_then(|mut slot| slot.0.take())
+    }
+
+    /// Unloads `owner` (e.g. the previous map's script on map change, §6.4): its event
+    /// listeners are removed and its `_ENV` is dropped, so the next chunk run for `owner`
+    /// starts from a fresh environment. Tasks it already started keep running until they
+    /// finish (§9.8). Returns the number of listeners removed.
+    pub fn unload_owner(&mut self, owner: &ScriptOwner) -> usize {
+        self.envs.remove(owner);
+        events::remove_owner(&self.lua, owner)
+    }
+
+    /// `true` if the project has a script file at `path` (e.g. `scripts/maps/route_1.lua`).
+    #[must_use]
+    pub fn script_exists(&self, path: &str) -> bool {
+        self.lua
+            .app_data_ref::<sandbox::Files>()
+            .is_some_and(|files| files.0.exists(path))
+    }
+
+    /// `true` if `owner` currently has an environment (a chunk ran for it and it was not
+    /// unloaded).
+    #[must_use]
+    pub fn is_loaded(&self, owner: &ScriptOwner) -> bool {
+        self.envs.contains_key(owner)
+    }
+
+    fn start_thread(
+        &mut self,
+        function: mlua::Function,
+        args: &[ScriptValue],
+    ) -> Result<(TaskId, TaskStatus)> {
+        let thread = self.lua.create_thread(function).map_err(engine)?;
+        let args = args
+            .iter()
+            .map(|a| convert::to_lua(&self.lua, a))
+            .collect::<mlua::Result<MultiValue>>()
+            .map_err(engine)?;
+        let id = self.next_task;
+        self.next_task = self.next_task.wrapping_add(1).max(1);
+        let status = self.run_task(id, thread, args)?;
+        Ok((id, status))
     }
 
     fn env(&mut self, owner: &ScriptOwner) -> Result<Table> {
@@ -455,16 +523,7 @@ impl ScriptHost for LuaScriptHost {
                 name: name.to_owned(),
             });
         };
-        let thread = self.lua.create_thread(function).map_err(engine)?;
-        let args = args
-            .iter()
-            .map(|a| convert::to_lua(&self.lua, a))
-            .collect::<mlua::Result<MultiValue>>()
-            .map_err(engine)?;
-        let id = self.next_task;
-        self.next_task = self.next_task.wrapping_add(1).max(1);
-        let status = self.run_task(id, thread, args)?;
-        Ok((id, status))
+        self.start_thread(function, args)
     }
 
     fn resume_task(&mut self, task: TaskId, answer: ScriptValue) -> Result<TaskStatus> {
@@ -483,6 +542,40 @@ impl ScriptHost for LuaScriptHost {
     fn set_tick(&mut self, tick: u64) {
         time::set_tick(&self.lua, tick);
     }
+
+    fn emit_event(&mut self, event: ScriptEvent) {
+        events::emit(&self.lua, event);
+    }
+
+    fn take_events(&mut self) -> Vec<ScriptEvent> {
+        events::take(&self.lua)
+    }
+
+    fn listeners(&mut self, event: &str) -> Vec<ListenerInfo> {
+        events::listeners(&self.lua, event)
+    }
+
+    fn start_listener(
+        &mut self,
+        listener: ListenerId,
+        args: &[ScriptValue],
+    ) -> Result<(TaskId, TaskStatus)> {
+        let function = events::function(&self.lua, listener)
+            .ok_or_else(|| ScriptError::Engine(format!("no event listener with id {listener}")))?;
+        self.start_thread(function, args)
+    }
+}
+
+/// Installs the API v0 tables (§9.1) into a new environment. `time` and the `ui` screen
+/// functions are installed by their own modules first.
+fn install_api_v0(lua: &Lua, env: &Table, owner: &ScriptOwner) -> mlua::Result<()> {
+    game::install(lua, env)?;
+    map::install(lua, env)?;
+    player::install(lua, env)?;
+    dialogue::install(lua, env)?;
+    camera::install(lua, env)?;
+    log::install(lua, env, owner)?;
+    events::install(lua, env, owner)
 }
 
 /// Reads what a yielded task waits for; `battle.start_*` yields a `{ wait = "battle" }` table,

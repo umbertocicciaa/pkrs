@@ -52,7 +52,8 @@ pub struct LoadOrder {
 }
 
 impl LoadOrder {
-    /// Rank of [`ScriptOwner::Game`].
+    /// Rank of [`ScriptOwner::Game`] and of per-map scripts ([`ScriptOwner::Map`]): game
+    /// content runs after every plugin at equal priority.
     pub const GAME_RANK: u32 = u32::MAX;
     /// Rank of a plugin owner that was never [`bind`](Self::bind)-ed.
     pub const UNBOUND_RANK: u32 = u32::MAX - 1;
@@ -75,7 +76,7 @@ impl LoadOrder {
     #[must_use]
     pub fn rank(&self, owner: &ScriptOwner) -> u32 {
         match owner {
-            ScriptOwner::Game => Self::GAME_RANK,
+            ScriptOwner::Game | ScriptOwner::Map(_) => Self::GAME_RANK,
             ScriptOwner::Plugin(id) => self.ranks.get(id).copied().unwrap_or(Self::UNBOUND_RANK),
         }
     }
@@ -271,10 +272,11 @@ impl HookTable {
     }
 }
 
-fn owner_label(owner: &ScriptOwner) -> &str {
+fn owner_label(owner: &ScriptOwner) -> String {
     match owner {
-        ScriptOwner::Game => "game",
-        ScriptOwner::Plugin(id) => id,
+        ScriptOwner::Game => "game".to_owned(),
+        ScriptOwner::Plugin(id) => id.clone(),
+        ScriptOwner::Map(id) => format!("map:{id}"),
     }
 }
 
@@ -417,6 +419,10 @@ mod tests {
             LoadOrder::UNBOUND_RANK
         );
         assert_eq!(order.rank(&ScriptOwner::Game), LoadOrder::GAME_RANK);
+        assert_eq!(
+            order.rank(&ScriptOwner::Map("town".into())),
+            LoadOrder::GAME_RANK
+        );
         assert!(order.rank(&ScriptOwner::plugin("addon")) < LoadOrder::UNBOUND_RANK);
     }
 

@@ -6,7 +6,7 @@
 
 use mlua::{Lua, Table};
 
-use super::{LuaScriptHost, battle};
+use super::{LuaScriptHost, battle, events};
 use crate::chain::{ChainKey, HookKind, HookTable, HookTableEntry, LoadOrder};
 use crate::host::ScriptOwner;
 
@@ -51,9 +51,8 @@ pub(super) fn chain_key(lua: &Lua, owner: &ScriptOwner, priority: i64) -> ChainK
 }
 
 impl LuaScriptHost {
-    /// The resolved hook table: every `battle.on` hook (and, once registered through
-    /// `events.on`, every world event) with its handlers in chain order (§9.4). This is what
-    /// `pkrs check --plugins` prints.
+    /// The resolved hook table: every `battle.on` hook and every `events.on` world event with
+    /// its handlers in chain order (§9.4). This is what `pkrs check --plugins` prints.
     #[must_use]
     pub fn hook_table(&self) -> HookTable {
         let mut table = HookTable::default();
@@ -65,6 +64,15 @@ impl LuaScriptHost {
                     disabled: h.is_disabled(),
                 });
             }
+        }
+        for (name, chain) in events::chains(&self.lua) {
+            table.add_chain(HookKind::Event, &name, &chain, |_, (owner, priority)| {
+                HookTableEntry {
+                    owner: owner.clone(),
+                    priority: *priority,
+                    disabled: false,
+                }
+            });
         }
         table
     }

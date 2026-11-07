@@ -66,7 +66,7 @@ pub(super) fn harden_globals(lua: &Lua) -> mlua::Result<()> {
 }
 
 /// `"<file>:<line>: "` for the Lua function that called the current Rust callback.
-fn caller_location(lua: &Lua) -> String {
+pub(super) fn caller_location(lua: &Lua) -> String {
     lua.inspect_stack(1, |d| {
         let src = d.source().short_src.map(|s| s.into_owned());
         match (src, d.current_line()) {
@@ -77,7 +77,7 @@ fn caller_location(lua: &Lua) -> String {
     .unwrap_or_default()
 }
 
-fn located_error(lua: &Lua, message: impl AsRef<str>) -> mlua::Error {
+pub(super) fn located_error(lua: &Lua, message: impl AsRef<str>) -> mlua::Error {
     mlua::Error::runtime(format!("{}{}", caller_location(lua), message.as_ref()))
 }
 
@@ -145,6 +145,7 @@ pub(super) fn build_env(
     super::ai::install(lua, &env, owner)?;
     super::time::install(lua, &env)?;
     super::ui::install(lua, &env, owner).map_err(mlua::Error::external)?;
+    super::install_api_v0(lua, &env, owner)?;
     Ok(env)
 }
 

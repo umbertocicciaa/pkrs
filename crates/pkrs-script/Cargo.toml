@@ -19,5 +19,8 @@ thiserror.workspace = true
 tracing.workspace = true
 mlua.workspace = true
 
+[dev-dependencies]
+insta.workspace = true
+
 [lints]
 workspace = true

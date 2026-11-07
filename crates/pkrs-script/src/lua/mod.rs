@@ -6,6 +6,7 @@
 mod ai;
 pub(crate) mod battle;
 mod convert;
+mod hook_order;
 mod plugin;
 mod sandbox;
 mod time;

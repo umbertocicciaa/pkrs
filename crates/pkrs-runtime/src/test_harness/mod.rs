@@ -167,6 +167,7 @@ impl ScenarioDriver {
         let (renderer, log) = headless_renderer(project.display());
         let mut host = ProjectHost::with_scripts(project, renderer, scripts)?;
         host.set_battle_seed(seed);
+        host.set_encounter_seed(seed);
         let last_overlay = host.overlay().map(|o| o.request().clone());
         Ok(Self {
             host,

@@ -7,8 +7,11 @@
 //! - **Adapter:** [`TiledImporter`] (feature `tiled`, default) reads `.tmx` + `.tsx` (§6.1).
 //! - **Conventions:** [`conventions`] maps layer names and properties onto the model and reports
 //!   every [`ConventionViolation`] at once, so `pkrs check` can reuse it.
+//! - **Encounters:** [`encounter`] finds the `encounters` rect and table of a tile and rolls
+//!   for a wild encounter after a step.
 
 pub mod conventions;
+pub mod encounter;
 mod error;
 mod importer;
 mod map;
@@ -17,6 +20,9 @@ pub mod raw;
 pub mod world_layout;
 
 pub use conventions::{ConventionViolation, ViolationKind, ViolationLocation, build_map};
+pub use encounter::{
+    EncounterSite, WildEncounter, encounter_site, roll_step_encounter, unknown_encounter_tables,
+};
 pub use error::{Result, WorldError};
 #[cfg(feature = "tiled")]
 pub use importer::TiledImporter;

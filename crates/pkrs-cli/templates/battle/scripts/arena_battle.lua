@@ -12,5 +12,5 @@ return function()
       ui.say("You lost. Better luck next time!")
     end
   until not ui.yes_no("Battle again?")
-  ui.say("Talk to the rival when you want another battle.")
+  ui.say("Walk up to the rival and talk to them for another battle.")
 end

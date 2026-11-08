@@ -9,6 +9,7 @@ redistribute them without attribution.
 | `tilesets/overworld.png` | pkrs contributors | CC0-1.0 |
 | `tilesets/overworld.tsx` | pkrs contributors | CC0-1.0 |
 | `sprites/player.png` | pkrs contributors | CC0-1.0 |
+| `sprites/rival.png` | pkrs contributors | CC0-1.0 |
 | `maps/arena.tmx` | pkrs contributors | CC0-1.0 |
 
 When you add third-party assets, list them here with their author and license.

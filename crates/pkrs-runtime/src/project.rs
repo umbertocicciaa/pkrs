@@ -335,6 +335,8 @@ pub struct ProjectHost {
     walker: GridStepper,
     player_sprite: (TextureHandle, Rect),
     npc_sprite: (TextureHandle, Rect),
+    /// `sprites/<id>.png` per NPC `sprite` id (the marker when it is missing or invalid).
+    npc_sprites: BTreeMap<String, (TextureHandle, Rect)>,
     item_sprite: (TextureHandle, Rect),
     ticks: u64,
     warp_phase: WarpPhase,
@@ -439,6 +441,7 @@ impl ProjectHost {
             walker: GridStepper::new(start, facing),
             player_sprite,
             npc_sprite,
+            npc_sprites: BTreeMap::new(),
             item_sprite,
             ticks: 0,
             warp_phase: WarpPhase::None,
@@ -874,23 +877,56 @@ impl ProjectHost {
         let Some(scripts) = self.scripts.as_ref() else {
             return;
         };
-        let placed: Vec<(u32, GridPos, (TextureHandle, Rect))> = {
+        let (npcs, items): (Vec<_>, Vec<_>) = {
             let world = scripts.world().get();
             let npcs = world
                 .npcs
                 .iter()
                 .filter(|n| n.visible)
-                .map(|n| (n.object_id, n.walker.pos(), self.npc_sprite));
+                .map(|n| (n.object_id, n.walker.pos(), n.sprite.clone()))
+                .collect();
             let items = world
                 .entities
                 .iter()
                 .filter(|e| matches!(e.kind, EntityKind::Item { .. }))
-                .map(|e| (e.object_id, e.rect.origin(), self.item_sprite));
-            npcs.chain(items).collect()
+                .map(|e| (e.object_id, e.rect.origin()))
+                .collect();
+            (npcs, items)
         };
-        for (id, pos, (texture, src)) in placed {
+        for (id, pos, sprite) in npcs {
+            let (texture, src) = self.npc_sprite_for(sprite.as_deref());
             self.scene.place_entity(id, pos, texture, src, false);
         }
+        let (texture, src) = self.item_sprite;
+        for (id, pos) in items {
+            self.scene.place_entity(id, pos, texture, src, false);
+        }
+    }
+
+    /// The sprite of an NPC: `sprites/<sprite>.png` when it names one that loads, else the
+    /// marker. Each id is loaded once.
+    fn npc_sprite_for(&mut self, sprite: Option<&str>) -> (TextureHandle, Rect) {
+        let Some(id) = sprite else {
+            return self.npc_sprite;
+        };
+        if let Some(found) = self.npc_sprites.get(id) {
+            return *found;
+        }
+        let (tw, th) = (self.scene.map().tile_width, self.scene.map().tile_height);
+        let path = format!("sprites/{id}.png");
+        let found = match load_sprite(&self.project, &mut self.renderer, &path, tw, th) {
+            Ok(Some(found)) => found,
+            Ok(None) => {
+                tracing::warn!(sprite = id, %path, "NPC sprite not found, using the marker");
+                self.npc_sprite
+            }
+            Err(err) => {
+                tracing::warn!(sprite = id, %path, %err, "NPC sprite failed to load, using the marker");
+                self.npc_sprite
+            }
+        };
+        self.npc_sprites.insert(id.to_owned(), found);
+        found
     }
 
     /// Moves NPC entities to their walkers' interpolated tiles; hides hidden ones.
@@ -901,25 +937,31 @@ impl ProjectHost {
         for id in scripts.take_removed_entities() {
             self.scene.remove_entity(id);
         }
-        let npcs: Vec<(u32, (f32, f32), bool)> = scripts
+        let npcs: Vec<_> = scripts
             .world()
             .get()
             .npcs
             .iter()
-            .map(|n| (n.object_id, n.walker.tile_position(), n.visible))
+            .map(|n| {
+                let pos = n.walker.tile_position();
+                (n.object_id, pos, n.visible, n.sprite.clone())
+            })
             .collect();
         let (tw, th) = (self.scene.map().tile_width, self.scene.map().tile_height);
-        let (texture, src) = self.npc_sprite;
-        for (id, (tx, ty), visible) in npcs {
+        for (id, (tx, ty), visible, sprite) in npcs {
             if !visible {
                 self.scene.remove_entity(id);
                 continue;
             }
+            // Looked up every tick so `npc:set_sprite` shows at once (cached after the first load).
+            let (texture, src) = self.npc_sprite_for(sprite.as_deref());
             if self.scene.entity_mut(id).is_none() {
                 let tile = GridPos::new(tx.round() as i32, ty.round() as i32);
                 self.scene.place_entity(id, tile, texture, src, false);
             }
             if let Some(entity) = self.scene.entity_mut(id) {
+                entity.texture = texture;
+                entity.src = src;
                 entity.pos.set(tx * tw as f32, ty * th as f32);
             }
         }
@@ -1377,15 +1419,33 @@ fn load_player_sprite(
     tw: u32,
     th: u32,
 ) -> Result<(TextureHandle, Rect), ProjectError> {
-    let path = VfsPath::new(PLAYER_SPRITE)?;
-    if project.vfs.exists(&path) {
-        let bytes = project.vfs.read(&path)?;
-        let (tex, w, h) = renderer.load_texture(&bytes)?;
-        let fw = w.min(tw.max(1));
-        return Ok((tex, Rect::new(0.0, 0.0, fw as f32, h.min(th * 2) as f32)));
+    if let Some(sprite) = load_sprite(project, renderer, PLAYER_SPRITE, tw, th)? {
+        return Ok(sprite);
     }
     // No sprite in the project: a plain marker the size of one tile.
     marker_sprite(renderer, tw, th, [230, 60, 60, 255])
+}
+
+/// The PNG at `path` with its first frame (one tile wide, at most two tiles tall), or `None`
+/// when the project has no such file.
+fn load_sprite(
+    project: &Project,
+    renderer: &mut Renderer,
+    path: &str,
+    tw: u32,
+    th: u32,
+) -> Result<Option<(TextureHandle, Rect)>, ProjectError> {
+    let path = VfsPath::new(path)?;
+    if !project.vfs.exists(&path) {
+        return Ok(None);
+    }
+    let bytes = project.vfs.read(&path)?;
+    let (tex, w, h) = renderer.load_texture(&bytes)?;
+    let fw = w.min(tw.max(1));
+    Ok(Some((
+        tex,
+        Rect::new(0.0, 0.0, fw as f32, h.min(th * 2) as f32),
+    )))
 }
 
 /// A one-tile solid-colour sprite (player without `sprites/player.png`, NPCs).

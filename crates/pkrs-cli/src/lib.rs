@@ -6,5 +6,6 @@
 
 pub mod check;
 pub mod plugin;
+pub mod report;
 pub mod run;
 pub mod template;

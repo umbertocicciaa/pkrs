@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<map version="1.10" tiledversion="1.10.2" orientation="orthogonal" renderorder="right-down" width="4" height="4" tilewidth="16" tileheight="16" infinite="0" nextlayerid="3" nextobjectid="3">
+ <tileset firstgid="1" source="../tilesets/overworld.tsx"/>
+ <layer id="1" name="ground" width="4" height="4">
+  <data encoding="csv">
+1,1,1,1,
+1,1,1,1,
+1,1,1,1,
+1,1,1,1
+</data>
+ </layer>
+ <objectgroup id="2" name="objects">
+  <object id="1" name="greeting" type="trigger" x="16" y="0" width="16" height="16">
+   <properties>
+    <property name="on_enter" value="greet"/>
+    <property name="once" type="bool" value="true"/>
+   </properties>
+  </object>
+  <object id="2" name="welcome" type="trigger" x="32" y="0" width="16" height="16">
+   <properties>
+    <property name="on_enter" value="welcome"/>
+    <property name="once" type="bool" value="true"/>
+   </properties>
+  </object>
+ </objectgroup>
+</map>

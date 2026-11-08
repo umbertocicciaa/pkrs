@@ -1,0 +1,6 @@
+Species(
+    id: "emberkit",
+    types: ["fire"],
+    base_stats: (hp: 45, atk: 52, def: 40, spa: 60, spd: 50, spe: 65),
+    learnset: [(level: 1, move: "scratch")],
+)

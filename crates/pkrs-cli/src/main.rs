@@ -1,9 +1,13 @@
 //! The `pkrs` command-line tool (§2.3).
 //!
-//! Implemented: `pkrs new` (one-shot and battle templates), `pkrs run`, `pkrs plugin new` and a first
-//! `pkrs check` (manifest and plugin set; `--plugins` prints the resolved load order and hook
-//! table, §9.4). `build` and `upgrade` arrive with their milestones (M6–M7).
+//! Implemented: `pkrs new` (one-shot and battle templates), `pkrs run`, `pkrs plugin new` and
+//! `pkrs check` (§8.2 validation with source snippets; `--plugins` also prints the resolved
+//! load order and hook table, §9.4). `build` and `upgrade` arrive with their milestones (M7).
+//!
+//! `pkrs check` exit codes: `0` no errors (warnings allowed), `1` errors found (or warnings
+//! with `--deny-warnings`), `2` the check could not run (bad arguments, no project).
 
+use std::io::IsTerminal as _;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -11,6 +15,7 @@ use anyhow::Context as _;
 use clap::{Parser, Subcommand, ValueEnum};
 use pkrs_cli::check;
 use pkrs_cli::plugin::{self, PluginVars};
+use pkrs_cli::report::{self, ReportStyle};
 use pkrs_cli::run::{self, RUNTIME_ENV, RunRequest};
 use pkrs_cli::template::{self, Template, TemplateVars};
 use tracing_subscriber::EnvFilter;
@@ -79,11 +84,15 @@ enum Command {
         #[arg(long)]
         ticks: Option<u64>,
     },
-    /// Validate the project (manifest and plugin set). Non-zero exit on errors.
+    /// Validate the project: manifest, plugins, data, maps and Lua syntax. Exit code 1 on
+    /// errors (2 when the check cannot run).
     Check {
         /// Also load the enabled plugins and print the resolved hook table.
         #[arg(long)]
         plugins: bool,
+        /// Fail (exit code 1) on warnings too.
+        #[arg(long)]
+        deny_warnings: bool,
         /// Project folder (default: the nearest folder with a pkrs.toml).
         #[arg(long)]
         project: Option<PathBuf>,
@@ -119,10 +128,15 @@ fn main() -> ExitCode {
         Ok(code) => code,
         Err(err) => {
             eprintln!("error: {err:#}");
-            ExitCode::FAILURE
+            ExitCode::from(EXIT_CANNOT_RUN)
         }
     }
 }
+
+/// Exit code of `pkrs check` when content has errors.
+const EXIT_INVALID: u8 = 1;
+/// Exit code when a command could not run at all.
+const EXIT_CANNOT_RUN: u8 = 2;
 
 fn execute(cli: Cli) -> anyhow::Result<ExitCode> {
     match cli.command {
@@ -143,24 +157,37 @@ fn execute(cli: Cli) -> anyhow::Result<ExitCode> {
             println!("Next: cd {} && pkrs run", dest.display());
             Ok(ExitCode::SUCCESS)
         }
-        Command::Check { plugins, project } => {
+        Command::Check {
+            plugins,
+            deny_warnings,
+            project,
+        } => {
             let project = project_root(project)?;
             let report = check::check_project(&project, plugins)?;
             print!("{report}");
-            for err in &report.data_errors {
-                eprintln!("error: {err}");
+            if !report.diagnostics.is_empty() {
+                let style = ReportStyle {
+                    color: std::env::var_os("NO_COLOR").is_none()
+                        && std::io::stderr().is_terminal(),
+                    ..ReportStyle::default()
+                };
+                let source = |path: &str| check::read_source(&project, path);
+                eprint!(
+                    "{}",
+                    report::render_diagnostics(&report.diagnostics, &source, style)
+                );
             }
-            for err in &report.content_errors {
-                eprintln!("error: {err}");
-            }
-            for failed in &report.failed {
-                eprintln!("error: {failed}");
-            }
-            Ok(if report.is_ok() {
+            Ok(if report.passes(deny_warnings) {
                 println!("check passed");
                 ExitCode::SUCCESS
             } else {
-                ExitCode::FAILURE
+                let why = if report.is_ok() {
+                    "warnings are denied"
+                } else {
+                    "errors found"
+                };
+                eprintln!("check failed: {why}");
+                ExitCode::from(EXIT_INVALID)
             })
         }
         Command::Plugin {
@@ -329,15 +356,29 @@ mod tests {
             cli.command,
             Command::Check {
                 plugins: true,
+                deny_warnings: false,
                 project: None
             }
         ));
         let cli = Cli::try_parse_from(["pkrs", "check", "--project", "game"]).unwrap();
-        let Command::Check { plugins, project } = cli.command else {
+        let Command::Check {
+            plugins,
+            deny_warnings,
+            project,
+        } = cli.command
+        else {
             panic!("expected check")
         };
-        assert!(!plugins);
+        assert!(!plugins && !deny_warnings);
         assert_eq!(project, Some(PathBuf::from("game")));
+        let cli = Cli::try_parse_from(["pkrs", "check", "--deny-warnings"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Check {
+                deny_warnings: true,
+                ..
+            }
+        ));
     }
 
     #[test]

@@ -35,6 +35,10 @@
 //! - **Hook chains:** [`chain`] orders handlers by priority, then plugin load order, then
 //!   registration order, threads the value through them and stops on cancel (§9.4).
 //!   [`LuaScriptHost::hook_table`] returns the resolved [`HookTable`].
+//! - **Validation (§8.2, §2.3):** [`validate::validate_project`] runs every static check of
+//!   `pkrs check` and the runtime's start-up check (manifest, plugin graph, content stages 1–3,
+//!   compile-only Lua syntax via [`check_lua_syntax`], maps, tick-listener and `once`-trigger
+//!   warnings) and returns vendor-free diagnostics.
 //! - **Test scenarios (§15.2):** [`LuaScenario`] runs a `tests/*.lua` scenario in its own
 //!   sandboxed Lua state with the scripted-input test API; [`scenario`] holds the engine-side
 //!   snapshot, step and failure types the runtime's harness uses.
@@ -49,6 +53,7 @@ pub mod plugin;
 pub mod registry;
 pub mod scenario;
 mod scheduler;
+pub mod validate;
 mod world;
 
 pub use chain::{
@@ -64,7 +69,7 @@ pub use host::{
 pub use input_bridge::ScriptInputSnapshot;
 pub use lua::{
     DEFAULT_AI_MAX_FAILURES, DEFAULT_MAX_FAILURES, GfxOp, HOOK_NAMES, LuaAi, LuaBattleHooks,
-    LuaScenario, LuaScriptHost, SCENARIO_API, UiScreenMethod,
+    LuaScenario, LuaScriptHost, LuaSyntaxError, SCENARIO_API, UiScreenMethod, check_lua_syntax,
 };
 pub use plugin::{
     ContentError, PluginError, PluginErrors, PluginHost, PluginInitError, PluginLoadReport,

@@ -1,0 +1,15 @@
+# Broken on purpose: invalid manifest values; the data is still checked.
+[game]
+name = "Broken Manifest"
+id   = "Not An Id"
+
+[engine]
+version = "0.0"
+api     = 1
+
+[display]
+scale = 40
+
+[start]
+map      = "town"
+position = [0, 0]

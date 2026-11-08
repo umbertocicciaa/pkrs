@@ -1,0 +1,12 @@
+# Valid, but with warnings: `pkrs check` passes, `pkrs check --deny-warnings` fails.
+[game]
+name = "Warnings Only"
+id   = "com.example.warnings-only"
+
+[engine]
+version = "0.0"
+api     = 1
+
+[start]
+map      = "town"
+position = [1, 1]

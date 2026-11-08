@@ -1,0 +1,54 @@
+---
+source: crates/pkrs-cli/tests/check_cli.rs
+expression: "transcript(&broken(\"broken-plugins\"), &[])"
+---
+exit code: 1
+--- stdout
+plugins: none enabled
+--- stderr
+plugin::manifest-invalid
+
+  × `plugin.version`: invalid version `one`: unexpected character 'o' while parsing major version
+  │ number
+   ╭─[plugins/bad-manifest/plugin.toml:4:11]
+ 3 │ name    = "Bad Manifest"
+ 4 │ version = "one"
+   ·           ──┬──
+   ·             ╰── invalid version `one`: unexpected character 'o' while parsing major version number
+ 5 │ api     = 1
+   ╰────
+
+plugin::not-found
+
+  × `plugins.enabled[2]`: plugin `ghost` is enabled but `plugins/ghost/plugin.toml` does not exist
+    ╭─[pkrs.toml:15:32]
+ 14 │ [plugins]
+ 15 │ enabled = ["loop-a", "loop-b", "ghost", "bad-manifest"]
+    ·                                ───┬───
+    ·                                   ╰── plugin not found
+    ╰────
+  help: create it with `pkrs plugin new ghost`, or remove it from the list
+
+plugin::cycle
+
+  × plugin load order has a cycle: loop-a -> loop-b -> loop-a
+    ╭─[pkrs.toml:15:11]
+ 14 │ [plugins]
+ 15 │ enabled = ["loop-a", "loop-b", "ghost", "bad-manifest"]
+    ·           ──────────────────────┬──────────────────────
+    ·                                 ╰── these plugins cannot be ordered
+    ╰────
+  help: remove a `dependencies` entry or a `[load] after` hint to break the cycle
+
+script::syntax
+
+  × Lua syntax error: ')' expected (to close '(' at line 4) near 'end'
+   ╭─[plugins/loop-b/init.lua:5:1]
+ 4 │   log.info("entered " .. p.id
+ 5 │ end)
+   · ──┬─
+   ·   ╰── ')' expected (to close '(' at line 4) near 'end'
+   ╰────
+
+4 errors, 0 warnings
+check failed: errors found

@@ -916,7 +916,10 @@ version = "0.0.0"
 dependencies = [
  "pkrs-core",
  "pkrs-data",
+ "ron",
+ "serde",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]

@@ -51,6 +51,7 @@ pub mod input_bridge;
 mod lua;
 pub mod plugin;
 pub mod registry;
+pub mod save_migration;
 pub mod scenario;
 mod scheduler;
 pub mod validate;
@@ -76,6 +77,7 @@ pub use plugin::{
     PluginPlan, load_plugins, merge_content, plan_plugins,
 };
 pub use registry::{FieldActionInfo, FieldActionSource, FieldContext, InputActionRequest};
+pub use save_migration::{MIGRATE_FUNCTION, MIGRATE_SCRIPT, ScriptSaveMigration};
 pub use scheduler::{
     PendingUiPush, Scheduler, StepReport, TaskKind, TaskOutcome, WaitCondition, WakeSignal,
 };

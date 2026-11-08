@@ -2,28 +2,76 @@
 //!
 //! The overworld keeps one `WorldState` for the whole session. Engine events consult it before
 //! running scripts (a fired `once` trigger stays silent, a picked-up item is not spawned again)
-//! and it survives leaving and re-entering maps. Serialising it to disk is M6 (§12); this module
-//! only defines the in-memory model.
+//! and it survives leaving and re-entering maps. It is also the `world` part of
+//! [`SaveData`](crate::SaveData): the session pieces the runtime keeps elsewhere during play
+//! (player position, party, RNG streams) are copied into it when a snapshot is taken (§12).
 //!
 //! Map state is keyed by **map id**, then by the object's **persistent key**: its `uid`
 //! property if set, otherwise its Tiled object id (`pkrs_world::MapObject::persistent_key`).
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use pkrs_core::{Direction, GridPos};
+use pkrs_core::{Direction, GridPos, RngState};
+use serde::{Deserialize, Serialize};
 
+use crate::model::{PlayerPlacement, SavedCreature};
 use crate::value::Value;
 
 /// Persistent state of one map object (NPC, item, sign, trigger) that differs from the map file.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ObjectState {
     /// Hidden (`npc:hide()`); hidden objects are not drawn, block nothing and cannot be
     /// interacted with or triggered.
+    #[serde(skip_serializing_if = "is_false")]
     pub hidden: bool,
     /// The item was picked up; the item ball is not spawned again.
+    #[serde(skip_serializing_if = "is_false")]
     pub picked_up: bool,
     /// Where the object stands now when a script moved it away from its map position.
+    #[serde(with = "tile_repr")]
     pub moved_to: Option<(GridPos, Direction)>,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+/// Saved form of a tile and facing: `{ "x": 1, "y": 2, "facing": "up" }`.
+pub(crate) mod tile_repr {
+    use pkrs_core::{Direction, GridPos};
+    use serde::de::Error as _;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    #[derive(Serialize, Deserialize)]
+    struct Tile {
+        x: i32,
+        y: i32,
+        facing: String,
+    }
+
+    pub(crate) fn serialize<S: Serializer>(
+        value: &Option<(GridPos, Direction)>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        value
+            .map(|(pos, facing)| Tile {
+                x: pos.x,
+                y: pos.y,
+                facing: facing.to_string(),
+            })
+            .serialize(serializer)
+    }
+
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<(GridPos, Direction)>, D::Error> {
+        let Some(tile) = Option::<Tile>::deserialize(deserializer)? else {
+            return Ok(None);
+        };
+        let facing = tile.facing.parse::<Direction>().map_err(D::Error::custom)?;
+        Ok(Some((GridPos::new(tile.x, tile.y), facing)))
+    }
 }
 
 impl ObjectState {
@@ -35,7 +83,8 @@ impl ObjectState {
 }
 
 /// Persistent state of one map (§6.5): object state, fired `once` triggers and map variables.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct MapState {
     objects: BTreeMap<String, ObjectState>,
     fired: BTreeSet<String>,
@@ -124,10 +173,15 @@ impl MapState {
     }
 }
 
-/// Session-wide story state (§6.5, §12): flags, variables, bag, money and per-map state.
+/// Session-wide story state (§6.5, §12): flags, variables, bag, money and per-map state, plus
+/// the player's position, party, RNG streams and save-owned options of a snapshot.
 ///
-/// Party, PC boxes, position and RNG state join this model with the save system (M6).
-#[derive(Clone, Debug, Default, PartialEq)]
+/// During play the runtime owns the live player position, party and RNG streams; it writes
+/// them into [`player`](Self::player), [`party`](Self::party) and [`rng`](Self::rng) when it
+/// takes a save snapshot and reads them back when it restores one. PC boxes join this model
+/// with creature storage.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct WorldState {
     flags: BTreeMap<String, bool>,
     vars: BTreeMap<String, Value>,
@@ -135,6 +189,14 @@ pub struct WorldState {
     /// Money.
     pub money: i64,
     maps: BTreeMap<String, MapState>,
+    /// Current map, tile, facing and field states (`None` until a snapshot sets it).
+    pub player: Option<PlayerPlacement>,
+    /// The player's party, in party order.
+    pub party: Vec<SavedCreature>,
+    /// RNG streams by name ([`RNG_BATTLE`](crate::RNG_BATTLE), …).
+    pub rng: BTreeMap<String, RngState>,
+    /// Text language chosen in this save (`None`: the game's default language).
+    pub language: Option<String>,
 }
 
 impl WorldState {

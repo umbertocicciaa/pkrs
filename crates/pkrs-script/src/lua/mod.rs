@@ -169,6 +169,21 @@ impl LuaScriptHost {
         events::remove_owner(&self.lua, owner)
     }
 
+    /// State of the RNG behind `math.random`, for saves (§12).
+    #[must_use]
+    pub fn rng_state(&self) -> Option<pkrs_core::RngState> {
+        self.lua
+            .app_data_ref::<sandbox::Rng>()
+            .map(|rng| rng.0.state())
+    }
+
+    /// Restores the RNG behind `math.random` from a save (§12).
+    pub fn restore_rng_state(&mut self, state: pkrs_core::RngState) {
+        if let Some(mut rng) = self.lua.app_data_mut::<sandbox::Rng>() {
+            rng.0.restore_state(state);
+        }
+    }
+
     /// `true` if the project has a script file at `path` (e.g. `scripts/maps/route_1.lua`).
     #[must_use]
     pub fn script_exists(&self, path: &str) -> bool {

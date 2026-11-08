@@ -35,6 +35,10 @@ use crate::party::PlayerParty;
 use crate::scene::{MapScene, NeighborBackdrop, PLAYER_ENTITY, tile_sheet};
 use crate::ui_theme::UiTheme;
 
+mod save;
+
+pub use save::{GameSaveError, game_migration, save_store};
+
 /// Scripting API levels this runtime supports (§9.7).
 pub const SUPPORTED_API: std::ops::RangeInclusive<u32> = 1..=1;
 
@@ -371,6 +375,8 @@ pub struct ProjectHost {
     post_battle: Option<(BattleResult, PostBattle)>,
     /// Wild encounter tables and roll stream (§6.3).
     encounters: Encounters,
+    /// Play time and plugin data carried over from a loaded save (§12).
+    save_session: save::SaveSession,
 }
 
 /// Seed of the stream battles derive their RNG from until the save owns the game RNG (§12).
@@ -466,6 +472,7 @@ impl ProjectHost {
             party: None,
             post_battle: None,
             encounters: Encounters::default(),
+            save_session: save::SaveSession::default(),
         };
         host.bootstrap_world_layout()?;
         if let Some(scripts) = host.scripts.as_mut() {
@@ -633,11 +640,22 @@ impl ProjectHost {
         if let Some(scripts) = self.scripts.as_mut() {
             scripts.exit_map();
         }
+        self.enter_loaded_map(map, pending.to, facing)
+    }
+
+    /// Makes `map` (already loaded, the previous map already exited) the active map with the
+    /// player on `to` facing `facing` (warps, loading a save).
+    fn enter_loaded_map(
+        &mut self,
+        map: Map,
+        to: GridPos,
+        facing: Direction,
+    ) -> Result<(), ProjectError> {
         let textures = upload_map_textures(&self.project, &mut self.renderer, &map)?;
-        if !map.grid.in_bounds(pending.to) {
+        if !map.grid.in_bounds(to) {
             return Err(ProjectError::StartOutOfBounds {
                 map: map.id.clone(),
-                pos: pending.to,
+                pos: to,
                 width: map.width,
                 height: map.height,
             });
@@ -645,18 +663,18 @@ impl ProjectHost {
         let mut scene = MapScene::new(map, &textures)?;
         scene.place_entity(
             PLAYER_ENTITY,
-            pending.to,
+            to,
             self.player_sprite.0,
             self.player_sprite.1,
             false,
         );
         self.scene = scene;
         self.active_textures = textures;
-        self.walker = GridStepper::new(pending.to, facing);
-        self.player_tile = pending.to;
-        tracing::info!(map = %self.scene.map().id, pos = %pending.to, "map_enter (warp)");
+        self.walker = GridStepper::new(to, facing);
+        self.player_tile = to;
+        tracing::info!(map = %self.scene.map().id, pos = %to, "map_enter (warp)");
         if let Some(scripts) = self.scripts.as_mut() {
-            scripts.enter_map(self.scene.map(), pending.to, facing);
+            scripts.enter_map(self.scene.map(), to, facing);
         }
         self.place_npcs();
         self.refresh_neighbors()?;

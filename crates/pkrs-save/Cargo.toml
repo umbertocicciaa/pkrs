@@ -11,6 +11,9 @@ publish.workspace = true
 pkrs-core.workspace = true
 pkrs-data.workspace = true
 thiserror.workspace = true
+serde.workspace = true
+ron.workspace = true
+tracing.workspace = true
 
 [lints]
 workspace = true

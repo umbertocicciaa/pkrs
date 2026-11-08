@@ -1,0 +1,73 @@
+{
+    "header": {
+        "engine_version": "0.0.0",
+        "format_version": 1,
+        "game_id": "com.example.harbor",
+        "game_version": "0.1.0",
+        "play_time": 5400,
+        "summary": {
+            "location": "harbor",
+            "party_size": 1,
+            "player_name": "Robin",
+            "progress": 1,
+        },
+        "timestamp": 1760000000,
+    },
+    "plugins": {
+        "resonance": {
+            "charges": 2,
+            "tuned": ["sproutle"],
+        },
+    },
+    "world": {
+        "bag": {
+            "potion": 3,
+        },
+        "flags": {
+            "got_starter": true,
+            "old_rival_flag": true,
+        },
+        "maps": {
+            "harbor": {
+                "fired": ["intro"],
+                "objects": {
+                    "guard": {
+                        "moved_to": {
+                            "facing": "left",
+                            "x": 4,
+                            "y": 6,
+                        },
+                    },
+                    "lamp_oil": {
+                        "picked_up": true,
+                    },
+                },
+                "vars": {
+                    "visits": 2,
+                },
+            },
+        },
+        "money": 500,
+        "party": [
+            {
+                "exp": 560,
+                "level": 8,
+                "moves": ["tackle", "leaf_cut"],
+                "species": "sproutle",
+            },
+        ],
+        "player": {
+            "facing": "down",
+            "map": "harbor",
+            "x": 5,
+            "y": 7,
+        },
+        "rng": {
+            "seed": 4242,
+            "steps": 99,
+        },
+        "vars": {
+            "rival_name": "Sky",
+        },
+    },
+}

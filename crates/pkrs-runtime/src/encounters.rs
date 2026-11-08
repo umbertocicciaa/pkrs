@@ -7,7 +7,7 @@
 //! project's species. A project whose content fails to load (or whose tables name unknown
 //! species) logs the error once and has no encounters.
 
-use pkrs_core::{GridPos, Pcg64Rng};
+use pkrs_core::{GameRng, GridPos, Pcg64Rng, RngState};
 use pkrs_data::{DataError, EncounterTables, GameData};
 use pkrs_script::BattleRequest;
 use pkrs_world::{Map, WildEncounter, roll_step_encounter, unknown_encounter_tables};
@@ -72,6 +72,17 @@ impl Encounters {
     /// Reseeds the roll stream (scenario runs pin it, §15.2).
     pub fn set_seed(&mut self, seed: u64) {
         self.rng = Pcg64Rng::from_seed(seed);
+    }
+
+    /// State of the roll stream, for saves (§12).
+    #[must_use]
+    pub fn rng_state(&self) -> RngState {
+        self.rng.state()
+    }
+
+    /// Restores the roll stream from a save (§12).
+    pub fn restore_rng_state(&mut self, state: RngState) {
+        self.rng.restore_state(state);
     }
 
     /// Uses `tables` instead of loading them from the project (tests, tools).

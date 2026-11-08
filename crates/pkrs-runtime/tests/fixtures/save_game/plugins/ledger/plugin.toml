@@ -1,0 +1,5 @@
+[plugin]
+id      = "ledger"
+name    = "Ledger"
+version = "0.1.0"
+api     = 1

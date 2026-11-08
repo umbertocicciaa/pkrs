@@ -11,6 +11,7 @@
 use core::fmt;
 
 use pkrs_core::{Direction, GridPos};
+use pkrs_data::{ENGINE_LANGUAGE, TextArgs, format_text};
 
 use crate::host::ScriptValue;
 
@@ -161,14 +162,46 @@ pub trait ScriptWorld {
 
     // --- ui (§9.1, §5.5) ---
 
-    /// `ui.say(text)`: opens a dialogue box. The engine signals
+    /// `ui.say(text, args)`: opens a dialogue box. `text` is literal text or a `text:` key,
+    /// localized by the engine with `args` filling its `{name}` / `{0}` placeholders (§5.5).
+    /// The engine signals
     /// [`WakeSignal::DialogueClosed`](crate::WakeSignal::DialogueClosed) when it closes.
-    fn say(&mut self, text: &str) -> ApiResult<()>;
-    /// `ui.choose(options)` / `ui.yes_no(text)`: opens a choice list (with an optional prompt).
+    fn say(&mut self, text: &str, args: &TextArgs) -> ApiResult<()>;
+    /// `ui.choose(options)` / `ui.yes_no(text, args)`: opens a choice list (with an optional
+    /// prompt and its arguments). Prompt and options are localized like [`say`](Self::say).
     /// The engine signals `DialogueClosed` with the 1-based index picked, or `Nil` on cancel.
-    fn choose(&mut self, prompt: Option<&str>, options: &[String]) -> ApiResult<()>;
-    /// `ui.notify(text)`: a non-blocking toast.
-    fn notify(&mut self, text: &str);
+    fn choose(
+        &mut self,
+        prompt: Option<&str>,
+        args: &TextArgs,
+        options: &[String],
+    ) -> ApiResult<()>;
+    /// `ui.notify(text, args)`: a non-blocking toast, localized like [`say`](Self::say).
+    fn notify(&mut self, text: &str, args: &TextArgs);
+
+    // --- localization (§5.5, §2.2 `[locale]`) ---
+
+    /// `game.language()`: the active language. Default: [`ENGINE_LANGUAGE`].
+    fn language(&self) -> String {
+        ENGINE_LANGUAGE.to_owned()
+    }
+    /// `game.languages()`: the languages `game.set_language` accepts. Default: just
+    /// [`language`](Self::language).
+    fn languages(&self) -> Vec<String> {
+        vec![self.language()]
+    }
+    /// `game.set_language(lang)`: switches every text shown from now on to `lang` (one of
+    /// [`languages`](Self::languages)). Default: refused.
+    fn set_language(&mut self, language: &str) -> ApiResult<()> {
+        Err(ApiError::new(format!(
+            "cannot switch to `{language}`: this world has no text tables"
+        )))
+    }
+    /// `game.text(value, args)`: `value` localized in the active language. Default: `value`
+    /// with its placeholders filled in.
+    fn text(&self, value: &str, args: &TextArgs) -> String {
+        format_text(value, args)
+    }
 
     // --- camera (§9.1, §5.3) ---
 

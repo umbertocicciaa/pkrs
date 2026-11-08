@@ -9,7 +9,7 @@ OrderResolved { order: [(Player, 0), (Opponent, 0)] }
 ActionCommitted { side: Player, slot: 0, action: Custom { id: "resonance:resonate", payload: [] } }
 SideStateChanged { side: Player, key: "resonance_used", value: Some(Bool(true)) }
 VolatileChanged { side: Player, slot: 0, key: "resonating", value: Some(Map({"turns": Int(3)})) }
-Message { key: "text:resonance.start" }
+Message { key: "text:resonance.start", args: TextArgs([("name", "hero")]) }
 Fx { side: Player, slot: 0, id: Some("resonance:aura") }
 CustomActionUsed { side: Player, slot: 0, id: "resonance:resonate", handled: true }
 ActionCommitted { side: Opponent, slot: 0, action: Fight { move_slot: 0, target_side: Player, target_slot: 0 } }

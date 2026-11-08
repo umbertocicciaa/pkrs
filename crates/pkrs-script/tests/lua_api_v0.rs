@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use pkrs_core::{Direction, GridPos, Pcg64Rng};
+use pkrs_data::{TextArgs, format_text};
 use pkrs_script::{
     ApiError, ApiResult, CameraCommand, CameraTarget, LuaScriptHost, MemoryScripts, Scheduler,
     ScriptEvent, ScriptHost, ScriptLimits, ScriptOwner, ScriptValue, ScriptWorld, TaskKind,
@@ -28,6 +29,7 @@ struct State {
     player: (GridPos, Direction),
     locked: bool,
     camera: Vec<CameraCommand>,
+    language: String,
 }
 
 #[derive(Clone)]
@@ -45,6 +47,7 @@ impl Fake {
             player: (GridPos::new(5, 6), Direction::Up),
             locked: false,
             camera: Vec::new(),
+            language: "en".to_owned(),
         })))
     }
 
@@ -175,16 +178,38 @@ impl ScriptWorld for Fake {
         self.note(format!("field {name}={value}"));
         Ok(())
     }
-    fn say(&mut self, text: &str) -> ApiResult<()> {
-        self.note(format!("say {text}"));
+    fn say(&mut self, text: &str, args: &TextArgs) -> ApiResult<()> {
+        self.note(format!("say {}", format_text(text, args)));
         Ok(())
     }
-    fn choose(&mut self, prompt: Option<&str>, options: &[String]) -> ApiResult<()> {
+    fn choose(
+        &mut self,
+        prompt: Option<&str>,
+        args: &TextArgs,
+        options: &[String],
+    ) -> ApiResult<()> {
+        let prompt = prompt.map(|p| format_text(p, args));
         self.note(format!("choose {prompt:?} {}", options.join("|")));
         Ok(())
     }
-    fn notify(&mut self, text: &str) {
-        self.note(format!("notify {text}"));
+    fn notify(&mut self, text: &str, args: &TextArgs) {
+        self.note(format!("notify {}", format_text(text, args)));
+    }
+    fn language(&self) -> String {
+        self.0.borrow().language.clone()
+    }
+    fn languages(&self) -> Vec<String> {
+        vec!["en".into(), "it".into()]
+    }
+    fn set_language(&mut self, language: &str) -> ApiResult<()> {
+        if !self.languages().iter().any(|l| l == language) {
+            return Err(ApiError::new(format!("unknown language `{language}`")));
+        }
+        self.0.borrow_mut().language = language.to_owned();
+        Ok(())
+    }
+    fn text(&self, value: &str, args: &TextArgs) -> String {
+        format!("[{}] {}", self.language(), format_text(value, args))
     }
     fn camera(&mut self, command: CameraCommand) -> ApiResult<()> {
         self.0.borrow_mut().camera.push(command);
@@ -616,7 +641,51 @@ fn ui_choose_and_yes_no_return_the_answer() {
     }
     assert_eq!(
         fake.log().last().unwrap(),
-        "choose Some(\"text:sure\") Yes|No"
+        "choose Some(\"text:sure\") text:ui.yes|text:ui.no"
+    );
+}
+
+#[test]
+fn ui_texts_take_arguments_and_game_switches_language() {
+    let fake = Fake::new();
+    let mut h = host(&fake);
+    let (id, _) = start(
+        &mut h,
+        "ui.say('Hi {name}, {0} and {1}!', { 'A', 2, name = 'Ash' })",
+    );
+    h.resume_task(id, ScriptValue::Nil).unwrap();
+    let (_, _) = start(&mut h, "return ui.yes_no('Go {0}?', { 'north' })");
+    eval(&mut h, "ui.notify('{n} saved', { n = 3.0 })");
+    assert_eq!(
+        fake.log(),
+        [
+            "say Hi Ash, A and 2!",
+            "choose Some(\"Go north?\") text:ui.yes|text:ui.no",
+            "notify 3 saved",
+        ]
+    );
+    assert_eq!(eval(&mut h, "return game.language()"), s("en"));
+    eval(&mut h, "game.set_language('it')");
+    assert_eq!(eval(&mut h, "return game.language()"), s("it"));
+    assert_eq!(
+        eval(&mut h, "return game.text('text:x {v}', { v = true })"),
+        s("[it] text:x true")
+    );
+    assert_eq!(
+        eval(&mut h, "return table.concat(game.languages(), ',')"),
+        s("en,it")
+    );
+    assert_eq!(
+        err(&mut h, "game.set_language('fr')"),
+        "scripts/test.lua:1: game.set_language: unknown language `fr`"
+    );
+    assert_eq!(
+        err(&mut h, "game.text('x', 5)"),
+        "scripts/test.lua:1: game.text: args must be a table (got number)"
+    );
+    assert_eq!(
+        err(&mut h, "game.text('x', { f = print })"),
+        "scripts/test.lua:1: game.text: args.f must be a string, number or boolean (got function)"
     );
 }
 
@@ -934,7 +1003,7 @@ fn old_keeper_runs_unmodified() {
         [
             "npc_face keeper down",
             "say text:keeper.hello",
-            "choose Some(\"text:keeper.help_me\") Yes|No",
+            "choose Some(\"text:keeper.help_me\") text:ui.yes|text:ui.no",
             "npc_move keeper up,up,left",
             "say text:keeper.thanks",
             "give_item lamp_oilx1",

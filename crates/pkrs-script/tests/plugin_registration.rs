@@ -437,9 +437,7 @@ fn battle_actions_add_menu_entries_and_run() {
         },
     );
     let events = battle.step(input, &mut hooks).unwrap();
-    assert!(events.contains(&BattleEvent::Message {
-        key: "text:res.focused".into()
-    }));
+    assert!(events.contains(&BattleEvent::message("text:res.focused")));
     assert!(events.contains(&BattleEvent::CustomActionUsed {
         side: SideId::Player,
         slot: 0,

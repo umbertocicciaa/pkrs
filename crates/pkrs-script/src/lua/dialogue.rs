@@ -1,35 +1,41 @@
-//! Blocking `ui` calls (§9.1, §9.3): `ui.say(text)`, `ui.choose(options)`, `ui.yes_no(text)`,
-//! plus the non-blocking `ui.notify(text)`. Added to the `ui` table next to
-//! `register_screen` / `push_screen` (see `ui.rs`).
+//! Blocking `ui` calls (§9.1, §9.3): `ui.say(text, args?)`, `ui.choose(options)`,
+//! `ui.yes_no(text, args?)`, plus the non-blocking `ui.notify(text, args?)`. Added to the `ui`
+//! table next to `register_screen` / `push_screen` (see `ui.rs`).
 //!
 //! The blocking calls open the box through the [`ScriptWorld`](crate::ScriptWorld) port, then
 //! yield `{ wait = "dialogue" }` from Lua; the engine resumes the task with
 //! [`WakeSignal::DialogueClosed`](crate::WakeSignal::DialogueClosed) once the box closes.
 //! `ui.choose` returns the 1-based index picked (or `nil` when cancelled); `ui.yes_no`
 //! returns `true` for "Yes".
+//!
+//! Texts (and choice options) are literal or `text:` keys; the engine localizes them in the
+//! active language, and the optional `args` table fills their placeholders
+//! (`{ name = "Ash" }` for `{name}`, a list `{ "Ash" }` for `{0}`, §5.5).
 
 use mlua::{Function, Lua, Table, Value};
 
-use super::facade::{coroutine_fns, needs_task, report, text, try_world, type_of, with_world};
+use super::facade::{
+    coroutine_fns, needs_task, report, text, text_args, try_world, type_of, with_world,
+};
 
-/// Labels of the `ui.yes_no` options.
-pub(crate) const YES_NO: [&str; 2] = ["Yes", "No"];
+/// Labels of the `ui.yes_no` options: engine text keys (`Yes` / `No` in English).
+pub(crate) const YES_NO: [&str; 2] = ["text:ui.yes", "text:ui.no"];
 
 /// Lua wrappers: Rust validates and opens the box, Lua yields.
 const DIALOGUE_FNS: &str = r#"
 local yield, isyieldable, req_say, req_choose = ...
-local function say(text)
-  local err = req_say(text, isyieldable())
+local function say(text, args)
+  local err = req_say(text, args, isyieldable())
   if err then error(err, 2) end
   yield({ wait = "dialogue" })
 end
 local function choose(options)
-  local err = req_choose("ui.choose", nil, options, isyieldable())
+  local err = req_choose("ui.choose", nil, nil, options, isyieldable())
   if err then error(err, 2) end
   return yield({ wait = "dialogue" })
 end
-local function yes_no(text)
-  local err = req_choose("ui.yes_no", text, nil, isyieldable())
+local function yes_no(text, args)
+  local err = req_choose("ui.yes_no", text, args, nil, isyieldable())
   if err then error(err, 2) end
   return yield({ wait = "dialogue" }) == 1
 end
@@ -62,20 +68,21 @@ fn options(func: &str, v: &Value) -> Result<Vec<String>, String> {
 /// Adds `say`, `choose`, `yes_no` and `notify` to `env.ui`.
 pub(super) fn install(lua: &Lua, env: &Table) -> mlua::Result<()> {
     let ui: Table = env.raw_get("ui")?;
-    let req_say = lua.create_function(|lua, (msg, yieldable): (Value, bool)| {
+    let req_say = lua.create_function(|lua, (msg, args, yieldable): (Value, Value, bool)| {
         const FUNC: &str = "ui.say";
         let r = text(FUNC, "text", &msg).and_then(|msg| {
+            let args = text_args(FUNC, &args)?;
             if !yieldable {
                 return Err(needs_task(FUNC));
             }
             try_world(lua, FUNC, |w| {
-                w.say(&msg).map_err(|e| format!("{FUNC}: {e}"))
+                w.say(&msg, &args).map_err(|e| format!("{FUNC}: {e}"))
             })
         });
         report(lua, r)
     })?;
     let req_choose = lua.create_function(
-        |lua, (func, prompt, opts, yieldable): (String, Value, Value, bool)| {
+        |lua, (func, prompt, args, opts, yieldable): (String, Value, Value, Value, bool)| {
             let r = (|| {
                 let (prompt, opts) = if func == "ui.yes_no" {
                     let prompt = text(&func, "text", &prompt)?;
@@ -83,11 +90,12 @@ pub(super) fn install(lua: &Lua, env: &Table) -> mlua::Result<()> {
                 } else {
                     (None, options(&func, &opts)?)
                 };
+                let args = text_args(&func, &args)?;
                 if !yieldable {
                     return Err(needs_task(&func));
                 }
                 try_world(lua, &func, |w| {
-                    w.choose(prompt.as_deref(), &opts)
+                    w.choose(prompt.as_deref(), &args, &opts)
                         .map_err(|e| format!("{func}: {e}"))
                 })
             })();
@@ -104,9 +112,10 @@ pub(super) fn install(lua: &Lua, env: &Table) -> mlua::Result<()> {
     ui.raw_set("yes_no", yes_no)?;
     ui.raw_set(
         "notify",
-        lua.create_function(|lua, msg: Value| {
+        lua.create_function(|lua, (msg, args): (Value, Value)| {
             let msg = super::facade::check(lua, text("ui.notify", "text", &msg))?;
-            with_world(lua, "ui.notify", |w| w.notify(&msg))
+            let args = super::facade::check(lua, text_args("ui.notify", &args))?;
+            with_world(lua, "ui.notify", |w| w.notify(&msg, &args))
         })?,
     )?;
     Ok(())

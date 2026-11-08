@@ -66,7 +66,7 @@ TurnStarted { turn: 6 }
 ActionsLocked
 OrderResolved { order: [(Opponent, 0), (Player, 0)] }
 ActionCommitted { side: Opponent, slot: 0, action: Item { item_id: "potion", target_side: Opponent, target_slot: 0 } }
-Message { key: "item_used:potion" }
+Message { key: "item_used:potion", args: TextArgs([]) }
 ActionCommitted { side: Player, slot: 0, action: Fight { move_slot: 0, target_side: Opponent, target_slot: 0 } }
 MoveUsed { user_side: Player, user_slot: 0, move_id: "water_gun", target_side: Opponent, target_slot: 0 }
 Damage { target_side: Opponent, target_slot: 0, amount: 32, remaining_hp: 0 }

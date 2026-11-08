@@ -1,6 +1,6 @@
 BattleStarted
 TurnStarted { turn: 1 }
-Message { key: "text:fixture.turn_1" }
+Message { key: "text:fixture.turn_1", args: TextArgs([]) }
 ActionsLocked
 OrderResolved { order: [(Player, 0), (Opponent, 0)] }
 ActionCommitted { side: Player, slot: 0, action: Fight { move_slot: 0, target_side: Opponent, target_slot: 0 } }
@@ -10,7 +10,7 @@ ActionCommitted { side: Opponent, slot: 0, action: Fight { move_slot: 0, target_
 MoveCancelled { user_side: Opponent, user_slot: 0, move_id: "tackle", reason: Some("text:fixture.flinch") }
 TurnEnded { turn: 1 }
 TurnStarted { turn: 2 }
-Message { key: "text:fixture.turn_2" }
+Message { key: "text:fixture.turn_2", args: TextArgs([]) }
 ActionsLocked
 OrderResolved { order: [(Player, 0), (Opponent, 0)] }
 ActionCommitted { side: Player, slot: 0, action: Fight { move_slot: 0, target_side: Opponent, target_slot: 0 } }

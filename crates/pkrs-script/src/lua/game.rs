@@ -1,12 +1,14 @@
 //! The `game` module (§9.1, §6.5): flags, variables, bag and money.
 //!
 //! `game.flag(name)`, `game.set_flag(name, value = true)`, `game.var(name)`,
-//! `game.set_var(name, value)`, `game.give_item(id, count = 1)`, `game.bag()`, `game.money()`.
+//! `game.set_var(name, value)`, `game.give_item(id, count = 1)`, `game.bag()`, `game.money()`,
+//! and the text language: `game.language()`, `game.languages()`, `game.set_language(lang)`,
+//! `game.text(value, args?)` (§5.5).
 
 use mlua::{Lua, Table, Value};
 
 use super::convert;
-use super::facade::{check, name, opt_int, storable, with_world};
+use super::facade::{check, name, opt_int, storable, text, text_args, with_world};
 
 /// Installs `game` into `env`.
 pub(super) fn install(lua: &Lua, env: &Table) -> mlua::Result<()> {
@@ -82,5 +84,41 @@ pub(super) fn install(lua: &Lua, env: &Table) -> mlua::Result<()> {
         "money",
         lua.create_function(|lua, ()| with_world(lua, "game.money", |w| w.money()))?,
     )?;
+    install_language(lua, &game)?;
     env.raw_set("game", game)
+}
+
+/// `game.language()`, `game.languages()`, `game.set_language(lang)` and
+/// `game.text(value, args?)` (§5.5): the options API for the text language.
+fn install_language(lua: &Lua, game: &Table) -> mlua::Result<()> {
+    game.raw_set(
+        "language",
+        lua.create_function(|lua, ()| with_world(lua, "game.language", |w| w.language()))?,
+    )?;
+    game.raw_set(
+        "languages",
+        lua.create_function(|lua, ()| {
+            let langs = with_world(lua, "game.languages", |w| w.languages())?;
+            lua.create_sequence_from(langs)
+        })?,
+    )?;
+    game.raw_set(
+        "set_language",
+        lua.create_function(|lua, lang: Value| {
+            const FUNC: &str = "game.set_language";
+            let lang = check(lua, name(FUNC, "language", &lang))?;
+            let result = with_world(lua, FUNC, |w| w.set_language(&lang))?;
+            check(lua, result.map_err(|e| format!("{FUNC}: {e}")))
+        })?,
+    )?;
+    game.raw_set(
+        "text",
+        lua.create_function(|lua, (value, args): (Value, Value)| {
+            const FUNC: &str = "game.text";
+            let value = check(lua, text(FUNC, "text", &value))?;
+            let args = check(lua, text_args(FUNC, &args))?;
+            with_world(lua, FUNC, |w| w.text(&value, &args))
+        })?,
+    )?;
+    Ok(())
 }

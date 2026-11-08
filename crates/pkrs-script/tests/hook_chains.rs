@@ -196,7 +196,7 @@ fn equal_priorities_follow_load_order_not_registration_order() {
     let messages: Vec<&str> = events
         .iter()
         .filter_map(|e| match e {
-            BattleEvent::Message { key } => Some(key.as_str()),
+            BattleEvent::Message { key, .. } => Some(key.as_str()),
             _ => None,
         })
         .collect();

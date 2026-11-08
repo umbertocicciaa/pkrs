@@ -83,17 +83,13 @@ pub fn blocks_move_attempt(
                 }
             }
         }
-        out.push(BattleEvent::Message {
-            key: "status:cant_move".into(),
-        });
+        out.push(BattleEvent::message("status:cant_move"));
         return true;
     }
 
     if let Some(chance) = def.full_paralysis_chance {
         if rng.gen_range_u32(100) < u32::from(chance) {
-            out.push(BattleEvent::Message {
-                key: "status:cant_move".into(),
-            });
+            out.push(BattleEvent::message("status:cant_move"));
             return true;
         }
     }
@@ -190,9 +186,7 @@ fn apply_residual_damage(
     if creature.fainted() {
         return Ok(());
     }
-    out.push(BattleEvent::Message {
-        key: format!("residual:{source}"),
-    });
+    out.push(BattleEvent::message(format!("residual:{source}")));
     let remaining = battle.apply_damage(side, slot, amount)?;
     out.push(BattleEvent::Damage {
         target_side: side,

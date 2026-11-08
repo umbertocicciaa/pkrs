@@ -12,6 +12,7 @@
 use std::collections::BTreeMap;
 
 use pkrs_core::GameRng;
+use pkrs_data::TextArgs;
 
 use crate::accuracy::AccuracyCalc;
 use crate::damage::DamageCalc;
@@ -227,7 +228,7 @@ impl BattleView {
 pub(crate) enum HookCommand {
     SetVolatile(SlotRef, String, Option<BattleValue>),
     SetSideState(SideId, String, Option<BattleValue>),
-    Message(String),
+    Message(String, TextArgs),
     Fx(SlotRef, Option<String>),
 }
 
@@ -332,7 +333,13 @@ impl<'a> BattleHookCtx<'a> {
 
     /// Queues a [`BattleEvent::Message`] with `key`.
     pub fn message(&mut self, key: impl Into<String>) {
-        self.commands.push(HookCommand::Message(key.into()));
+        self.message_with(key, TextArgs::new());
+    }
+
+    /// Queues a [`BattleEvent::Message`] with `key` and placeholder `args`
+    /// (`ctx.message(key, { name = … })` in Lua).
+    pub fn message_with(&mut self, key: impl Into<String>, args: TextArgs) {
+        self.commands.push(HookCommand::Message(key.into(), args));
     }
 
     /// Queues a [`BattleEvent::Fx`] that shows the visual effect `id` on the creature in

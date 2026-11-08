@@ -9,6 +9,7 @@ pub mod encounters;
 pub mod evolution;
 mod fixed_step;
 mod game_host;
+pub mod locale;
 mod main_loop;
 pub mod overworld;
 pub mod party;

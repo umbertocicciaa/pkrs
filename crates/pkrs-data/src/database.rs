@@ -417,18 +417,8 @@ impl GameDataBuilder {
                     }
                 }
                 DataKind::Text => {
-                    for lang in sorted(files.list_dirs(&path)) {
-                        let dir = format!("{path}/{lang}");
-                        for name in ron_files(files, &dir) {
-                            let file = format!("{dir}/{name}");
-                            match files.read_text(&file) {
-                                Ok(source) => {
-                                    self.add_text(&lang, &file, &source);
-                                }
-                                Err(message) => self.errors.push(DataError::Read { file, message }),
-                            }
-                        }
-                    }
+                    let errors = self.data.text.load_dir(files, &path);
+                    self.errors.extend(errors);
                 }
                 _ => {
                     for name in ron_files(files, &path) {
@@ -640,7 +630,7 @@ fn add_records<T: Keyed + DeserializeOwned>(
 }
 
 /// Adds the file to an error that does not name it yet.
-fn in_file(file: &str, err: DataError) -> DataError {
+pub(crate) fn in_file(file: &str, err: DataError) -> DataError {
     if err.to_string().contains(file) {
         err
     } else {
@@ -651,14 +641,14 @@ fn in_file(file: &str, err: DataError) -> DataError {
     }
 }
 
-fn sorted(mut names: Vec<String>) -> Vec<String> {
+pub(crate) fn sorted(mut names: Vec<String>) -> Vec<String> {
     names.sort();
     names.dedup();
     names
 }
 
 /// `*.ron` files directly in `dir`, in name order.
-fn ron_files(files: &dyn DataFiles, dir: &str) -> Vec<String> {
+pub(crate) fn ron_files(files: &dyn DataFiles, dir: &str) -> Vec<String> {
     sorted(
         files
             .list_files(dir)

@@ -1,0 +1,24 @@
+# Fixture for localization (design §5.5, §2.2 [locale]): the same dialogue in Italian (the
+# default language) and English, with a runtime language switch. `tests/*.lua` are its
+# scenarios.
+[game]
+name    = "I18n Town"
+id      = "com.example.i18n-town"
+version = "0.1.0"
+
+[engine]
+version = "0.0"
+api     = 1
+
+[start]
+map      = "town"
+position = [5, 7]
+facing   = "up"
+
+[features]
+battles = false
+party   = false
+
+[locale]
+default   = "it"
+available = ["it", "en"]

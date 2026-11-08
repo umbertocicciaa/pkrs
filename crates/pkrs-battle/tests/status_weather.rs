@@ -27,6 +27,7 @@ fn resources(extra_moves: Vec<MoveDef>) -> BattleResources {
         power: 0,
         accuracy: 100,
         priority: 0,
+        targeting: Default::default(),
         effects: vec![MoveEffect::ApplyStatus {
             status: "poison".into(),
             chance: 100,
@@ -40,6 +41,7 @@ fn resources(extra_moves: Vec<MoveDef>) -> BattleResources {
         power: 0,
         accuracy: 100,
         priority: 0,
+        targeting: Default::default(),
         effects: vec![],
     })
     .expect("pass");
@@ -213,6 +215,7 @@ fn fire_type_cannot_be_burned() {
         power: 0,
         accuracy: 100,
         priority: 0,
+        targeting: Default::default(),
         effects: vec![MoveEffect::ApplyStatus {
             status: "burn".into(),
             chance: 100,
@@ -260,6 +263,7 @@ fn sleep_wakes_with_status_cured_event() {
         power: 0,
         accuracy: 100,
         priority: 0,
+        targeting: Default::default(),
         effects: vec![MoveEffect::ApplyStatus {
             status: "sleep".into(),
             chance: 100,

@@ -1,0 +1,41 @@
+---
+source: crates/pkrs-script/tests/doubles_replay.rs
+expression: log
+---
+BattleStarted
+TurnStarted { turn: 1 }
+ActionsLocked
+OrderResolved { order: [(Player, 0), (Player, 1), (Opponent, 0), (Opponent, 1)] }
+ActionCommitted { side: Player, slot: 0, action: Fight { move_slot: 0, target_side: Opponent, target_slot: 0 } }
+MoveUsed { user_side: Player, user_slot: 0, move_id: "spread_tackle", target_side: Opponent, target_slot: 0 }
+Damage { target_side: Opponent, target_slot: 0, amount: 8, remaining_hp: 32 }
+MoveUsed { user_side: Player, user_slot: 0, move_id: "spread_tackle", target_side: Opponent, target_slot: 1 }
+Damage { target_side: Opponent, target_slot: 1, amount: 8, remaining_hp: 32 }
+ActionCommitted { side: Player, slot: 1, action: Fight { move_slot: 0, target_side: Opponent, target_slot: 1 } }
+MoveUsed { user_side: Player, user_slot: 1, move_id: "spread_tackle", target_side: Opponent, target_slot: 0 }
+Damage { target_side: Opponent, target_slot: 0, amount: 8, remaining_hp: 24 }
+MoveUsed { user_side: Player, user_slot: 1, move_id: "spread_tackle", target_side: Opponent, target_slot: 1 }
+Damage { target_side: Opponent, target_slot: 1, amount: 7, remaining_hp: 25 }
+ActionCommitted { side: Opponent, slot: 0, action: Fight { move_slot: 0, target_side: Opponent, target_slot: 0 } }
+MoveUsed { user_side: Opponent, user_slot: 0, move_id: "tackle", target_side: Opponent, target_slot: 0 }
+Damage { target_side: Opponent, target_slot: 0, amount: 13, remaining_hp: 11 }
+ActionCommitted { side: Opponent, slot: 1, action: Fight { move_slot: 0, target_side: Opponent, target_slot: 1 } }
+MoveUsed { user_side: Opponent, user_slot: 1, move_id: "tackle", target_side: Opponent, target_slot: 1 }
+Damage { target_side: Opponent, target_slot: 1, amount: 13, remaining_hp: 12 }
+TurnEnded { turn: 1 }
+TurnStarted { turn: 2 }
+ActionsLocked
+OrderResolved { order: [(Player, 0), (Player, 1), (Opponent, 0), (Opponent, 1)] }
+ActionCommitted { side: Player, slot: 0, action: Fight { move_slot: 0, target_side: Opponent, target_slot: 0 } }
+MoveUsed { user_side: Player, user_slot: 0, move_id: "spread_tackle", target_side: Opponent, target_slot: 0 }
+Damage { target_side: Opponent, target_slot: 0, amount: 7, remaining_hp: 4 }
+MoveUsed { user_side: Player, user_slot: 0, move_id: "spread_tackle", target_side: Opponent, target_slot: 1 }
+Damage { target_side: Opponent, target_slot: 1, amount: 8, remaining_hp: 4 }
+ActionCommitted { side: Player, slot: 1, action: Fight { move_slot: 0, target_side: Opponent, target_slot: 1 } }
+MoveUsed { user_side: Player, user_slot: 1, move_id: "spread_tackle", target_side: Opponent, target_slot: 0 }
+Damage { target_side: Opponent, target_slot: 0, amount: 7, remaining_hp: 0 }
+Fainted { side: Opponent, slot: 0, party_index: 0 }
+MoveUsed { user_side: Player, user_slot: 1, move_id: "spread_tackle", target_side: Opponent, target_slot: 1 }
+Damage { target_side: Opponent, target_slot: 1, amount: 9, remaining_hp: 0 }
+Fainted { side: Opponent, slot: 1, party_index: 1 }
+BattleEnded { outcome: PlayerWin }

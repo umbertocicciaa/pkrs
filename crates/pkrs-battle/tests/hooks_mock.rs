@@ -26,6 +26,7 @@ fn resources() -> BattleResources {
             power: 40,
             accuracy: 100,
             priority: 0,
+            targeting: Default::default(),
             effects: vec![MoveEffect::Damage],
         },
         MoveDef {
@@ -35,6 +36,7 @@ fn resources() -> BattleResources {
             power: 0,
             accuracy: 0,
             priority: 0,
+            targeting: Default::default(),
             effects: vec![MoveEffect::ApplyStatus {
                 status: "sleep".into(),
                 chance: 100,

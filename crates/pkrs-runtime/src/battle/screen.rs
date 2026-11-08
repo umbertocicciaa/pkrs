@@ -13,7 +13,7 @@ use std::rc::Rc;
 use pkrs_battle::{
     ActionMenu, Battle, BattleAction, BattleError, BattleEvent, BattleHooks, BattleInput,
     BattleOutcome, BattlePhase, BattleResult, PartyIndex, RngPolicy, SideId, SideInput, SlotIndex,
-    SlotRef, TrainerAi, ai_side_input,
+    SlotRef, TrainerAi, ai_side_input, needs_foe_target_ui,
 };
 use pkrs_data::BattlePack;
 use pkrs_platform::{Action, BuiltinAction, Input};
@@ -27,6 +27,7 @@ use pkrs_ui::{
 use super::content::{BattleKind, PreparedBattle};
 use super::menu::{
     ActionKind, MenuEntry, action_entries, bag_entries, fight_entries, party_entries,
+    target_entries,
 };
 use super::present::{Cue, Presenter, Roster};
 use crate::ui_theme::UiTheme;
@@ -58,6 +59,8 @@ pub enum MenuKind {
         /// Mandatory replacement.
         forced: bool,
     },
+    /// Pick an opposing active slot (doubles).
+    Target,
 }
 
 impl MenuKind {
@@ -69,6 +72,7 @@ impl MenuKind {
             Self::Fight => "fight",
             Self::Bag => "bag",
             Self::Party { .. } => "party",
+            Self::Target => "target",
         }
     }
 }
@@ -78,6 +82,7 @@ enum MenuValues {
     Fight(Vec<u8>),
     Bag(Vec<String>),
     Party(Vec<PartyIndex>),
+    Target(Vec<u8>),
 }
 
 struct OpenMenu {
@@ -150,15 +155,21 @@ pub struct BattleScreen {
     reopen: Option<MenuKind>,
     action_menu: Option<(u32, ActionMenu)>,
     bag: BTreeMap<String, u32>,
-    sprites: [SpriteFx; 2],
-    /// Active FX asset id per side's lead slot (`ctx.play_fx`, §9.5).
-    slot_fx: [Option<String>; 2],
+    sprites: [[SpriteFx; 2]; 2],
+    /// Active FX asset id per active slot (`ctx.play_fx`, §9.5).
+    slot_fx: [[Option<String>; 2]; 2],
     theme: UiTheme,
     view: (u32, u32),
     texts_shown: u64,
     finished: bool,
     /// Player party indices sent out so far (they earn exp, §7.3).
     participants: BTreeSet<PartyIndex>,
+    /// Which player active slot is choosing an action this turn.
+    choosing_slot: SlotIndex,
+    /// Actions collected for the current `SelectActions` step.
+    pending_actions: Vec<Option<BattleAction>>,
+    /// Move slot waiting for a foe target pick.
+    pending_move: Option<u8>,
 }
 
 impl BattleScreen {
@@ -174,6 +185,7 @@ impl BattleScreen {
     ) -> Result<Self, BattleError> {
         let PreparedBattle {
             kind,
+            config,
             setup,
             resources,
             ai,
@@ -183,13 +195,7 @@ impl BattleScreen {
         let pack = Rc::new(resources.pack.clone());
         let rewards = super::rewards::battle_rewards(&kind, &setup, &pack);
         let participants = setup.player.leading.iter().flatten().copied().collect();
-        let mut battle = Battle::new(
-            setup,
-            pkrs_battle::BattleConfig::default(),
-            resources,
-            policy,
-            hooks,
-        )?;
+        let mut battle = Battle::new(setup, config, resources, policy, hooks)?;
         battle.set_rewards(rewards);
         let mut screen = Self {
             battle,
@@ -204,13 +210,16 @@ impl BattleScreen {
             reopen: None,
             action_menu: None,
             bag,
-            sprites: [SpriteFx { visible: true }; 2],
-            slot_fx: [None, None],
+            sprites: [[SpriteFx { visible: true }; 2]; 2],
+            slot_fx: std::array::from_fn(|_| std::array::from_fn(|_| None)),
             theme,
             view,
             texts_shown: 0,
             finished: false,
             participants,
+            choosing_slot: 0,
+            pending_actions: vec![None; usize::from(config.side_size)],
+            pending_move: None,
         };
         screen.run_logic(BattleInput::default(), hooks);
         Ok(screen)
@@ -391,24 +400,90 @@ impl BattleScreen {
     }
 
     fn submit(&mut self, action: BattleAction, hooks: &mut dyn BattleHooks) {
-        let input = match self.battle.phase() {
+        match self.battle.phase() {
             BattlePhase::Replace {
                 side: SideId::Player,
                 ..
-            } => BattleInput {
-                player: Some(SideInput {
-                    slots: vec![action],
-                }),
-                opponent: None,
-            },
-            _ => BattleInput {
-                player: Some(SideInput {
-                    slots: vec![action],
-                }),
-                opponent: ai_side_input(&mut self.ai, &self.battle, SideId::Opponent),
-            },
+            } => {
+                let input = BattleInput {
+                    player: Some(SideInput {
+                        slots: vec![action],
+                    }),
+                    opponent: None,
+                };
+                self.menu = None;
+                self.run_logic(input, hooks);
+            }
+            BattlePhase::SelectActions => {
+                self.menu = None;
+                self.stage_player_action(action, hooks);
+            }
+            phase => {
+                tracing::warn!(target: "battle", ?phase, "submit outside player choice phase");
+            }
+        }
+    }
+
+    fn player_actor(&self) -> SlotRef {
+        SlotRef::new(SideId::Player, self.choosing_slot)
+    }
+
+    fn first_choosing_slot(&self) -> Option<SlotIndex> {
+        (0..self.battle.config().side_size).find(|&slot| {
+            self.battle
+                .view()
+                .creature(SlotRef::new(SideId::Player, slot))
+                .is_some()
+        })
+    }
+
+    fn next_choosing_slot(&self) -> Option<SlotIndex> {
+        let start = self.choosing_slot.saturating_add(1);
+        (start..self.battle.config().side_size).find(|&slot| {
+            self.battle
+                .view()
+                .creature(SlotRef::new(SideId::Player, slot))
+                .is_some()
+        })
+    }
+
+    fn begin_select_actions(&mut self) {
+        let size = usize::from(self.battle.config().side_size);
+        self.pending_actions = vec![None; size];
+        self.choosing_slot = self.first_choosing_slot().unwrap_or(0);
+        self.pending_move = None;
+    }
+
+    fn stage_player_action(&mut self, action: BattleAction, hooks: &mut dyn BattleHooks) {
+        let slot = usize::from(self.choosing_slot);
+        if let Some(slot_action) = self.pending_actions.get_mut(slot) {
+            *slot_action = Some(action);
+        }
+        self.pending_move = None;
+        if let Some(next) = self.next_choosing_slot() {
+            self.choosing_slot = next;
+            self.open_menu(MenuKind::Action, hooks);
+            return;
+        }
+        self.flush_player_turn(hooks);
+    }
+
+    fn flush_player_turn(&mut self, hooks: &mut dyn BattleHooks) {
+        let mut slots = Vec::with_capacity(self.pending_actions.len());
+        for (i, action) in self.pending_actions.iter().enumerate() {
+            let Some(action) = action else {
+                tracing::warn!(target: "battle", slot = i, "incomplete player turn");
+                return;
+            };
+            slots.push(action.clone());
+        }
+        let size = usize::from(self.battle.config().side_size);
+        self.pending_actions = vec![None; size];
+        self.choosing_slot = self.first_choosing_slot().unwrap_or(0);
+        let input = BattleInput {
+            player: Some(SideInput { slots }),
+            opponent: ai_side_input(&mut self.ai, &self.battle, SideId::Opponent),
         };
-        self.menu = None;
         self.run_logic(input, hooks);
     }
 
@@ -439,6 +514,7 @@ impl BattleScreen {
                 None
             }
             BattlePhase::SelectActions => {
+                self.begin_select_actions();
                 let kind = self.reopen.take().unwrap_or(MenuKind::Action);
                 self.open_menu(kind, hooks);
                 None
@@ -454,7 +530,7 @@ impl BattleScreen {
 
     fn open_menu(&mut self, kind: MenuKind, hooks: &mut dyn BattleHooks) {
         let view = self.battle.view();
-        let me = SlotRef::new(SideId::Player, 0);
+        let me = self.player_actor();
         let menu = match kind {
             MenuKind::Action => {
                 let turn = self.battle.turn();
@@ -480,6 +556,7 @@ impl BattleScreen {
                 party_entries(view.side(SideId::Player)),
                 MenuValues::Party,
             ),
+            MenuKind::Target => OpenMenu::new(kind, target_entries(&view), MenuValues::Target),
         };
         match menu {
             Some(menu) => self.menu = Some(menu),
@@ -517,6 +594,7 @@ impl BattleScreen {
                     MenuValues::Fight(v) => v.get(i).copied().map(Pick::Move),
                     MenuValues::Bag(v) => v.get(i).cloned().map(Pick::Item),
                     MenuValues::Party(v) => v.get(i).copied().map(Pick::Member),
+                    MenuValues::Target(v) => v.get(i).copied().map(Pick::Target),
                 };
                 if let Some(pick) = pick {
                     self.pick(kind, pick, enabled, hooks);
@@ -526,6 +604,7 @@ impl BattleScreen {
                 input.consume(Action::Builtin(BuiltinAction::Cancel));
                 match menu.kind {
                     MenuKind::Action | MenuKind::Party { forced: true } => {}
+                    MenuKind::Target => self.open_menu(MenuKind::Fight, hooks),
                     _ => self.open_menu(MenuKind::Action, hooks),
                 }
             }
@@ -556,19 +635,56 @@ impl BattleScreen {
             Pick::Move(_) if !enabled => {
                 self.say_then("There's no PP left for this move!", MenuKind::Fight);
             }
-            Pick::Move(move_slot) => self.submit(
-                BattleAction::Fight {
-                    move_slot,
-                    target_side: SideId::Opponent,
-                    target_slot: 0,
-                },
-                hooks,
-            ),
+            Pick::Move(move_slot) => {
+                let actor = self.player_actor();
+                let needs_target = self
+                    .battle
+                    .view()
+                    .creature(actor)
+                    .and_then(|c| c.moves.get(usize::from(move_slot)))
+                    .and_then(|m| m.as_ref())
+                    .and_then(|m| {
+                        self.pack
+                            .move_by_id(&m.id)
+                            .map(|def| needs_foe_target_ui(&self.battle, &def.id))
+                    })
+                    .unwrap_or(false);
+                if needs_target {
+                    self.pending_move = Some(move_slot);
+                    self.open_menu(MenuKind::Target, hooks);
+                } else {
+                    self.submit(
+                        BattleAction::Fight {
+                            move_slot,
+                            target_side: SideId::Opponent,
+                            target_slot: 0,
+                        },
+                        hooks,
+                    );
+                }
+            }
+            Pick::Target(target_slot) => {
+                let move_slot = match self.pending_move {
+                    Some(slot) => slot,
+                    None => {
+                        self.open_menu(MenuKind::Fight, hooks);
+                        return;
+                    }
+                };
+                self.submit(
+                    BattleAction::Fight {
+                        move_slot,
+                        target_side: SideId::Opponent,
+                        target_slot,
+                    },
+                    hooks,
+                );
+            }
             Pick::Item(item_id) => self.submit(
                 BattleAction::Item {
                     item_id,
                     target_side: SideId::Player,
-                    target_slot: 0,
+                    target_slot: self.choosing_slot,
                 },
                 hooks,
             ),
@@ -677,9 +793,7 @@ impl BattleScreen {
             }
             Cue::SwitchIn { side, slot, .. } => {
                 self.display.apply(&cue);
-                if slot == 0 {
-                    self.sprites[side_index(side)].visible = true;
-                }
+                self.sprites[side_index(side)][usize::from(slot.min(1))].visible = true;
                 Playing::Anim {
                     cue,
                     total: SWITCH_TICKS,
@@ -708,23 +822,20 @@ impl BattleScreen {
     }
 
     fn set_slot_fx(&mut self, side: SideId, slot: SlotIndex, id: Option<String>) {
-        if slot != 0 {
-            tracing::warn!(target: "battle", ?side, slot, "battle FX on non-lead slots is ignored");
-            return;
-        }
         let idx = side_index(side);
+        let s = usize::from(slot.min(1));
         if let Some(id) = id {
-            tracing::debug!(target: "battle", fx = %id, ?side, "play battle FX");
-            self.slot_fx[idx] = Some(id);
+            tracing::debug!(target: "battle", fx = %id, ?side, slot, "play battle FX");
+            self.slot_fx[idx][s] = Some(id);
         } else {
-            self.slot_fx[idx] = None;
+            self.slot_fx[idx][s] = None;
         }
     }
 
     fn finish_anim(&mut self, cue: &Cue) {
         match *cue {
-            Cue::Faint { side, slot } | Cue::SwitchOut { side, slot } if slot == 0 => {
-                self.sprites[side_index(side)].visible = false;
+            Cue::Faint { side, slot } | Cue::SwitchOut { side, slot } => {
+                self.sprites[side_index(side)][usize::from(slot.min(1))].visible = false;
             }
             _ => {}
         }
@@ -738,22 +849,31 @@ impl BattleScreen {
     }
 
     /// How far the sprite of `side` is shown (`0.0` hidden … `1.0` full) this frame.
-    fn sprite_scale(&self, side: SideId) -> f32 {
+    fn sprite_scale(&self, side: SideId, slot: SlotIndex) -> f32 {
+        let idx = side_index(side);
+        let s = usize::from(slot.min(1));
         if let Some(Playing::Anim { cue, total, left }) = &self.playing {
             let t = 1.0 - *left as f32 / (*total).max(1) as f32;
             match *cue {
                 Cue::SwitchIn {
-                    side: s, slot: 0, ..
-                } if s == side => return t,
-                Cue::SwitchOut { side: s, slot: 0 } | Cue::Faint { side: s, slot: 0 }
-                    if s == side =>
-                {
+                    side: cue_side,
+                    slot: cue_slot,
+                    ..
+                } if cue_side == side && cue_slot == slot => return t,
+                Cue::SwitchOut {
+                    side: cue_side,
+                    slot: cue_slot,
+                }
+                | Cue::Faint {
+                    side: cue_side,
+                    slot: cue_slot,
+                } if cue_side == side && cue_slot == slot => {
                     return 1.0 - t;
                 }
                 _ => {}
             }
         }
-        if self.sprites[side_index(side)].visible {
+        if self.sprites[idx][s].visible {
             1.0
         } else {
             0.0
@@ -775,8 +895,16 @@ impl BattleScreen {
         let my_base = Rect::new(12.0, field_h - 10.0, 96.0, 8.0);
         renderer.draw_filled_rect(foe_base, PLATFORM, Layer::GroundDecor);
         renderer.draw_filled_rect(my_base, PLATFORM, Layer::GroundDecor);
-        self.draw_creature(renderer, SideId::Opponent, foe_base, 40.0);
-        self.draw_creature(renderer, SideId::Player, my_base, 48.0);
+        for slot in 0..self.battle.config().side_size.min(2) {
+            let offset = if slot == 0 { 0.0 } else { -44.0 };
+            let size = if slot == 0 { 40.0 } else { 36.0 };
+            self.draw_creature(renderer, SideId::Opponent, slot, foe_base, size, offset);
+        }
+        for slot in 0..self.battle.config().side_size.min(2) {
+            let offset = if slot == 0 { 0.0 } else { 52.0 };
+            let size = if slot == 0 { 48.0 } else { 40.0 };
+            self.draw_creature(renderer, SideId::Player, slot, my_base, size, offset);
+        }
         // Info boxes.
         self.draw_info(renderer, SideId::Opponent, Rect::new(8.0, 8.0, 104.0, 26.0));
         self.draw_info(
@@ -790,18 +918,26 @@ impl BattleScreen {
         }
     }
 
-    fn draw_creature(&self, renderer: &mut Renderer, side: SideId, base: Rect, size: f32) {
-        let scale = self.sprite_scale(side).clamp(0.0, 1.0);
+    fn draw_creature(
+        &self,
+        renderer: &mut Renderer,
+        side: SideId,
+        slot: SlotIndex,
+        base: Rect,
+        size: f32,
+        x_offset: f32,
+    ) {
+        let scale = self.sprite_scale(side, slot).clamp(0.0, 1.0);
         if scale <= 0.0 {
             return;
         }
-        let Some(member) = self.display.side(side).active_member(0) else {
+        let Some(member) = self.display.side(side).active_member(slot) else {
             return;
         };
         let h = (size * scale).round();
-        let x = base.x + (base.width - size) / 2.0;
+        let x = base.x + (base.width - size) / 2.0 + x_offset;
         let y = base.y + base.height / 2.0 - h;
-        if self.slot_fx[side_index(side)].is_some() {
+        if self.slot_fx[side_index(side)][usize::from(slot.min(1))].is_some() {
             const AURA: Color = Color {
                 r: 255,
                 g: 220,
@@ -921,7 +1057,7 @@ impl BattleScreen {
         let height = rows * lh + 12.0;
         let rect = match menu.kind {
             MenuKind::Action => Rect::new(vw - 96.0, vh - height, 96.0, height),
-            MenuKind::Fight => Rect::new(vw - 128.0, vh - height, 128.0, height),
+            MenuKind::Fight | MenuKind::Target => Rect::new(vw - 128.0, vh - height, 128.0, height),
             MenuKind::Bag | MenuKind::Party { .. } => Rect::new(8.0, 8.0, vw - 16.0, height),
         };
         self.theme.skin.draw(renderer, rect, PANEL_TINT);
@@ -953,6 +1089,7 @@ enum Pick {
     Move(u8),
     Item(String),
     Member(PartyIndex),
+    Target(u8),
 }
 
 fn take(input: &mut Input, action: BuiltinAction) -> bool {

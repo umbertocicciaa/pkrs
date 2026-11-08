@@ -41,6 +41,7 @@ pub fn resources() -> BattleResources {
             100
         },
         priority,
+        targeting: Default::default(),
         effects: vec![MoveEffect::Damage],
     };
     for def in [

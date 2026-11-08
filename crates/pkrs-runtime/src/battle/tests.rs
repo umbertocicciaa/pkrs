@@ -29,8 +29,16 @@ fn renderer() -> Renderer {
 }
 
 fn prepared(kind: BattleKind, setup: pkrs_battle::BattleSetup) -> PreparedBattle {
+    let side_size = setup
+        .player
+        .leading
+        .len()
+        .max(setup.opponent.leading.len())
+        .try_into()
+        .unwrap_or(1);
     PreparedBattle {
         kind,
+        config: pkrs_battle::BattleConfig::with_side_size(side_size),
         setup,
         resources: battle_testkit::default_resources(),
         ai: TrainerAi::new(&AiProfile::builtin("basic", AiTier::Basic), Vec::new(), 3),
@@ -424,4 +432,82 @@ fn battle_state_pops_back_and_queues_the_result_for_the_script() {
         panic!("expected one BattleEnded wake, got {wakes:?}");
     };
     assert_eq!(result.get("outcome"), Some(&ScriptValue::from("win")));
+}
+
+fn doubles_setup() -> pkrs_battle::BattleSetup {
+    use pkrs_battle::{BattleCreature, BattleSideSetup, CreatureStats, MoveSlot};
+    let mk = |name: &str, hp: u32, spe: u32| BattleCreature {
+        species_id: name.into(),
+        types: vec!["normal".into()],
+        nickname: name.into(),
+        level: 8,
+        stats: CreatureStats::new(hp, 20, 10, spe),
+        moves: [
+            Some(MoveSlot {
+                id: "tackle".into(),
+                priority: 0,
+                power: 35,
+                pp: 35,
+                max_pp: 35,
+            }),
+            None,
+            None,
+            None,
+        ],
+    };
+    pkrs_battle::BattleSetup {
+        player: BattleSideSetup {
+            name: "Player".into(),
+            party: vec![mk("a", 50, 15), mk("b", 50, 12)],
+            leading: vec![Some(0), Some(1)],
+        },
+        opponent: BattleSideSetup {
+            name: "Twins".into(),
+            party: vec![mk("x", 25, 8), mk("y", 25, 6)],
+            leading: vec![Some(0), Some(1)],
+        },
+    }
+}
+
+#[test]
+fn doubles_two_active_slots_reopen_action_menu_after_one_turn() {
+    let mut s = screen_with(
+        rival(),
+        doubles_setup(),
+        BTreeMap::new(),
+        &mut NullBattleHooks,
+    );
+    let mut input = input();
+    let hooks = &mut NullBattleHooks;
+    let (_, _) = read_texts(&mut s, &mut input, hooks);
+    assert_eq!(s.battle().config().side_size, 2);
+    for _slot in 0..2 {
+        assert_eq!(s.menu(), Some(MenuKind::Action));
+        press(&mut s, &mut input, Key::Enter, hooks); // FIGHT
+        assert_eq!(s.menu(), Some(MenuKind::Fight));
+        press(&mut s, &mut input, Key::Enter, hooks); // Tackle
+        while s.menu() == Some(MenuKind::Target) {
+            press(&mut s, &mut input, Key::Enter, hooks);
+        }
+    }
+    for _ in 0..8_000 {
+        if s.menu() == Some(MenuKind::Action) {
+            return;
+        }
+        if s.is_finished() {
+            return;
+        }
+        if s.text().is_some() {
+            press(&mut s, &mut input, Key::Enter, hooks);
+        } else {
+            tick(&mut s, &mut input, &[], hooks);
+        }
+    }
+    panic!(
+        "expected action menu after doubles turn; phase={:?} menu={:?} queue={} finished={}",
+        s.battle().phase(),
+        s.menu(),
+        s.queued().len(),
+        s.is_finished()
+    );
 }

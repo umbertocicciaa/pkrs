@@ -161,7 +161,9 @@ impl PlayerParty {
         &self,
         content: &BattleContent,
         name: &str,
+        side_size: u8,
     ) -> Result<BattleSideSetup, BattleContentError> {
+        let party_len = self.members.len();
         let party = self
             .members
             .iter()
@@ -170,7 +172,7 @@ impl PlayerParty {
         Ok(BattleSideSetup {
             name: name.to_owned(),
             party,
-            leading: vec![Some(0)],
+            leading: crate::battle::content::BattleContent::leading_for_side(side_size, party_len),
         })
     }
 }

@@ -32,6 +32,17 @@ pub enum StatId {
     Evasion,
 }
 
+/// Which foes a move can hit in multi-active battles (§7.3 formats).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MoveTargetScope {
+    /// One chosen foe (default).
+    #[default]
+    SingleFoe,
+    /// Every non-fainted foe (`Spread` moves in doubles).
+    AllFoes,
+}
+
 /// Who receives a stat-stage or status effect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -122,6 +133,9 @@ pub struct MoveDef {
     pub accuracy: u8,
     /// Priority for turn order.
     pub priority: i8,
+    /// Who the move hits in multi-active battles.
+    #[serde(default)]
+    pub targeting: MoveTargetScope,
     /// Effect pipeline executed after a successful hit check.
     pub effects: Vec<MoveEffect>,
 }

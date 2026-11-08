@@ -193,6 +193,9 @@ pub struct TrainerDef {
     /// Items the AI may use when its profile allows it.
     #[serde(default)]
     pub items: Vec<String>,
+    /// Active slots sent out at battle start (`1` = singles, `2` = doubles, …; default `1`).
+    #[serde(default)]
+    pub active_slots: Option<u8>,
 }
 
 impl TrainerDef {
@@ -228,7 +231,24 @@ impl TrainerDef {
         if self.ai_profile.is_empty() {
             return bad("ai_profile must not be empty".into());
         }
+        if let Some(n) = self.active_slots {
+            if !(1..=6).contains(&n) {
+                return bad(format!("active_slots must be 1..=6 (got {n})"));
+            }
+            if usize::from(n) > self.party.len() {
+                return bad(format!(
+                    "active_slots ({n}) cannot exceed party size ({})",
+                    self.party.len()
+                ));
+            }
+        }
         Ok(())
+    }
+
+    /// Active slots when this trainer battles (default singles).
+    #[must_use]
+    pub fn battle_active_slots(&self) -> u8 {
+        self.active_slots.unwrap_or(1)
     }
 
     /// The referenced profile id (`profiles/champion_hard` → `champion_hard`).
@@ -373,6 +393,7 @@ Trainer(
             }],
             ai_profile: profile.into(),
             items: vec![],
+            active_slots: None,
         };
         let errs = check_ai_profiles(
             &[

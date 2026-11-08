@@ -55,6 +55,7 @@ fn resources() -> BattleResources {
             power,
             accuracy: 100,
             priority: 0,
+            targeting: Default::default(),
             effects: vec![MoveEffect::Damage],
         })
         .unwrap();

@@ -8,7 +8,9 @@
 
 use std::collections::BTreeMap;
 
-use pkrs_battle::{ActionMenu, CreatureView, MenuOption, PartyIndex, SideView};
+use pkrs_battle::{
+    ActionMenu, BattleView, CreatureView, MenuOption, PartyIndex, SideId, SideView, SlotRef,
+};
 
 use super::content::display_name;
 
@@ -112,6 +114,24 @@ pub fn bag_entries(bag: &BTreeMap<String, u32>) -> Vec<MenuEntry<String>> {
             label: format!("{} x{n}", display_name(id)),
             enabled: true,
             value: id.clone(),
+        })
+        .collect()
+}
+
+/// Foe slots the player can target with a single-target move (doubles).
+#[must_use]
+pub fn target_entries(view: &BattleView) -> Vec<MenuEntry<u8>> {
+    (0..view.side_size)
+        .filter_map(|slot| {
+            let who = view.creature(SlotRef::new(SideId::Opponent, slot))?;
+            Some(MenuEntry {
+                label: format!(
+                    "{} Lv{} {}/{}",
+                    who.nickname, who.level, who.hp, who.stats.max_hp
+                ),
+                enabled: who.hp > 0,
+                value: slot,
+            })
         })
         .collect()
 }

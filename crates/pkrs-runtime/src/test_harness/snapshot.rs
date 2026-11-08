@@ -19,6 +19,8 @@ pub const STATE_OVERWORLD: &str = "Overworld";
 pub const STATE_DIALOGUE: &str = "Dialogue";
 /// State name while a choice list (`ui.choose`, `ui.yes_no`) is open.
 pub const STATE_CHOICE: &str = "Choice";
+/// State name while the field start menu is open (issue #57).
+pub const STATE_MENU: &str = "Menu";
 /// State name during a warp transition.
 pub const STATE_WARP: &str = "Warp";
 /// State name while a battle runs (§7.2), including the exp and move texts after a win.
@@ -38,6 +40,9 @@ pub fn state_name(host: &ProjectHost) -> &'static str {
     }
     if host.battle().is_some() {
         return STATE_BATTLE;
+    }
+    if host.field_menu().is_some() {
+        return STATE_MENU;
     }
     match host.overlay().map(|o| o.request()) {
         Some(UiRequest::Say(_)) => STATE_DIALOGUE,

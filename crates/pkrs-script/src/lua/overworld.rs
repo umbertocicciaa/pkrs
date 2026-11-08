@@ -15,10 +15,10 @@ use mlua::{Function, Lua, Table, Value};
 
 use super::facade::{check, fail, name, type_of};
 use super::hook_order;
-use super::registry::{FieldActionEntry, check_id, with_regs};
+use super::registry::{FieldActionEntry, ItemUseEntry, check_id, with_regs};
 use crate::host::ScriptOwner;
 use crate::plugin::check_custom_terrain;
-use crate::registry::FieldActionInfo;
+use crate::registry::{FieldActionInfo, ItemUseInfo};
 
 fn opt_bool(lua: &Lua, func: &str, t: &Table, key: &str, default: bool) -> mlua::Result<bool> {
     match t.raw_get::<Value>(key)? {
@@ -178,6 +178,67 @@ fn register_field_action(
     }
 }
 
+fn register_item_use(
+    lua: &Lua,
+    owner: &ScriptOwner,
+    (id, def): (Value, Value),
+) -> mlua::Result<String> {
+    const FUNC: &str = "world.register_item_use";
+    let id = check(lua, name(FUNC, "item id", &id))?;
+    check(lua, check_id(FUNC, "item id", &id, owner))?;
+    let Value::Table(def) = def else {
+        return Err(fail(
+            lua,
+            format!("{FUNC}: definition must be a table (got {})", type_of(&def)),
+        ));
+    };
+    let Some(run) = opt_function(lua, FUNC, &def, "use")? else {
+        return Err(fail(lua, format!("{FUNC}: `use` must be a function")));
+    };
+    let override_existing = opt_bool(lua, FUNC, &def, "override", false)?;
+    let priority = hook_order::parse_priority(Some(&def))
+        .map_err(|_| fail(lua, format!("{FUNC}: `priority` must be an integer")))?;
+    let key = hook_order::chain_key(lua, owner, priority);
+    let entry = ItemUseEntry {
+        key,
+        info: ItemUseInfo {
+            id: id.clone(),
+            owner: owner.clone(),
+        },
+        run,
+    };
+    let previous = with_regs(lua, |r| {
+        let previous = r
+            .item_uses
+            .iter()
+            .position(|e| e.info.id == id)
+            .map(|i| (i, r.item_uses[i].info.owner.clone()));
+        match previous {
+            Some(_) if !override_existing => {}
+            Some((i, _)) => {
+                r.item_uses.remove(i);
+                r.item_uses.push(entry);
+            }
+            None => r.item_uses.push(entry),
+        }
+        r.item_uses.sort_by_key(|e| e.key);
+        previous.map(|(_, o)| o)
+    })?;
+    match previous {
+        Some(prev) if !override_existing => Err(fail(
+            lua,
+            format!(
+                "{FUNC}: item use `{id}` is already registered by {prev}; set `override = true` to replace it"
+            ),
+        )),
+        Some(prev) => {
+            tracing::info!(target: "data", item = %id, previous = %prev, by = %owner, "item use overridden");
+            Ok(id)
+        }
+        None => Ok(id),
+    }
+}
+
 /// Installs `world` into `env` for `owner`, and `map.register_terrain` as an alias.
 pub(super) fn install(lua: &Lua, env: &Table, owner: &ScriptOwner) -> mlua::Result<()> {
     let world = lua.create_table()?;
@@ -189,6 +250,11 @@ pub(super) fn install(lua: &Lua, env: &Table, owner: &ScriptOwner) -> mlua::Resu
     world.raw_set(
         "register_field_action",
         lua.create_function(move |lua, args: (Value, Value)| register_field_action(lua, &o, args))?,
+    )?;
+    let o = owner.clone();
+    world.raw_set(
+        "register_item_use",
+        lua.create_function(move |lua, args: (Value, Value)| register_item_use(lua, &o, args))?,
     )?;
     if let Value::Table(map) = env.raw_get::<Value>("map")? {
         map.raw_set("register_terrain", terrain)?;

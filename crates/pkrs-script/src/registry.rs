@@ -88,6 +88,38 @@ pub struct FieldActionInfo {
     pub menu: bool,
 }
 
+/// Context for `world.register_item_use` handlers (field menu item on a party member).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ItemUseContext {
+    /// Item id being used.
+    pub item_id: String,
+    /// Party index of the target creature.
+    pub party_index: usize,
+}
+
+impl ItemUseContext {
+    /// `ctx` as scripts see it: `{ item, party_index }`.
+    #[must_use]
+    pub fn to_value(&self) -> ScriptValue {
+        let mut m = BTreeMap::new();
+        m.insert("item".to_owned(), ScriptValue::from(self.item_id.as_str()));
+        m.insert(
+            "party_index".to_owned(),
+            ScriptValue::Int(i64::try_from(self.party_index).unwrap_or(0)),
+        );
+        ScriptValue::Map(m)
+    }
+}
+
+/// Metadata for a `world.register_item_use` hook.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ItemUseInfo {
+    /// Item id or `namespace:` prefix.
+    pub id: String,
+    /// Who registered it.
+    pub owner: ScriptOwner,
+}
+
 /// An input action registered with `input.register_action(name, default_keys)` (§10). The
 /// engine binds it in the `Input` facade; `pkrs.toml [input]` overrides the default keys.
 #[derive(Clone, Debug, PartialEq, Eq)]

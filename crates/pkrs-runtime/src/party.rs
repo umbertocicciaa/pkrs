@@ -4,8 +4,8 @@
 //! Until the save-backed party lands (§12, M6), the party is built from
 //! `data/trainers/player.ron` on the first battle ([`PlayerParty::from_side`]) and then lives
 //! in memory: experience, level ups, learned moves and evolutions carry over to every later
-//! battle of the session. HP and PP are not kept: every battle starts with full HP and PP
-//! (there is no healing yet).
+//! battle of the session. Field HP is kept between battles for menus and saves; every battle still
+//! starts at full HP and PP until saves own the party (§7.3).
 
 use pkrs_battle::{BattleSideSetup, CreatureStats};
 use pkrs_data::{BattlePack, MAX_LEVEL, SpeciesDef};
@@ -26,6 +26,8 @@ pub struct PartyMember {
     pub exp: u32,
     /// Known moves (at most [`MAX_MOVES`]), in slot order.
     pub moves: Vec<String>,
+    /// Current HP in the field (`None` = full HP at the current level).
+    pub hp: Option<u32>,
 }
 
 /// What [`PartyMember::learn`] did.
@@ -49,6 +51,7 @@ impl PartyMember {
             level,
             exp: species.exp_for_level(level),
             moves,
+            hp: None,
         }
     }
 
@@ -62,6 +65,43 @@ impl PartyMember {
     #[must_use]
     pub fn stats(&self, species: &SpeciesDef) -> CreatureStats {
         level_stats(species, self.level)
+    }
+
+    /// Current HP in the field (full when [`Self::hp`] is unset).
+    #[must_use]
+    pub fn current_hp(&self, species: &SpeciesDef) -> u32 {
+        let max = self.stats(species).max_hp;
+        self.hp.unwrap_or(max).min(max)
+    }
+
+    /// Sets current HP, clamped to max HP at this level.
+    pub fn set_hp(&mut self, hp: u32, species: &SpeciesDef) {
+        let max = self.stats(species).max_hp;
+        self.hp = Some(hp.min(max));
+    }
+
+    /// Heals by `amount`, capped at max HP.
+    pub fn heal(&mut self, amount: u32, species: &SpeciesDef) {
+        let cur = self.current_hp(species);
+        self.set_hp(cur.saturating_add(amount), species);
+    }
+
+    /// Sets current HP to the maximum at this level.
+    pub fn heal_full(&mut self, species: &SpeciesDef) {
+        self.hp = None;
+        let _ = species;
+    }
+
+    /// `true` when current HP is zero.
+    #[must_use]
+    pub fn fainted(&self, species: &SpeciesDef) -> bool {
+        self.current_hp(species) == 0
+    }
+
+    /// Deals `amount` damage, floored at 0 HP.
+    pub fn damage(&mut self, amount: u32, species: &SpeciesDef) {
+        let cur = self.current_hp(species);
+        self.set_hp(cur.saturating_sub(amount), species);
     }
 
     /// Adds `amount` exp (capped at the exp of level 100) and levels up along `species`'
@@ -131,6 +171,7 @@ impl PlayerParty {
                         level: c.level,
                         exp: 0,
                         moves,
+                        hp: Some(c.stats.max_hp),
                     },
                 }
             })
@@ -153,6 +194,19 @@ impl PlayerParty {
     /// Member `index`, mutably.
     pub fn member_mut(&mut self, index: usize) -> Option<&mut PartyMember> {
         self.members.get_mut(index)
+    }
+
+    /// Swaps members at `a` and `b` when both indices are valid and distinct.
+    pub fn swap_members(&mut self, a: usize, b: usize) -> bool {
+        if a == b {
+            return false;
+        }
+        let len = self.members.len();
+        if a >= len || b >= len {
+            return false;
+        }
+        self.members.swap(a, b);
+        true
     }
 
     /// The battle side of this party (full HP and PP, current species, levels and moves),

@@ -20,8 +20,8 @@
 mod snapshot;
 
 pub use snapshot::{
-    STATE_BATTLE, STATE_CHOICE, STATE_DIALOGUE, STATE_EVOLUTION, STATE_OVERWORLD, STATE_WARP,
-    snapshot, state_name,
+    STATE_BATTLE, STATE_CHOICE, STATE_DIALOGUE, STATE_EVOLUTION, STATE_MENU, STATE_OVERWORLD,
+    STATE_WARP, snapshot, state_name,
 };
 
 use std::fmt;

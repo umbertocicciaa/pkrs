@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use anyhow::Context as _;
+use pkrs_assets::watcher::{FileWatcher, NotifyWatcher};
 use pkrs_core::{GameRng, GridPos, Pcg64Rng};
 use pkrs_platform::{
     DisplaySettings, FixedPaths, MacroquadPlatform, NullPlatform, Platform, PlatformConfig,
@@ -75,11 +76,12 @@ fn run_project_headless(opts: &ProjectOptions, config: RuntimeLoopConfig) -> any
     let project = Project::open(opts)
         .with_context(|| format!("cannot open project `{}`", opts.dir.display()))?;
     startup_check(&project)?;
-    let (scripts, _plugins) =
+    let (scripts, plugins) =
         start_project_scripts(&project, script_rng()).context("cannot load plugins")?;
     let (renderer, _log) = headless_renderer(project.display());
     let mut host = ProjectHost::with_scripts(&project, renderer, scripts)
         .context("cannot start the project")?;
+    host.enable_dev(None, plugins.loaded);
     let mut platform = Platform::new(
         Box::new(NullPlatform::new()),
         Box::new(project.paths.clone()),
@@ -119,19 +121,21 @@ fn run_project_windowed(opts: &ProjectOptions, config: RuntimeLoopConfig) -> any
     startup_check(&project)?;
     let display = project.display();
     let window = window_config(&project.manifest.game.name, &display, config.vsync);
+    let project_dir = opts.dir.clone();
     MacroquadPlatform::run(&window, move |backend| async move {
         let mut platform = Platform::new(
             Box::new(backend),
             Box::new(project.paths.clone()),
             PlatformConfig::default(),
         );
-        let scripts = match start_project_scripts(&project, script_rng()) {
-            Ok((scripts, _plugins)) => scripts,
+        let plugins = match start_project_scripts(&project, script_rng()) {
+            Ok((scripts, report)) => (scripts, report),
             Err(err) => {
                 tracing::error!(%err, "cannot load plugins");
                 return;
             }
         };
+        let (scripts, plugin_report) = plugins;
         let renderer = Renderer::new(
             Box::new(MacroquadRenderer::new()),
             display,
@@ -144,6 +148,10 @@ fn run_project_windowed(opts: &ProjectOptions, config: RuntimeLoopConfig) -> any
                 return;
             }
         };
+        let watcher = NotifyWatcher::new(&project_dir)
+            .ok()
+            .map(|w| Box::new(w) as Box<dyn FileWatcher>);
+        host.enable_dev(watcher, plugin_report.loaded);
         let exit = run_loop(&mut platform, &mut host, &config).await;
         tracing::info!(?exit, "project run finished");
     });

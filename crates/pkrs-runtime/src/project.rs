@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use pkrs_assets::watcher::{FileWatcher, ReloadAction};
 use pkrs_assets::{FolderVfs, Vfs, VfsPath};
 use pkrs_battle::{BattleResult, NullBattleHooks, RngPolicy};
 use pkrs_core::{Direction, GridPos, Pcg64Rng, ProjectManifest, Version};
@@ -27,6 +28,7 @@ use pkrs_world::{
 
 use crate::battle::{BattleContent, BattleScreen, PostBattle};
 use crate::data::load_game_data;
+use crate::debug::{DebugOverlaySnapshot, DevRuntime, script_overlay_fields};
 use crate::default_theme::build_default_ui_theme;
 use crate::encounters::{Encounters, wild_battle_request};
 use crate::main_loop::SimulationHost;
@@ -380,6 +382,10 @@ pub struct ProjectHost {
     /// Active language and text tables (§5.5); the script world holds the live copy when
     /// scripting is on ([`localizer`](Self::localizer)).
     localizer: Localizer,
+    /// Dev overlays, console and hot reload (`pkrs run`, §15.1).
+    dev: Option<DevRuntime>,
+    /// Plugin ids used when scripts are reloaded (§8.3).
+    dev_plugins: Vec<String>,
 }
 
 /// Seed of the stream battles derive their RNG from until the save owns the game RNG (§12).
@@ -481,6 +487,8 @@ impl ProjectHost {
                 &project.manifest.locale,
                 &text_plugins(project),
             ),
+            dev: None,
+            dev_plugins: Vec::new(),
         };
         if let Some(scripts) = host.scripts.as_ref() {
             scripts.world().get_mut().localizer = host.localizer.clone();
@@ -557,6 +565,49 @@ impl ProjectHost {
     /// Mutable overworld scripting (tests, debug console).
     pub fn scripts_mut(&mut self) -> Option<&mut OverworldScripts> {
         self.scripts.as_mut()
+    }
+
+    /// Enables F3–F6 overlays, the `` ` `` console and file watching (windowed `pkrs run`).
+    pub fn enable_dev(&mut self, watcher: Option<Box<dyn FileWatcher>>, plugins: Vec<String>) {
+        self.dev_plugins = plugins;
+        self.dev = Some(match watcher {
+            Some(w) => DevRuntime::with_watcher(w),
+            None => DevRuntime::disabled(),
+        });
+    }
+
+    /// Active dev session, when [`enable_dev`](Self::enable_dev) ran.
+    #[must_use]
+    pub fn dev_runtime(&self) -> Option<&DevRuntime> {
+        self.dev.as_ref()
+    }
+
+    /// Collects F3 overlay fields without drawing (unit tests).
+    #[must_use]
+    pub fn debug_overlay_snapshot(&self, frame_ms: f32) -> DebugOverlaySnapshot {
+        let tasks = self.scripts.as_ref().map_or(0, |s| s.scheduler().len());
+        let host = self.scripts.as_ref().map(|s| s.host());
+        let (lua_bytes, script_tasks) = script_overlay_fields(host, tasks);
+        let fps = if frame_ms > 0.0 {
+            1000.0 / frame_ms
+        } else {
+            0.0
+        };
+        DebugOverlaySnapshot {
+            fps,
+            frame_ms,
+            ticks: self.ticks,
+            mode: self.debug_mode_line(),
+            map: self.scene.map().id.clone(),
+            player_tile: self.walker.pos(),
+            lua_bytes,
+            script_tasks,
+        }
+    }
+
+    /// Applies one reload action (integration tests).
+    pub fn apply_hot_reload(&mut self, action: ReloadAction) {
+        self.apply_hot_reload_actions(vec![action]);
     }
 
     /// The script dialogue on screen, if any.
@@ -1548,6 +1599,93 @@ fn load_sprite(
     )))
 }
 
+impl ProjectHost {
+    /// Human-readable play mode for the F3 overlay.
+    #[must_use]
+    pub fn debug_mode_line(&self) -> String {
+        if self.post_battle.is_some() {
+            "post_battle".into()
+        } else if self.battle.is_some() {
+            "battle".into()
+        } else if self.overlay.is_some() {
+            "dialogue".into()
+        } else if self.is_warping() {
+            "warp".into()
+        } else {
+            "overworld".into()
+        }
+    }
+
+    pub(crate) fn reload_scripts(&mut self) {
+        if let Some(scripts) = self.scripts.as_mut() {
+            scripts.reload_all_scripts(&self.dev_plugins);
+        }
+    }
+
+    pub(crate) fn reload_data(&mut self) -> Result<(), String> {
+        let options = LoadOptions::from_features(&self.project.manifest.features);
+        let vfs = &self.project.vfs;
+        let attempt = match self.scripts.as_ref() {
+            Some(scripts) => scripts
+                .host()
+                .with_content(|db| load_game_data(vfs, options, Some(db))),
+            None => load_game_data(vfs, options, None),
+        };
+        match attempt {
+            Ok(data) => {
+                self.game_data = Some(data);
+                self.battle_content = None;
+                self.localizer = crate::locale::project_localizer(
+                    &self.project.vfs,
+                    &self.project.manifest.locale,
+                    &text_plugins(&self.project),
+                );
+                if let Some(scripts) = self.scripts.as_mut() {
+                    scripts.world().get_mut().localizer = self.localizer.clone();
+                }
+                tracing::info!(target: "dev", "data reloaded");
+                Ok(())
+            }
+            Err(err) => {
+                let message = err.to_string();
+                tracing::warn!(target: "dev", %message, "data reload kept previous content");
+                Err(message)
+            }
+        }
+    }
+
+    pub(crate) fn reload_textures(&mut self) -> Result<(), ProjectError> {
+        let textures = upload_map_textures(&self.project, &mut self.renderer, self.scene.map())?;
+        self.scene.refresh_tile_textures(&textures);
+        self.active_textures = textures;
+        tracing::info!(target: "dev", "map textures reloaded");
+        Ok(())
+    }
+
+    fn apply_hot_reload_actions(&mut self, actions: Vec<ReloadAction>) {
+        for action in actions {
+            match action {
+                ReloadAction::Scripts => self.reload_scripts(),
+                ReloadAction::Data => {
+                    let err = self.reload_data().err();
+                    if let Some(dev) = self.dev.as_mut() {
+                        if let Some(msg) = err {
+                            dev.set_reload_error(msg);
+                        } else {
+                            dev.clear_reload_error();
+                        }
+                    }
+                }
+                ReloadAction::Textures => {
+                    if let Err(err) = self.reload_textures() {
+                        tracing::warn!(target: "dev", %err, "texture reload failed");
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// A one-tile solid-colour sprite (player without `sprites/player.png`, NPCs).
 fn marker_sprite(
     renderer: &mut Renderer,
@@ -1565,6 +1703,10 @@ fn marker_sprite(
 impl SimulationHost for ProjectHost {
     fn poll_input(&mut self, platform: &Platform) {
         self.input.poll(platform);
+        if let Some(mut dev) = self.dev.take() {
+            dev.poll(platform, self);
+            self.dev = Some(dev);
+        }
     }
 
     fn begin_tick(&mut self) {
@@ -1572,6 +1714,10 @@ impl SimulationHost for ProjectHost {
     }
 
     fn simulation_tick(&mut self, _dt: f64) {
+        if let Some(mut dev) = self.dev.take() {
+            dev.apply_pending(self);
+            self.dev = Some(dev);
+        }
         self.ticks += 1;
 
         // §3.3 step 2: resume script tasks.
@@ -1626,11 +1772,30 @@ impl SimulationHost for ProjectHost {
         }
         let backdrops: Vec<&NeighborBackdrop> =
             self.neighbors.iter().map(|n| &n.backdrop).collect();
-        self.scene.render(&mut self.renderer, alpha, &backdrops);
+        let origin = self.scene.render(&mut self.renderer, alpha, &backdrops);
         if let (Some(overlay), Some(theme)) = (&self.overlay, &self.ui_theme) {
             overlay.render(&mut self.renderer, theme);
         }
         self.fade.render(&mut self.renderer);
+        if let Some(dev) = self.dev.as_ref() {
+            let frame_ms = (platform.raw_frame_time() * 1000.0) as f32;
+            let stats = dev.show_stats().then(|| {
+                let mut snap = self.debug_overlay_snapshot(frame_ms);
+                snap.fps = dev.smoothed_fps();
+                snap.frame_ms = frame_ms;
+                snap
+            });
+            let map = self.scene.map();
+            let theme = self.ui_theme.as_ref();
+            dev.render_to(
+                &mut self.renderer,
+                platform,
+                theme,
+                map,
+                stats.as_ref(),
+                origin,
+            );
+        }
         self.renderer.end_frame();
     }
 }

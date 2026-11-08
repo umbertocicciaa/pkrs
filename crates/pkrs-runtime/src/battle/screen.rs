@@ -30,6 +30,7 @@ use super::menu::{
     target_entries,
 };
 use super::present::{Cue, Presenter, Roster};
+use crate::locale::BattleText;
 use crate::ui_theme::UiTheme;
 
 /// Glyphs revealed per tick in battle text.
@@ -148,6 +149,8 @@ pub struct BattleScreen {
     ai: TrainerAi,
     kind: BattleKind,
     presenter: Presenter,
+    /// Localized texts and names (§5.5).
+    text: BattleText,
     display: Roster,
     queue: VecDeque<Cue>,
     playing: Option<Playing>,
@@ -189,8 +192,9 @@ impl BattleScreen {
             setup,
             resources,
             ai,
+            text,
         } = prepared;
-        let presenter = Presenter::new(kind.clone(), &setup);
+        let presenter = Presenter::with_text(kind.clone(), &setup, text.clone());
         let display = presenter.roster().clone();
         let pack = Rc::new(resources.pack.clone());
         let rewards = super::rewards::battle_rewards(&kind, &setup, &pack);
@@ -203,6 +207,7 @@ impl BattleScreen {
             ai,
             kind,
             presenter,
+            text,
             display,
             queue: VecDeque::new(),
             playing: None,
@@ -276,6 +281,12 @@ impl BattleScreen {
     #[must_use]
     pub fn is_finished(&self) -> bool {
         self.finished
+    }
+
+    /// The battle's localized texts and names (§5.5).
+    #[must_use]
+    pub fn battle_text(&self) -> &BattleText {
+        &self.text
     }
 
     /// Wild or trainer battle.
@@ -384,8 +395,8 @@ impl BattleScreen {
                 }
                 Err(err) => {
                     tracing::warn!(target: "battle", %err, "battle input rejected");
-                    self.queue
-                        .push_back(Cue::Text("That can't be done now!".into()));
+                    let text = self.text.say("battle.cant_do_now", &[]);
+                    self.queue.push_back(Cue::Text(text));
                     return;
                 }
             }
@@ -551,26 +562,31 @@ impl BattleScreen {
                         menu
                     }
                 };
-                OpenMenu::new(kind, action_entries(&menu), MenuValues::Action)
+                OpenMenu::new(kind, action_entries(&menu, &self.text), MenuValues::Action)
             }
             MenuKind::Fight => view
                 .creature(me)
-                .and_then(|c| OpenMenu::new(kind, fight_entries(c), MenuValues::Fight)),
-            MenuKind::Bag => OpenMenu::new(kind, bag_entries(&self.bag), MenuValues::Bag),
+                .and_then(|c| OpenMenu::new(kind, fight_entries(c, &self.text), MenuValues::Fight)),
+            MenuKind::Bag => {
+                OpenMenu::new(kind, bag_entries(&self.bag, &self.text), MenuValues::Bag)
+            }
             MenuKind::Party { .. } => OpenMenu::new(
                 kind,
-                party_entries(view.side(SideId::Player)),
+                party_entries(view.side(SideId::Player), &self.text),
                 MenuValues::Party,
             ),
-            MenuKind::Target => OpenMenu::new(kind, target_entries(&view), MenuValues::Target),
+            MenuKind::Target => {
+                OpenMenu::new(kind, target_entries(&view, &self.text), MenuValues::Target)
+            }
         };
         match menu {
             Some(menu) => self.menu = Some(menu),
             None => {
-                let text = match kind {
-                    MenuKind::Bag => "The bag is empty.",
-                    _ => "There's nothing to choose.",
+                let key = match kind {
+                    MenuKind::Bag => "battle.bag_empty",
+                    _ => "battle.nothing_to_choose",
                 };
+                let text = self.text.say(key, &[]);
                 self.say_then(text, MenuKind::Action);
             }
         }
@@ -626,10 +642,10 @@ impl BattleScreen {
             }
             Pick::Action(ActionKind::Run) => match self.kind {
                 BattleKind::Wild => self.submit(BattleAction::Run, hooks),
-                BattleKind::Trainer { .. } => self.say_then(
-                    "There's no running from a trainer battle!",
-                    MenuKind::Action,
-                ),
+                BattleKind::Trainer { .. } => {
+                    let text = self.text.say("battle.no_running", &[]);
+                    self.say_then(text, MenuKind::Action);
+                }
             },
             Pick::Action(ActionKind::Custom(id)) => self.submit(
                 BattleAction::Custom {
@@ -639,7 +655,8 @@ impl BattleScreen {
                 hooks,
             ),
             Pick::Move(_) if !enabled => {
-                self.say_then("There's no PP left for this move!", MenuKind::Fight);
+                let text = self.text.say("battle.no_pp", &[]);
+                self.say_then(text, MenuKind::Fight);
             }
             Pick::Move(move_slot) => {
                 let actor = self.player_actor();
@@ -701,9 +718,9 @@ impl BattleScreen {
                     .members
                     .get(usize::from(party));
                 let text = match member {
-                    Some(m) if m.hp == 0 => format!("{} has no energy left to battle!", m.name),
-                    Some(m) => format!("{} is already in battle!", m.name),
-                    None => "That creature can't battle.".to_owned(),
+                    Some(m) if m.hp == 0 => self.text.say("battle.no_energy", &[("name", &m.name)]),
+                    Some(m) => self.text.say("battle.already_in", &[("name", &m.name)]),
+                    None => self.text.say("battle.cant_battle", &[]),
                 };
                 self.say_then(text, kind);
             }
@@ -984,7 +1001,9 @@ impl BattleScreen {
         renderer.draw_text(
             font,
             self.theme.font_tex,
-            &format!("Lv{}", member.level),
+            &self
+                .text
+                .say("battle.hud.level", &[("level", &member.level.to_string())]),
             rect.x + rect.width - 30.0,
             rect.y + 4.0,
             style,
@@ -1036,14 +1055,13 @@ impl BattleScreen {
             }
             _ if self.menu.is_some() => {
                 let prompt = match self.menu() {
-                    Some(MenuKind::Party { forced: true }) => "Choose who goes next.".to_owned(),
-                    _ => format!(
-                        "What will {} do?",
-                        self.display
-                            .side(SideId::Player)
-                            .active_member(0)
-                            .map_or("you", |m| m.name.as_str())
-                    ),
+                    Some(MenuKind::Party { forced: true }) => {
+                        self.text.say("battle.prompt.next", &[])
+                    }
+                    _ => match self.display.side(SideId::Player).active_member(0) {
+                        Some(m) => self.text.say("battle.prompt.action", &[("name", &m.name)]),
+                        None => self.text.say("battle.prompt.action_nobody", &[]),
+                    },
                 };
                 renderer.draw_text(
                     &self.theme.font,

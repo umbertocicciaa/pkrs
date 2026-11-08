@@ -33,9 +33,10 @@ use pkrs_ui::{
     colored_line_char_count, draw_colored_lines, draw_more_arrow,
 };
 
-use super::content::{BattleKind, display_name};
+use super::content::BattleKind;
 use super::screen::{BATTLE_CHARS_PER_TICK, TEXT_PANEL_HEIGHT};
 use crate::evolution::EvolutionScene;
+use crate::locale::BattleText;
 use crate::party::{Learn, MAX_MOVES, PlayerParty};
 use crate::ui_theme::UiTheme;
 
@@ -104,11 +105,14 @@ pub struct PostBattle {
     theme: UiTheme,
     view: (u32, u32),
     texts_shown: u64,
+    /// Localized texts and names (§5.5).
+    text: BattleText,
 }
 
 impl PostBattle {
     /// The flow for `result`: `earners` (party indices sent out and not fainted) share
     /// `result.exp`. `None` when there is nothing to show (not a win, no exp, no earner).
+    /// Texts are in English; see [`with_text`](Self::with_text).
     #[must_use]
     pub fn new(
         result: &BattleResult,
@@ -117,6 +121,28 @@ impl PostBattle {
         pack: &BattlePack,
         theme: UiTheme,
         view: (u32, u32),
+    ) -> Option<Self> {
+        Self::with_text(
+            result,
+            earners,
+            party,
+            pack,
+            theme,
+            view,
+            BattleText::default(),
+        )
+    }
+
+    /// Like [`new`](Self::new), with texts and names from `text`.
+    #[must_use]
+    pub fn with_text(
+        result: &BattleResult,
+        earners: &[PartyIndex],
+        party: &PlayerParty,
+        pack: &BattlePack,
+        theme: UiTheme,
+        view: (u32, u32),
+        text: BattleText,
     ) -> Option<Self> {
         if result.outcome != BattleOutcome::PlayerWin || result.exp == 0 {
             return None;
@@ -140,15 +166,21 @@ impl PostBattle {
             let Some(m) = party.member_mut(member) else {
                 continue;
             };
-            let name = m.name();
-            steps.push_back(Step::Text(format!("{name} gained {share} Exp. Points!")));
+            let name = text.species(&m.species);
+            steps.push_back(Step::Text(text.say(
+                "battle.exp_gained",
+                &[("name", &name), ("exp", &share.to_string())],
+            )));
             let Some(species) = pack.species.get(&m.species) else {
                 tracing::warn!(target: "battle", species = %m.species, "unknown species gains no levels");
                 continue;
             };
             let levels = m.gain_exp(share, species);
             for level in &levels {
-                steps.push_back(Step::Text(format!("{name} grew to level {level}!")));
+                steps.push_back(Step::Text(text.say(
+                    "battle.level_up",
+                    &[("name", &name), ("level", &level.to_string())],
+                )));
                 for move_id in species.moves_learned_at(*level) {
                     steps.push_back(Step::Learn {
                         member,
@@ -180,6 +212,7 @@ impl PostBattle {
             theme,
             view,
             texts_shown: 0,
+            text,
         })
     }
 
@@ -295,11 +328,12 @@ impl PostBattle {
                     let Some(m) = self.party.member(member) else {
                         continue;
                     };
-                    let name = m.name();
+                    let name = self.text.species(&m.species);
                     self.phase = PostBattlePhase::Evolution;
-                    self.scene = Some(EvolutionScene::new(name.clone(), display_name(&into)));
+                    self.scene = Some(EvolutionScene::new(name.clone(), self.text.species(&into)));
                     self.steps.push_front(Step::Animate { member, into });
-                    self.say(format!("What? {name} is evolving!"));
+                    let text = self.text.say("battle.evolving", &[("name", &name)]);
+                    self.say(text);
                 }
                 Step::Animate { member, into } => {
                     self.playing = Some(Playing::Evolving { member, into });
@@ -327,15 +361,26 @@ impl PostBattle {
         let Some(m) = self.party.member_mut(member) else {
             return;
         };
-        let (name, move_name) = (m.name(), display_name(&move_id));
+        let (name, move_name) = (self.text.species(&m.species), self.text.move_name(&move_id));
         match m.learn(&move_id) {
             Learn::AlreadyKnown => {}
-            Learn::Learned => self.say(format!("{name} learned {move_name}!")),
+            Learn::Learned => {
+                let text = self
+                    .text
+                    .say("battle.learned", &[("name", &name), ("move", &move_name)]);
+                self.say(text);
+            }
             Learn::Full => {
                 self.steps.push_front(Step::Prompt { member, move_id });
-                self.say(format!(
-                    "{name} wants to learn {move_name}, but {name} already knows {MAX_MOVES} moves."
-                ));
+                let text = self.text.say(
+                    "battle.moves_full",
+                    &[
+                        ("name", &name),
+                        ("move", &move_name),
+                        ("max", &MAX_MOVES.to_string()),
+                    ],
+                );
+                self.say(text);
             }
         }
     }
@@ -345,18 +390,18 @@ impl PostBattle {
         let Some(m) = self.party.member(member) else {
             return;
         };
-        let (name, move_name) = (m.name(), display_name(&move_id));
+        let (name, move_name) = (self.text.species(&m.species), self.text.move_name(&move_id));
         let mut options: Vec<ChoiceOption> = m
             .moves
             .iter()
             .map(|id| ChoiceOption {
-                label: display_name(id),
+                label: self.text.move_name(id),
             })
             .collect();
         options.push(ChoiceOption {
-            label: format!("Don't learn {move_name}"),
+            label: self.text.say("battle.dont_learn", &[("move", &move_name)]),
         });
-        let prompt = format!("Which move should {name} forget?");
+        let prompt = self.text.say("battle.forget_prompt", &[("name", &name)]);
         match ChoiceSession::new(options) {
             Ok(session) => {
                 self.texts_shown = self.texts_shown.saturating_add(1);
@@ -392,17 +437,25 @@ impl PostBattle {
         let Some(m) = self.party.member_mut(member) else {
             return;
         };
-        let (name, move_name) = (m.name(), display_name(&move_id));
+        let (name, move_name) = (self.text.species(&m.species), self.text.move_name(&move_id));
         let forgotten = slot.and_then(|i| m.replace_move(i, &move_id));
         match forgotten {
             Some(old) => {
-                self.steps.push_front(Step::Text(format!(
-                    "{name} forgot {} and learned {move_name}!",
-                    display_name(&old)
+                let old = self.text.move_name(&old);
+                self.steps.push_front(Step::Text(self.text.say(
+                    "battle.forgot_and_learned",
+                    &[("name", &name), ("old", &old), ("move", &move_name)],
                 )));
-                self.say("1, 2 and... Poof!".to_owned());
+                let text = self.text.say("battle.poof", &[]);
+                self.say(text);
             }
-            None => self.say(format!("{name} did not learn {move_name}.")),
+            None => {
+                let text = self.text.say(
+                    "battle.did_not_learn",
+                    &[("name", &name), ("move", &move_name)],
+                );
+                self.say(text);
+            }
         }
     }
 
@@ -416,7 +469,7 @@ impl PostBattle {
         else {
             return;
         };
-        let old = m.name();
+        let old = self.text.species(&m.species);
         m.evolve(species);
         let level = m.level;
         let new_moves: Vec<Step> = species
@@ -429,10 +482,11 @@ impl PostBattle {
         for step in new_moves.into_iter().rev() {
             self.steps.push_front(step);
         }
-        self.say(format!(
-            "Congratulations! Your {old} evolved into {}!",
-            display_name(&into)
-        ));
+        let text = self.text.say(
+            "battle.evolved",
+            &[("name", &old), ("into", &self.text.species(&into))],
+        );
+        self.say(text);
     }
 
     // --- rendering ---------------------------------------------------------------------

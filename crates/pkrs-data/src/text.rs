@@ -13,11 +13,149 @@
 //!
 //! Content fields that hold display text (`name`, `description`) either contain literal
 //! text or a reference `text:<key>` ([`TEXT_PREFIX`]) resolved with [`TextDb::resolve`].
+//!
+//! Texts may contain **argument placeholders** filled by [`format_text`] from [`TextArgs`]:
+//! `{name}` takes the argument called `name`, `{0}`, `{1}`, … the positional arguments in
+//! order. A placeholder without a matching argument stays as written, so dialogue control
+//! codes (`{player}`, `{color:red}`, `{pause:20}`, `{{`, §5.5) pass through untouched.
+//!
+//! ```ron
+//! // data/text/en/battle.ron
+//! { "resonance.start": "{name} is resonating!" }
+//! ```
+//!
+//! [`Localizer`](crate::Localizer) layers several databases (game, plugins, engine) and picks
+//! the active language with a fallback to the default one.
 
 use std::collections::BTreeMap;
 
 use crate::codec::RonCodec;
+use crate::database::{in_file, ron_files, sorted};
 use crate::error::{DataError, Result};
+use crate::files::DataFiles;
+
+/// The key of a `text:<key>` reference, or `None` for literal text.
+#[must_use]
+pub fn text_key(value: &str) -> Option<&str> {
+    value.strip_prefix(TEXT_PREFIX)
+}
+
+/// Arguments of a localized text (`{name}` / `{0}` placeholders), in order.
+///
+/// Positional arguments are named by their 0-based index (`"0"`, `"1"`, …), so `{0}` and a
+/// named `{name}` are looked up the same way.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TextArgs(Vec<(String, String)>);
+
+impl TextArgs {
+    /// No arguments.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Positional arguments `{0}`, `{1}`, … in order.
+    #[must_use]
+    pub fn positional<I, S>(values: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self(
+            values
+                .into_iter()
+                .enumerate()
+                .map(|(i, v)| (i.to_string(), v.into()))
+                .collect(),
+        )
+    }
+
+    /// Adds (or replaces) the argument `name`, builder style.
+    #[must_use]
+    pub fn with(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.set(name, value);
+        self
+    }
+
+    /// Sets the argument `name` to `value`, replacing an earlier one.
+    pub fn set(&mut self, name: impl Into<String>, value: impl Into<String>) {
+        let (name, value) = (name.into(), value.into());
+        match self.0.iter_mut().find(|(n, _)| *n == name) {
+            Some(entry) => entry.1 = value,
+            None => self.0.push((name, value)),
+        }
+    }
+
+    /// The value of `name` (`"0"` for the first positional argument).
+    #[must_use]
+    pub fn get(&self, name: &str) -> Option<&str> {
+        self.0
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v.as_str())
+    }
+
+    /// `true` without arguments.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// `(name, value)` pairs in order.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.0.iter().map(|(n, v)| (n.as_str(), v.as_str()))
+    }
+}
+
+/// Fills the `{name}` / `{0}` placeholders of `template` from `args`. `{{` and placeholders
+/// without a matching argument (dialogue control codes such as `{player}`) are kept as
+/// written; argument values are inserted as they are.
+#[must_use]
+pub fn format_text(template: &str, args: &TextArgs) -> String {
+    if args.is_empty() || !template.contains('{') {
+        return template.to_owned();
+    }
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        if let Some(escaped) = after.strip_prefix('{') {
+            out.push_str("{{");
+            rest = escaped;
+            continue;
+        }
+        let Some(close) = after.find('}') else {
+            out.push_str(&rest[open..]);
+            rest = "";
+            break;
+        };
+        let name = &after[..close];
+        match args.get(name) {
+            Some(value) => out.push_str(value),
+            None => {
+                out.push('{');
+                out.push_str(name);
+                out.push('}');
+            }
+        }
+        rest = &after[close + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// What a display value resolves to in a [`TextDb`] ([`TextDb::lookup`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextLookup<'a> {
+    /// Not a `text:` reference: the value is literal text.
+    Literal(&'a str),
+    /// The text of the referenced key.
+    Found(&'a str),
+    /// A `text:` reference to a key that neither language defines (the key, without the
+    /// prefix). This is what a missing-key report lists.
+    Missing(&'a str),
+}
 
 /// Prefix of a text reference in content fields (`text:species.emberkit`).
 pub const TEXT_PREFIX: &str = "text:";
@@ -95,6 +233,47 @@ impl TextDb {
         duplicate.map_or(Ok(()), Err)
     }
 
+    /// Loads every `<dir>/<lang>/*.ron` file (normally `data/text`), language folders and
+    /// files in name order, merging each into its language. Returns the problems found; the
+    /// readable files are still merged.
+    pub fn load_dir(&mut self, files: &dyn DataFiles, dir: &str) -> Vec<DataError> {
+        let mut errors = Vec::new();
+        for lang in sorted(files.list_dirs(dir)) {
+            let lang_dir = format!("{dir}/{lang}");
+            for name in ron_files(files, &lang_dir) {
+                let file = format!("{lang_dir}/{name}");
+                match files.read_text(&file) {
+                    Ok(source) => {
+                        if let Err(e) = self.insert_ron(&lang, &source, &file) {
+                            errors.push(in_file(&file, e));
+                        }
+                    }
+                    Err(message) => errors.push(DataError::Read { file, message }),
+                }
+            }
+        }
+        errors
+    }
+
+    /// `true` when `lang` defines `key`.
+    #[must_use]
+    pub fn contains(&self, lang: &str, key: &str) -> bool {
+        self.get(lang, key).is_some()
+    }
+
+    /// Like [`resolve`](Self::resolve), telling literal text, a found key and a missing key
+    /// apart (missing-key reports use this).
+    #[must_use]
+    pub fn lookup<'a>(&'a self, lang: &str, fallback: &str, value: &'a str) -> TextLookup<'a> {
+        match text_key(value) {
+            None => TextLookup::Literal(value),
+            Some(key) => self
+                .get(lang, key)
+                .or_else(|| self.get(fallback, key))
+                .map_or(TextLookup::Missing(key), TextLookup::Found),
+        }
+    }
+
     /// The text of `key` in `lang`.
     #[must_use]
     pub fn get(&self, lang: &str, key: &str) -> Option<&str> {
@@ -167,6 +346,59 @@ mod tests {
         );
         assert_eq!(db.resolve("it", "en", "Literal"), Some("Literal"));
         assert_eq!(db.resolve("en", "en", "text:missing"), None);
+    }
+
+    #[test]
+    fn arguments_fill_named_and_positional_placeholders() {
+        let args = TextArgs::new().with("name", "Ash").with("n", "3");
+        assert_eq!(
+            format_text("{name} won {n} times!", &args),
+            "Ash won 3 times!"
+        );
+        let pos = TextArgs::positional(["Ash", "Leafkit"]);
+        assert_eq!(
+            format_text("{0} sent out {1}!", &pos),
+            "Ash sent out Leafkit!"
+        );
+        assert_eq!(pos.get("1"), Some("Leafkit"));
+        // Unknown placeholders, control codes, escapes and unclosed braces stay as written.
+        assert_eq!(
+            format_text("{color:red}{name}{{x}} {player} {missing} {open", &args),
+            "{color:red}Ash{{x}} {player} {missing} {open"
+        );
+        assert_eq!(format_text("{name}", &TextArgs::new()), "{name}");
+        let mut replaced = TextArgs::new().with("a", "1");
+        replaced.set("a", "2");
+        assert_eq!(replaced.iter().collect::<Vec<_>>(), [("a", "2")]);
+        assert!(!replaced.is_empty());
+    }
+
+    #[test]
+    fn lookup_tells_literal_found_and_missing_apart() {
+        let mut db = TextDb::new();
+        db.insert_ron("en", r#"{ "a": "A" }"#, "en.ron").unwrap();
+        assert_eq!(db.lookup("it", "en", "text:a"), TextLookup::Found("A"));
+        assert_eq!(db.lookup("it", "en", "text:b"), TextLookup::Missing("b"));
+        assert_eq!(db.lookup("it", "en", "plain"), TextLookup::Literal("plain"));
+        assert!(db.contains("en", "a"));
+        assert!(!db.contains("it", "a"));
+        assert_eq!(text_key("text:a"), Some("a"));
+        assert_eq!(text_key("a"), None);
+    }
+
+    #[test]
+    fn load_dir_reads_every_language_folder() {
+        let files = crate::MemoryDataFiles::new()
+            .with("data/text/en/a.ron", r#"{ "a": "A" }"#)
+            .with("data/text/it/a.ron", r#"{ "a": "Ah" }"#)
+            .with("data/text/it/b.ron", "{ ")
+            .with("data/text/it/notes.txt", "ignored");
+        let mut db = TextDb::new();
+        let errors = db.load_dir(&files, "data/text");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].to_string().contains("data/text/it/b.ron"));
+        assert_eq!(db.get("it", "a"), Some("Ah"));
+        assert_eq!(db.languages().collect::<Vec<_>>(), ["en", "it"]);
     }
 
     #[test]

@@ -89,9 +89,7 @@ pub fn apply_effects(
             MoveEffect::MultiHit { min, max } => {
                 let span = u32::from(max.saturating_sub(*min)) + 1;
                 let extra = rng.gen_range_u32(span) + u32::from(*min);
-                out.push(BattleEvent::Message {
-                    key: format!("multi_hit:{extra}"),
-                });
+                out.push(BattleEvent::message(format!("multi_hit:{extra}")));
             }
             MoveEffect::Weather { weather: id } => {
                 if let Some(def) = rules.weather(id) {
@@ -102,14 +100,10 @@ pub fn apply_effects(
                 }
             }
             MoveEffect::Protect => {
-                out.push(BattleEvent::Message {
-                    key: "protect".into(),
-                });
+                out.push(BattleEvent::message("protect"));
             }
             MoveEffect::SwitchOut => {
-                out.push(BattleEvent::Message {
-                    key: "switch_out".into(),
-                });
+                out.push(BattleEvent::message("switch_out"));
             }
         }
     }

@@ -3,6 +3,7 @@
 
 use mlua::{Function, Lua, Table, Value};
 use pkrs_core::{Direction, GridPos};
+use pkrs_data::TextArgs;
 
 use super::convert;
 use super::sandbox::located_error;
@@ -111,6 +112,66 @@ pub(super) fn int(func: &str, what: &str, v: &Value, min: i64, max: i64) -> Resu
             type_of(v)
         )),
     }
+}
+
+/// Optional text arguments (§5.5): `nil`, or a table whose list part fills `{0}`, `{1}`, …
+/// and whose string keys fill `{name}`. Values are strings, numbers or booleans.
+pub(super) fn text_args(func: &str, v: &Value) -> Result<TextArgs, String> {
+    let table = match v {
+        Value::Nil => return Ok(TextArgs::new()),
+        Value::Table(t) => t,
+        other => {
+            return Err(format!(
+                "{func}: args must be a table (got {})",
+                type_of(other)
+            ));
+        }
+    };
+    let value = |key: &str, v: &Value| -> Result<String, String> {
+        match v {
+            Value::String(s) => Ok(s.to_string_lossy()),
+            Value::Integer(i) => Ok(i.to_string()),
+            Value::Number(n) if n.fract() == 0.0 && n.is_finite() => Ok(format!("{n:.0}")),
+            Value::Number(n) => Ok(n.to_string()),
+            Value::Boolean(b) => Ok(b.to_string()),
+            other => Err(format!(
+                "{func}: args.{key} must be a string, number or boolean (got {})",
+                type_of(other)
+            )),
+        }
+    };
+    let mut named = Vec::new();
+    let mut positional = Vec::new();
+    for pair in table.clone().pairs::<Value, Value>() {
+        let (k, v) = pair.map_err(|e| format!("{func}: {e}"))?;
+        match k {
+            Value::String(s) => {
+                let key = s.to_string_lossy();
+                let v = value(&key, &v)?;
+                named.push((key, v));
+            }
+            Value::Integer(i) if i >= 1 => {
+                let v = value(&i.to_string(), &v)?;
+                positional.push((i, v));
+            }
+            other => {
+                return Err(format!(
+                    "{func}: args keys must be names or list positions (got {})",
+                    type_of(&other)
+                ));
+            }
+        }
+    }
+    positional.sort();
+    named.sort();
+    let mut args = TextArgs::new();
+    for (i, v) in positional {
+        args.set((i - 1).to_string(), v);
+    }
+    for (k, v) in named {
+        args.set(k, v);
+    }
+    Ok(args)
 }
 
 /// Like [`int`], `default` when `nil`.

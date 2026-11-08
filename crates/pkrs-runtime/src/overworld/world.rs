@@ -17,6 +17,7 @@ use std::rc::Rc;
 
 use pkrs_core::is_action_name;
 use pkrs_core::{Direction, GridPos};
+use pkrs_data::{Localizer, TextArgs};
 use pkrs_save::WorldState;
 use pkrs_script::{ApiError, ApiResult, CameraCommand, ScriptValue, ScriptWorld, TileInfo};
 use pkrs_world::{
@@ -178,6 +179,9 @@ pub struct WorldModel {
     pub warp_request: Option<WarpRequest>,
     /// Camera commands, in call order.
     pub camera: Vec<CameraCommand>,
+    /// Active language and text tables (§5.5): dialogue, choices and notifications are
+    /// localized with it when they are queued.
+    pub localizer: Localizer,
 }
 
 impl Default for WorldModel {
@@ -198,6 +202,7 @@ impl Default for WorldModel {
             notifications: Vec::new(),
             warp_request: None,
             camera: Vec::new(),
+            localizer: crate::locale::engine_localizer(),
         }
     }
 }
@@ -222,6 +227,12 @@ fn object_id(object: &MapObject, fallback: String) -> String {
 }
 
 impl WorldModel {
+    /// Queues a text box showing `text` (literal or `text:` key) localized with `args`.
+    pub fn say(&mut self, text: &str, args: &TextArgs) {
+        let shown = self.localizer.text(text, args);
+        self.ui_requests.push_back(UiRequest::Say(shown));
+    }
+
     /// Replaces the map-dependent state with `map`'s entities and grid, the player standing on
     /// `player` facing `facing`. Entities spawn through the map's persistent state (§6.5).
     pub fn enter_map(&mut self, map: &Map, player: GridPos, facing: Direction) {
@@ -670,24 +681,56 @@ impl ScriptWorld for SharedWorld {
         Ok(())
     }
 
-    fn say(&mut self, text: &str) -> ApiResult<()> {
-        self.get_mut()
+    fn say(&mut self, text: &str, args: &TextArgs) -> ApiResult<()> {
+        self.get_mut().say(text, args);
+        Ok(())
+    }
+
+    fn choose(
+        &mut self,
+        prompt: Option<&str>,
+        args: &TextArgs,
+        options: &[String],
+    ) -> ApiResult<()> {
+        let mut world = self.get_mut();
+        let none = TextArgs::new();
+        let prompt = prompt.map(|p| world.localizer.text(p, args));
+        let options = options
+            .iter()
+            .map(|o| world.localizer.text(o, &none))
+            .collect();
+        world
             .ui_requests
-            .push_back(UiRequest::Say(text.to_owned()));
+            .push_back(UiRequest::Choose { prompt, options });
         Ok(())
     }
 
-    fn choose(&mut self, prompt: Option<&str>, options: &[String]) -> ApiResult<()> {
-        self.get_mut().ui_requests.push_back(UiRequest::Choose {
-            prompt: prompt.map(str::to_owned),
-            options: options.to_vec(),
-        });
-        Ok(())
-    }
-
-    fn notify(&mut self, text: &str) {
+    fn notify(&mut self, text: &str, args: &TextArgs) {
+        let mut world = self.get_mut();
+        let text = world.localizer.text(text, args);
         tracing::info!(target: "script", text, "notify");
-        self.get_mut().notifications.push(text.to_owned());
+        world.notifications.push(text);
+    }
+
+    fn language(&self) -> String {
+        self.get().localizer.language().to_owned()
+    }
+
+    fn languages(&self) -> Vec<String> {
+        self.get().localizer.available().to_vec()
+    }
+
+    fn set_language(&mut self, language: &str) -> ApiResult<()> {
+        self.get_mut()
+            .localizer
+            .set_language(language)
+            .map_err(|e| ApiError::new(e.to_string()))?;
+        tracing::info!(target: "script", language, "text language switched");
+        Ok(())
+    }
+
+    fn text(&self, value: &str, args: &TextArgs) -> String {
+        self.get().localizer.text(value, args)
     }
 
     fn camera(&mut self, command: CameraCommand) -> ApiResult<()> {
@@ -832,9 +875,13 @@ mod tests {
     #[test]
     fn requests_are_queued_for_the_overworld() {
         let mut world = SharedWorld::new();
-        world.say("text:a").unwrap();
+        world.say("text:a", &TextArgs::new()).unwrap();
         world
-            .choose(Some("q"), &["Yes".into(), "No".into()])
+            .choose(
+                Some("q {n}"),
+                &TextArgs::new().with("n", "1"),
+                &["text:ui.yes".into(), "No".into()],
+            )
             .unwrap();
         world.warp("house", GridPos::new(1, 2), None).unwrap();
         assert!(world.set_field_state("fly", true).is_err());
@@ -845,7 +892,40 @@ mod tests {
         assert!(field.surf && field.is_active("mud:boots"));
         let w = world.get();
         assert_eq!(w.ui_requests.len(), 2);
+        assert_eq!(
+            w.ui_requests[1],
+            UiRequest::Choose {
+                prompt: Some("q 1".into()),
+                options: vec!["Yes".into(), "No".into()],
+            },
+            "prompts take arguments, engine keys are localized"
+        );
         assert_eq!(w.warp_request.as_ref().unwrap().map, "house");
+    }
+
+    #[test]
+    fn language_switch_changes_later_texts() {
+        let mut world = SharedWorld::new();
+        world.get_mut().localizer = pkrs_data::Localizer::new("en", vec!["it".into()])
+            .with_layer(crate::locale::engine_text());
+        assert_eq!(world.language(), "en");
+        assert_eq!(world.languages(), ["en", "it"]);
+        assert!(world.set_language("fr").is_err());
+        world.set_language("it").unwrap();
+        assert_eq!(world.text("text:ui.yes", &TextArgs::new()), "Sì");
+        world
+            .choose(None, &TextArgs::new(), &["text:ui.yes".into()])
+            .unwrap();
+        world.notify("{0}!", &TextArgs::positional(["3"]));
+        let w = world.get();
+        assert_eq!(
+            w.ui_requests[0],
+            UiRequest::Choose {
+                prompt: None,
+                options: vec!["Sì".into()],
+            }
+        );
+        assert_eq!(w.notifications, ["3!"]);
     }
 
     #[test]

@@ -1,7 +1,8 @@
 //! Data-driven content: RON schemas, loading, validation and cross-reference checks.
 //!
 //! - Schemas (§8.1): [`SpeciesDef`], [`MoveDef`], [`ItemDef`], [`AbilityDef`],
-//!   [`TypeChart`], [`TrainerDef`] / [`AiProfile`], [`EncounterTable`], text ([`TextDb`]),
+//!   [`TypeChart`], [`TrainerDef`] / [`AiProfile`], [`EncounterTable`], text ([`TextDb`],
+//!   layered and localized by [`Localizer`]),
 //!   plus statuses, terrains and effect primitives.
 //! - [`RonCodec`]: the only place the `ron` crate is used (§4.5).
 //! - [`GameData`]: the immutable content database of a project, loaded through the
@@ -20,6 +21,7 @@ mod error;
 mod files;
 mod growth;
 mod intern;
+mod locale;
 mod move_def;
 mod species;
 mod text;
@@ -46,12 +48,13 @@ pub use error::{DataError, Result};
 pub use files::{DataFiles, MemoryDataFiles};
 pub use growth::{GrowthRate, MAX_LEVEL};
 pub use intern::{Handle, Keyed, Table};
+pub use locale::{ENGINE_LANGUAGE, Localizer, UnknownLanguage};
 pub use move_def::{EffectTarget, MoveCategory, MoveDef, MoveEffect, MoveTargetScope, StatId};
 pub use species::{
     BaseStats, DEFAULT_CATCH_RATE, EvolutionDef, EvolutionTrigger, LearnsetEntry, SpeciesDef,
     SpeciesSprites, check_species_refs,
 };
-pub use text::{TEXT_PREFIX, TextDb, is_text_key};
+pub use text::{TEXT_PREFIX, TextArgs, TextDb, TextLookup, format_text, is_text_key, text_key};
 pub use trainer::{
     AiProfile, AiTier, AiVisibility, AiWeights, BUILTIN_PROFILES, TrainerDef, TrainerMember,
     check_ai_profiles, resolve_ai_profile,

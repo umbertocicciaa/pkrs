@@ -1,0 +1,9 @@
+// Italian, the default language: every key is defined here.
+{
+    "guide.hello": "Benvenuto a {town}!",
+    "guide.switch": "Vuoi passare a {lang}?",
+    "guide.bye": "Lingua cambiata {0} volte. Ciao!",
+    "town.sign": "Cartello: solo in italiano.",
+    "lang.it": "italiano",
+    "lang.en": "inglese",
+}

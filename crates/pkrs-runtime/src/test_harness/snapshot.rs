@@ -56,6 +56,7 @@ pub fn snapshot(host: &ProjectHost, dialogues_opened: u64) -> ScenarioSnapshot {
         tick: host.ticks(),
         state: state_name(host).to_owned(),
         map: Some(host.scene().map().id.clone()),
+        language: Some(host.language()),
         player: Some(Placement {
             pos: walker.pos(),
             facing: walker.facing(),

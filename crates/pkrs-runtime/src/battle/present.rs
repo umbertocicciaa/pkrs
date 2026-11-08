@@ -8,9 +8,10 @@
 //! animates between and playback never queries the battle.
 
 use pkrs_battle::{BattleEvent, BattleOutcome, BattleSetup, PartyIndex, SideId, SlotIndex};
-use pkrs_data::StatId;
+use pkrs_data::{StatId, TextArgs};
 
-use super::content::{BattleKind, display_name};
+use super::content::BattleKind;
+use crate::locale::BattleText;
 
 /// One presentation step of the playback queue.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -178,19 +179,33 @@ impl Roster {
 pub struct Presenter {
     kind: BattleKind,
     roster: Roster,
+    /// Localized texts and names (§5.5).
+    text: BattleText,
     /// Last known stat stage per `(side, slot, stat)`, to tell rises from drops.
     stages: Vec<(SideId, SlotIndex, StatId, i8)>,
 }
 
 impl Presenter {
-    /// A presenter for a battle of `kind` starting from `setup`.
+    /// A presenter for a battle of `kind` starting from `setup`, with English engine texts.
     #[must_use]
     pub fn new(kind: BattleKind, setup: &BattleSetup) -> Self {
+        Self::with_text(kind, setup, BattleText::default())
+    }
+
+    /// Like [`new`](Self::new), with texts and names from `text`.
+    #[must_use]
+    pub fn with_text(kind: BattleKind, setup: &BattleSetup, text: BattleText) -> Self {
         Self {
             kind,
             roster: Roster::from_setup(setup),
+            text,
             stages: Vec::new(),
         }
+    }
+
+    /// The engine text `key` with `args`.
+    fn say(&self, key: &str, args: &[(&str, &str)]) -> Cue {
+        Cue::Text(self.text.say(key, args))
     }
 
     /// The roster as of the last mapped event.
@@ -214,11 +229,13 @@ impl Presenter {
                 user_slot,
                 move_id,
                 ..
-            } => vec![Cue::Text(format!(
-                "{} used {}!",
-                self.name(*user_side, *user_slot),
-                display_name(move_id)
-            ))],
+            } => vec![self.say(
+                "battle.used_move",
+                &[
+                    ("name", &self.name(*user_side, *user_slot)),
+                    ("move", &self.text.move_name(move_id)),
+                ],
+            )],
             BattleEvent::Damage {
                 target_side,
                 target_slot,
@@ -227,21 +244,18 @@ impl Presenter {
             } => self.hp_to(*target_side, *target_slot, |_| *remaining_hp),
             BattleEvent::Heal { side, slot, amount } => {
                 let mut cues = self.hp_to(*side, *slot, |hp| hp.saturating_add(*amount));
-                cues.push(Cue::Text(format!(
-                    "{} regained health!",
-                    self.name(*side, *slot)
-                )));
+                cues.push(self.say(
+                    "battle.regained_health",
+                    &[("name", &self.name(*side, *slot))],
+                ));
                 cues
             }
             BattleEvent::Recoil { side, slot, amount } => {
                 let mut cues = self.hp_to(*side, *slot, |hp| hp.saturating_sub(*amount));
-                cues.push(Cue::Text(format!(
-                    "{} is hit with recoil!",
-                    self.name(*side, *slot)
-                )));
+                cues.push(self.say("battle.recoil", &[("name", &self.name(*side, *slot))]));
                 cues
             }
-            BattleEvent::Missed { .. } => vec![Cue::Text("The attack missed!".into())],
+            BattleEvent::Missed { .. } => vec![self.say("battle.missed", &[])],
             BattleEvent::StatChanged {
                 side,
                 slot,
@@ -252,34 +266,40 @@ impl Presenter {
                 target_side,
                 target_slot,
                 status,
-            } => vec![Cue::Text(format!(
-                "{} is now {}!",
-                self.name(*target_side, *target_slot),
-                display_name(status).to_lowercase()
-            ))],
+            } => vec![self.say(
+                "battle.status_applied",
+                &[
+                    ("name", &self.name(*target_side, *target_slot)),
+                    ("status", &self.text.status(status)),
+                ],
+            )],
             BattleEvent::StatusCured {
                 target_side,
                 target_slot,
                 status,
-            } => vec![Cue::Text(format!(
-                "{} is no longer {}.",
-                self.name(*target_side, *target_slot),
-                display_name(status).to_lowercase()
-            ))],
+            } => vec![self.say(
+                "battle.status_cured",
+                &[
+                    ("name", &self.name(*target_side, *target_slot)),
+                    ("status", &self.text.status(status)),
+                ],
+            )],
             BattleEvent::VolatileEnded {
                 target_side,
                 target_slot,
                 volatile,
-            } => vec![Cue::Text(format!(
-                "{}'s {} ended.",
-                self.name(*target_side, *target_slot),
-                display_name(volatile).to_lowercase()
-            ))],
-            BattleEvent::WeatherSet { weather } => vec![Cue::Text(format!(
-                "The weather turned to {}.",
-                display_name(weather).to_lowercase()
-            ))],
-            BattleEvent::WeatherEnded => vec![Cue::Text("The weather cleared.".into())],
+            } => vec![self.say(
+                "battle.volatile_ended",
+                &[
+                    ("name", &self.name(*target_side, *target_slot)),
+                    ("effect", &self.text.status(volatile)),
+                ],
+            )],
+            BattleEvent::WeatherSet { weather } => vec![self.say(
+                "battle.weather_set",
+                &[("weather", &self.text.status(weather))],
+            )],
+            BattleEvent::WeatherEnded => vec![self.say("battle.weather_ended", &[])],
             BattleEvent::Fainted { side, slot, .. } => {
                 let name = self.name(*side, *slot);
                 vec![
@@ -287,7 +307,7 @@ impl Presenter {
                         side: *side,
                         slot: *slot,
                     },
-                    Cue::Text(format!("{name} fainted!")),
+                    self.say("battle.fainted", &[("name", &name)]),
                 ]
             }
             BattleEvent::Switched {
@@ -296,13 +316,14 @@ impl Presenter {
                 to_party,
             } => self.switched(*side, *slot, *to_party),
             BattleEvent::Ran { side } => match side {
-                SideId::Player => vec![Cue::Text("Got away safely!".into())],
-                SideId::Opponent => vec![Cue::Text(format!(
-                    "{} fled!",
-                    self.name(SideId::Opponent, 0)
-                ))],
+                SideId::Player => vec![self.say("battle.got_away", &[])],
+                SideId::Opponent => {
+                    vec![self.say("battle.fled", &[("name", &self.name(SideId::Opponent, 0))])]
+                }
             },
-            BattleEvent::Message { key } => vec![Cue::Text(message_text(key))],
+            BattleEvent::Message { key, args } => {
+                vec![Cue::Text(message_text_in(&self.text, key, args))]
+            }
             BattleEvent::Fx { side, slot, id } => vec![Cue::Fx {
                 side: *side,
                 slot: *slot,
@@ -316,13 +337,15 @@ impl Presenter {
                 reason,
             } => vec![Cue::Text(reason.as_deref().map_or_else(
                 || {
-                    format!(
-                        "{} couldn't use {}!",
-                        self.name(*user_side, *user_slot),
-                        display_name(move_id)
+                    self.text.say(
+                        "battle.couldnt_use",
+                        &[
+                            ("name", &self.name(*user_side, *user_slot)),
+                            ("move", &self.text.move_name(move_id)),
+                        ],
                     )
                 },
-                message_text,
+                |key| self.message(key),
             ))],
             BattleEvent::DamagePrevented {
                 target_side,
@@ -330,12 +353,12 @@ impl Presenter {
                 reason,
             } => vec![Cue::Text(reason.as_deref().map_or_else(
                 || {
-                    format!(
-                        "{} protected itself!",
-                        self.name(*target_side, *target_slot)
+                    self.text.say(
+                        "battle.protected",
+                        &[("name", &self.name(*target_side, *target_slot))],
                     )
                 },
-                message_text,
+                |key| self.message(key),
             ))],
             BattleEvent::StatusBlocked {
                 target_side,
@@ -344,21 +367,24 @@ impl Presenter {
                 ..
             } => vec![Cue::Text(reason.as_deref().map_or_else(
                 || {
-                    format!(
-                        "It doesn't affect {}...",
-                        self.name(*target_side, *target_slot)
+                    self.text.say(
+                        "battle.no_effect",
+                        &[("name", &self.name(*target_side, *target_slot))],
                     )
                 },
-                message_text,
+                |key| self.message(key),
             ))],
             BattleEvent::SwitchCancelled { side, slot, reason } => {
                 vec![Cue::Text(reason.as_deref().map_or_else(
-                    || format!("{} can't be switched out!", self.name(*side, *slot)),
-                    message_text,
+                    || {
+                        self.text
+                            .say("battle.cant_switch", &[("name", &self.name(*side, *slot))])
+                    },
+                    |key| self.message(key),
                 ))]
             }
             BattleEvent::CustomActionUsed { handled: false, .. } => {
-                vec![Cue::Text("But nothing happened!".into())]
+                vec![self.say("battle.nothing_happened", &[])]
             }
             _ => Vec::new(),
         }
@@ -369,13 +395,16 @@ impl Presenter {
         let foe = self.member_name(SideId::Opponent, 0);
         let mine = self.member_name(SideId::Player, 0);
         let mut cues = match &self.kind {
-            BattleKind::Wild => vec![Cue::Text(format!("A wild {foe} appeared!"))],
+            BattleKind::Wild => vec![self.say("battle.wild_appeared", &[("name", &foe)])],
             BattleKind::Trainer { name } => vec![
-                Cue::Text(format!("{name} wants to battle!")),
-                Cue::Text(format!("{name} sent out {foe}!")),
+                self.say("battle.trainer_challenge", &[("trainer", name)]),
+                self.say(
+                    "battle.trainer_sent_out",
+                    &[("trainer", name), ("name", &foe)],
+                ),
             ],
         };
-        cues.push(Cue::Text(format!("Go! {mine}!")));
+        cues.push(self.say("battle.go", &[("name", &mine)]));
         cues
     }
 
@@ -383,11 +412,14 @@ impl Presenter {
         let player = &self.roster.side(SideId::Player).name;
         match (outcome, &self.kind) {
             (BattleOutcome::PlayerWin, BattleKind::Trainer { name }) => {
-                vec![Cue::Text(format!("{player} defeated {name}!"))]
+                vec![self.say(
+                    "battle.player_won",
+                    &[("player", player), ("trainer", name)],
+                )]
             }
             (BattleOutcome::OpponentWin, _) => vec![
-                Cue::Text(format!("{player} is out of usable creatures!")),
-                Cue::Text(format!("{player} blacked out!")),
+                self.say("battle.player_out", &[("player", player)]),
+                self.say("battle.blacked_out", &[("player", player)]),
             ],
             _ => Vec::new(),
         }
@@ -403,12 +435,15 @@ impl Presenter {
         if let Some(old) = previous.and_then(|i| self.roster.side(side).members.get(usize::from(i)))
         {
             if old.hp > 0 {
-                let text = match (side, &trainer) {
-                    (SideId::Player, _) => format!("{}, come back!", old.name),
-                    (SideId::Opponent, Some(t)) => format!("{t} withdrew {}!", old.name),
-                    (SideId::Opponent, None) => format!("{} withdrew!", old.name),
+                let name = old.name.as_str();
+                let cue = match (side, &trainer) {
+                    (SideId::Player, _) => self.say("battle.come_back", &[("name", name)]),
+                    (SideId::Opponent, Some(t)) => {
+                        self.say("battle.trainer_withdrew", &[("trainer", t), ("name", name)])
+                    }
+                    (SideId::Opponent, None) => self.say("battle.withdrew", &[("name", name)]),
                 };
-                cues.push(Cue::Text(text));
+                cues.push(cue);
                 cues.push(Cue::SwitchOut { side, slot });
             }
         }
@@ -422,11 +457,13 @@ impl Presenter {
             .retain(|(s, sl, _, _)| (*s, *sl) != (side, slot));
         cues.push(cue);
         let new = self.member_name(side, slot);
-        cues.push(Cue::Text(match (side, &trainer) {
-            (SideId::Player, _) => format!("Go! {new}!"),
-            (SideId::Opponent, Some(t)) => format!("{t} sent out {new}!"),
-            (SideId::Opponent, None) => format!("{new} appeared!"),
-        }));
+        cues.push(match (side, &trainer) {
+            (SideId::Player, _) => self.say("battle.go", &[("name", &new)]),
+            (SideId::Opponent, Some(t)) => {
+                self.say("battle.trainer_sent_out", &[("trainer", t), ("name", &new)])
+            }
+            (SideId::Opponent, None) => self.say("battle.appeared", &[("name", &new)]),
+        });
         cues
     }
 
@@ -448,14 +485,14 @@ impl Presenter {
                 0
             }
         };
-        let what = format!("{}'s {}", self.name(side, slot), stat_name(stat));
-        let text = match stages.cmp(&before) {
-            std::cmp::Ordering::Greater => format!("{what} rose!"),
-            std::cmp::Ordering::Less => format!("{what} fell!"),
-            std::cmp::Ordering::Equal if stages > 0 => format!("{what} won't go any higher!"),
-            std::cmp::Ordering::Equal => format!("{what} won't go any lower!"),
+        let key = match stages.cmp(&before) {
+            std::cmp::Ordering::Greater => "battle.stat_rose",
+            std::cmp::Ordering::Less => "battle.stat_fell",
+            std::cmp::Ordering::Equal if stages > 0 => "battle.stat_max",
+            std::cmp::Ordering::Equal => "battle.stat_min",
         };
-        vec![Cue::Text(text)]
+        let stat = self.text.say(stat_key(stat), &[]);
+        vec![self.say(key, &[("name", &self.name(side, slot)), ("stat", &stat)])]
     }
 
     /// An HP cue for the creature in `slot`, moving its HP to `to(hp)`.
@@ -490,45 +527,63 @@ impl Presenter {
     }
 
     /// How texts name the creature in `slot`: the player's by name, the foe's as
-    /// "Wild X" or "Foe X".
+    /// "Wild X" or "Foe X" (`battle.wild_name` / `battle.foe_name`).
     fn name(&self, side: SideId, slot: SlotIndex) -> String {
         let name = self.member_name(side, slot);
         match (side, &self.kind) {
             (SideId::Player, _) => name,
-            (SideId::Opponent, BattleKind::Wild) => format!("Wild {name}"),
-            (SideId::Opponent, BattleKind::Trainer { .. }) => format!("Foe {name}"),
+            (SideId::Opponent, BattleKind::Wild) => {
+                self.text.say("battle.wild_name", &[("name", &name)])
+            }
+            (SideId::Opponent, BattleKind::Trainer { .. }) => {
+                self.text.say("battle.foe_name", &[("name", &name)])
+            }
         }
     }
-}
 
-fn stat_name(stat: StatId) -> &'static str {
-    match stat {
-        StatId::Attack => "attack",
-        StatId::Defense => "defense",
-        StatId::Speed => "speed",
-        StatId::Accuracy => "accuracy",
-        StatId::Evasion => "evasiveness",
+    /// Text of a hook's reason key (no arguments).
+    fn message(&self, key: &str) -> String {
+        message_text_in(&self.text, key, &TextArgs::new())
     }
 }
 
-/// Text of a [`BattleEvent::Message`] key (or a hook's reason key). Known engine keys have
-/// built-in English texts; `text:<key>` and unknown keys are shown readable until localized
-/// text data lands (§8).
+/// Engine text key of a stat's name.
+fn stat_key(stat: StatId) -> &'static str {
+    match stat {
+        StatId::Attack => "battle.stat.attack",
+        StatId::Defense => "battle.stat.defense",
+        StatId::Speed => "battle.stat.speed",
+        StatId::Accuracy => "battle.stat.accuracy",
+        StatId::Evasion => "battle.stat.evasion",
+    }
+}
+
+/// Text of a [`BattleEvent::Message`] key (or a hook's reason key) in English: see
+/// [`message_text_in`].
 #[must_use]
 pub fn message_text(key: &str) -> String {
+    message_text_in(&BattleText::default(), key, &TextArgs::new())
+}
+
+/// Text of a [`BattleEvent::Message`] key (or a hook's reason key) through `text`. Engine
+/// keys (`status:cant_move`, `protect`, `switch_out`, `multi_hit:<n>`, `item_used:<item>`,
+/// `residual:<source>`) map to `battle.*` engine texts; `text:<key>` is looked up with
+/// `args`; a missing or unknown key is shown readable (without `text:`).
+#[must_use]
+pub fn message_text_in(text: &BattleText, key: &str, args: &TextArgs) -> String {
     match key {
-        "status:cant_move" => "It can't move!".into(),
-        "protect" => "It protected itself!".into(),
-        "switch_out" => "It was forced out!".into(),
+        "status:cant_move" => text.say("battle.cant_move", &[]),
+        "protect" => text.say("battle.protect", &[]),
+        "switch_out" => text.say("battle.switch_out", &[]),
         _ => {
             if let Some(n) = key.strip_prefix("multi_hit:") {
-                format!("Hit {} more time(s)!", n)
+                text.say("battle.multi_hit", &[("count", n)])
             } else if let Some(item) = key.strip_prefix("item_used:") {
-                format!("Used {}!", display_name(item))
+                text.say("battle.item_used", &[("item", &text.item(item))])
             } else if let Some(source) = key.strip_prefix("residual:") {
-                format!("It is hurt by {}!", display_name(source).to_lowercase())
+                text.say("battle.residual", &[("source", &text.status(source))])
             } else {
-                key.strip_prefix("text:").unwrap_or(key).to_owned()
+                text.value(key, args)
             }
         }
     }
@@ -743,9 +798,7 @@ mod tests {
     #[test]
     fn fx_like_messages_and_ended_volatiles_are_plain_text() {
         let mut p = trainer();
-        let cues = p.present(&BattleEvent::Message {
-            key: "fx:test:glow".into(),
-        });
+        let cues = p.present(&BattleEvent::message("fx:test:glow"));
         assert!(matches!(cues.as_slice(), [Cue::Text(_)]), "{cues:?}");
         let cues = p.present(&BattleEvent::VolatileEnded {
             target_side: SideId::Player,

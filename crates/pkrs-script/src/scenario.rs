@@ -64,6 +64,8 @@ pub struct ScenarioSnapshot {
     pub state: String,
     /// Active map id.
     pub map: Option<String>,
+    /// Active text language (§5.5), e.g. `en`.
+    pub language: Option<String>,
     /// Player tile and facing.
     pub player: Option<Placement>,
     /// `true` when the player is not mid-step.

@@ -1,23 +1,34 @@
-//! Species schema for battles and creature progression (§8.1; full data in M6).
+//! Species schema (§8.1).
 //!
 //! ```ron
-//! // data/species/sproutling.ron
-//! (
-//!   id: "sproutling", types: ["grass"],
-//!   hp: 40, attack: 30, defense: 30, speed: 25,
-//!   exp_yield: 64, growth: MediumSlow,
-//!   learnset: [ (level: 1, move: "tackle"), (level: 6, move: "vine_whip") ],
-//!   evolutions: [ (into: "bloomling", trigger: Level(16)) ],
+//! // data/species/emberkit.ron
+//! Species(
+//!   id: "emberkit",
+//!   name: "text:species.emberkit",
+//!   types: ["fire"],
+//!   base_stats: (hp: 45, atk: 52, def: 40, spa: 60, spd: 50, spe: 65),
+//!   abilities: ["kindle"],
+//!   learnset: [ (level: 1, move: "scratch"), (level: 7, move: "ember") ],
+//!   evolutions: [ (into: "blazecat", trigger: Level(16)) ],
+//!   sprites: (front: "sprites/creatures/emberkit_front.png", icon: "sprites/icons/emberkit.png"),
+//!   catch_rate: 45, exp_yield: 62, growth: MediumFast,
 //! )
 //! ```
 //!
-//! `exp_yield`, `growth`, `learnset` and `evolutions` are optional (`0`, `MediumFast`, none,
-//! none), so species written before they existed still load.
+//! The `Species` name is optional. Everything except `id`, `types` and the base stats has a
+//! default (`name` none, no abilities, no learnset, no evolutions, no sprites, `catch_rate`
+//! 45, `exp_yield` 0, `growth` `MediumFast`).
+//!
+//! **Legacy base stats.** Instead of `base_stats`, a species may give the flat M1 fields
+//! `hp`, `attack`, `defense` and `speed` (special attack/defense then equal attack/defense),
+//! so species written before §8.1's nested form still load. Giving both forms, or only part
+//! of the flat one, is an error.
 
 use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
+use crate::codec::RonCodec;
 use crate::error::{DataError, Result};
 use crate::growth::{GrowthRate, MAX_LEVEL};
 use crate::move_def::MoveDef;
@@ -52,42 +63,152 @@ pub struct EvolutionDef {
     pub trigger: EvolutionTrigger,
 }
 
-/// Species record used when building battle parties from content data.
+/// Base stats (§7.3): HP, attack, defense, special attack, special defense, speed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+pub struct BaseStats {
+    /// Hit points.
+    pub hp: u32,
+    /// Attack.
+    pub atk: u32,
+    /// Defense.
+    pub def: u32,
+    /// Special attack.
+    pub spa: u32,
+    /// Special defense.
+    pub spd: u32,
+    /// Speed.
+    pub spe: u32,
+}
+
+/// Sprite paths of a species (project-relative; all optional).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct SpeciesSprites {
+    /// Front sprite (seen on the opponent's side).
+    pub front: Option<String>,
+    /// Back sprite (seen on the player's side).
+    pub back: Option<String>,
+    /// Party/menu icon.
+    pub icon: Option<String>,
+}
+
+/// Default catch rate (out of 255).
+pub const DEFAULT_CATCH_RATE: u8 = 45;
+
+/// A species (§8.1).
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "RawSpecies")]
 pub struct SpeciesDef {
     /// Content id.
     pub id: String,
+    /// Display name: literal text or a `text:` key (empty: derived from the id).
+    pub name: String,
     /// One or two type ids.
     pub types: Vec<String>,
-    /// Base HP.
-    pub hp: u32,
-    /// Base attack.
-    pub attack: u32,
-    /// Base defense.
-    pub defense: u32,
-    /// Base speed.
-    pub speed: u32,
+    /// Base stats.
+    pub base_stats: BaseStats,
+    /// Ability ids.
+    pub abilities: Vec<String>,
     /// Base experience yield when defeated (`0`: defeating it gives no exp).
-    #[serde(default)]
     pub exp_yield: u32,
     /// Growth curve (total exp per level).
-    #[serde(default)]
     pub growth: GrowthRate,
     /// Moves learned by level, in the order they are learned.
-    #[serde(default)]
     pub learnset: Vec<LearnsetEntry>,
     /// Evolutions (the first one whose trigger is met wins).
-    #[serde(default)]
     pub evolutions: Vec<EvolutionDef>,
+    /// Sprite paths.
+    pub sprites: SpeciesSprites,
+    /// Catch rate (out of 255).
+    pub catch_rate: u8,
+}
+
+fn default_catch_rate() -> u8 {
+    DEFAULT_CATCH_RATE
+}
+
+/// The file shape of a species: both base-stat forms are accepted.
+#[derive(Deserialize)]
+#[serde(rename = "Species")]
+struct RawSpecies {
+    id: String,
+    #[serde(default)]
+    name: String,
+    types: Vec<String>,
+    #[serde(default)]
+    base_stats: Option<BaseStats>,
+    #[serde(default)]
+    hp: Option<u32>,
+    #[serde(default)]
+    attack: Option<u32>,
+    #[serde(default)]
+    defense: Option<u32>,
+    #[serde(default)]
+    speed: Option<u32>,
+    #[serde(default)]
+    abilities: Vec<String>,
+    #[serde(default)]
+    exp_yield: u32,
+    #[serde(default)]
+    growth: GrowthRate,
+    #[serde(default)]
+    learnset: Vec<LearnsetEntry>,
+    #[serde(default)]
+    evolutions: Vec<EvolutionDef>,
+    #[serde(default)]
+    sprites: SpeciesSprites,
+    #[serde(default = "default_catch_rate")]
+    catch_rate: u8,
+}
+
+impl TryFrom<RawSpecies> for SpeciesDef {
+    type Error = String;
+
+    fn try_from(raw: RawSpecies) -> core::result::Result<Self, String> {
+        let flat = [raw.hp, raw.attack, raw.defense, raw.speed];
+        let base_stats = match (raw.base_stats, flat) {
+            (Some(stats), [None, None, None, None]) => stats,
+            (Some(_), _) => {
+                return Err(format!(
+                    "species `{}`: give either `base_stats` or the flat `hp`/`attack`/`defense`/`speed`, not both",
+                    raw.id
+                ));
+            }
+            (None, [Some(hp), Some(atk), Some(def), Some(spe)]) => BaseStats {
+                hp,
+                atk,
+                def,
+                spa: atk,
+                spd: def,
+                spe,
+            },
+            (None, _) => {
+                return Err(format!(
+                    "species `{}`: missing `base_stats` (or all of `hp`, `attack`, `defense`, `speed`)",
+                    raw.id
+                ));
+            }
+        };
+        Ok(Self {
+            id: raw.id,
+            name: raw.name,
+            types: raw.types,
+            base_stats,
+            abilities: raw.abilities,
+            exp_yield: raw.exp_yield,
+            growth: raw.growth,
+            learnset: raw.learnset,
+            evolutions: raw.evolutions,
+            sprites: raw.sprites,
+            catch_rate: raw.catch_rate,
+        })
+    }
 }
 
 impl SpeciesDef {
     /// Parses a species RON document and checks its schema ([`validate`](Self::validate)).
     pub fn parse_ron(source: &str, file: &str) -> Result<Self> {
-        let species: Self = ron::from_str(source).map_err(|e| DataError::Parse {
-            file: file.into(),
-            message: e.to_string(),
-        })?;
+        let species: Self = RonCodec::decode(source, file)?;
         species.validate(file)?;
         Ok(species)
     }
@@ -248,6 +369,58 @@ mod tests {
         assert!(old.learnset.is_empty() && old.evolutions.is_empty());
         assert!(old.moves_at_level(50).is_empty());
         assert_eq!(old.evolution_at(100), None);
+    }
+
+    #[test]
+    fn design_doc_species_and_both_base_stat_forms() {
+        let s = SpeciesDef::parse_ron(
+            r#"Species(
+              id: "emberkit", name: "text:species.emberkit", types: ["fire"],
+              base_stats: (hp: 45, atk: 52, def: 40, spa: 60, spd: 50, spe: 65),
+              abilities: ["kindle"],
+              sprites: (front: "f.png", icon: "i.png"),
+              catch_rate: 45, exp_yield: 62, growth: MediumFast,
+            )"#,
+            "emberkit.ron",
+        )
+        .unwrap();
+        assert_eq!(s.base_stats.spa, 60);
+        assert_eq!(s.sprites.back, None);
+        assert_eq!(s.sprites.icon.as_deref(), Some("i.png"));
+        let flat = sproutling();
+        assert_eq!(
+            flat.base_stats,
+            BaseStats {
+                hp: 40,
+                atk: 30,
+                def: 30,
+                spa: 30,
+                spd: 30,
+                spe: 25
+            }
+        );
+        assert_eq!(
+            (flat.name.as_str(), flat.catch_rate),
+            ("", DEFAULT_CATCH_RATE)
+        );
+        let both = SpeciesDef::parse_ron(
+            r#"(id: "a", types: [], hp: 1, attack: 1, defense: 1, speed: 1,
+                base_stats: (hp: 1, atk: 1, def: 1, spa: 1, spd: 1, spe: 1))"#,
+            "a.ron",
+        );
+        assert!(both.unwrap_err().to_string().contains("not both"));
+        let partial = SpeciesDef::parse_ron(r#"(id: "a", types: [], hp: 1, attack: 1)"#, "a.ron");
+        assert!(
+            partial
+                .unwrap_err()
+                .to_string()
+                .contains("missing `base_stats`")
+        );
+        let wrong_name = SpeciesDef::parse_ron(
+            r#"Move(id: "a", types: [], hp: 1, attack: 1, defense: 1, speed: 1)"#,
+            "a.ron",
+        );
+        assert!(wrong_name.is_err());
     }
 
     #[test]

@@ -1,18 +1,16 @@
-//! Battle content read from the project's `data/` folder (§7.3, §8.1) and turned into a
-//! [`BattleSetup`] for `battle.start_wild` / `battle.start_trainer` requests.
+//! Battle content taken from the project's immutable content database ([`GameData`], §8.1)
+//! and turned into a [`BattleSetup`] for `battle.start_wild` / `battle.start_trainer`
+//! requests.
 //!
-//! Files (all optional except what a requested battle needs):
+//! The database holds (all optional except what a requested battle needs) the type chart
+//! (`data/types.ron`), moves (`data/moves`, merged with every move plugins add, §9.4),
+//! species, trainers and AI profiles; the trainer `player` (`data/trainers/player.ron`,
+//! [`PLAYER_TRAINER`]) is **the player's party** until the save-backed party model lands
+//! (§12). A project with `features.battles = false` has no battle content
+//! ([`BattleContentError::BattlesDisabled`]).
 //!
-//! - `data/types.ron`: the type chart (an empty chart when absent),
-//! - `data/moves/*.ron` (one move or a list, as merged into the content database, §8.1),
-//!   plus every move plugins add ([`BattleContent::merge_moves`]),
-//! - `data/species/*.ron`: one species per file,
-//! - `data/trainers/*.ron`: trainers; `data/trainers/profiles/*.ron`: AI profiles,
-//! - `data/trainers/player.ron`: **the player's party** ([`PLAYER_TRAINER`]) until the
-//!   save-backed party model lands (§12).
-//!
-//! Stats follow the Gen-3 formula with zero IVs/EVs; moves get [`DEFAULT_PP`] PP since move
-//! data has no PP field yet. A creature with no explicit moves (every wild creature) knows
+//! Stats follow the Gen-3 formula with zero IVs/EVs; a move without a `pp` field gets
+//! [`DEFAULT_PP`] PP. A creature with no explicit moves (every wild creature) knows
 //! the last four moves of its species' learnset up to its level
 //! ([`SpeciesDef::moves_at_level`]); a species without a learnset (or with nothing learned
 //! yet at that level) falls back to up to four damaging moves of its own types, then any
@@ -20,21 +18,21 @@
 
 use std::collections::BTreeMap;
 
-use pkrs_assets::{EntryKind, Vfs, VfsPath};
+use pkrs_assets::Vfs;
 use pkrs_battle::{
     BattleConfig, BattleCreature, BattleResources, BattleSetup, BattleSideSetup, CreatureStats,
     MoveSlot, PartyIndex, RngPolicy, SideId, TrainerAi,
 };
 use pkrs_data::{
-    AiProfile, AiTier, BattlePack, ContentDb, ContentDef, ContentKind, DataError, MoveCategory,
-    SpeciesDef, TrainerDef, TypeChart, parse_content, resolve_ai_profile,
+    AiProfile, AiTier, BattlePack, DataError, DataErrors, GameData, LoadOptions, MoveCategory,
+    SpeciesDef, TrainerDef, resolve_ai_profile,
 };
 use pkrs_script::BattleRequest;
 
 /// Trainer id whose party the player fields (`data/trainers/player.ron`).
 pub const PLAYER_TRAINER: &str = "player";
 
-/// PP of every move slot (move data has no PP field yet).
+/// PP of a move slot whose move data has no `pp` field.
 pub const DEFAULT_PP: u8 = 20;
 
 /// AI profile of wild creatures.
@@ -43,15 +41,15 @@ pub const WILD_AI_PROFILE: &str = "random";
 /// Why a battle could not be set up.
 #[derive(Debug, thiserror::Error)]
 pub enum BattleContentError {
-    /// A data file could not be listed or read.
+    /// The project's content failed to load (every problem).
     #[error(transparent)]
-    Assets(#[from] pkrs_assets::AssetsError),
-    /// A data file is invalid or references unknown content.
+    Load(#[from] DataErrors),
+    /// A battle references unknown content.
     #[error(transparent)]
     Data(#[from] DataError),
-    /// A data file is not UTF-8.
-    #[error("`{0}` is not valid UTF-8")]
-    Utf8(String),
+    /// `features.battles = false`: the project has no battle data.
+    #[error("battles are disabled (`features.battles = false` in pkrs.toml)")]
+    BattlesDisabled,
     /// No `data/trainers/player.ron`.
     #[error("no player party: add `data/trainers/{PLAYER_TRAINER}.ron`")]
     NoPlayerParty,
@@ -96,36 +94,29 @@ pub struct BattleContent {
 }
 
 impl BattleContent {
-    /// Loads every battle data file of the project mounted in `vfs`.
+    /// Loads the content of the project mounted in `vfs` (no plugins) and takes its battle
+    /// content ([`from_data`](Self::from_data)).
     pub fn load(vfs: &dyn Vfs) -> Result<Self, BattleContentError> {
-        let chart = match read_optional(vfs, "data/types.ron")? {
-            Some(source) => TypeChart::parse_ron(&source, "data/types.ron")?,
-            None => TypeChart::from_parts(Vec::new(), Default::default()),
-        };
-        let mut pack = BattlePack::new(chart);
-        for (file, source) in read_dir(vfs, "data/moves")? {
-            for record in parse_content(ContentKind::Move, &source, &file)? {
-                if let ContentDef::Move(mv) = record.def {
-                    pack.moves.insert(mv.id.clone(), mv);
-                }
-            }
-        }
-        for (file, source) in read_dir(vfs, "data/species")? {
-            pack.insert_species(SpeciesDef::parse_ron(&source, &file)?)?;
-        }
-        let mut trainers = BTreeMap::new();
-        for (file, source) in read_dir(vfs, "data/trainers")? {
-            let trainer = TrainerDef::parse_ron(&source, &file)?;
-            trainers.insert(trainer.id.clone(), trainer);
-        }
-        let mut profiles = Vec::new();
-        for (file, source) in read_dir(vfs, "data/trainers/profiles")? {
-            profiles.push(AiProfile::parse_ron(&source, &file)?);
+        let data = crate::data::load_game_data(vfs, LoadOptions::default(), None)?;
+        Self::from_data(&data)
+    }
+
+    /// The battle content of `data`: type chart, moves, species, trainers and AI profiles.
+    /// Errors with [`BattleContentError::BattlesDisabled`] when `data` was loaded without
+    /// battle data.
+    pub fn from_data(data: &GameData) -> Result<Self, BattleContentError> {
+        if !data.battles_enabled() {
+            return Err(BattleContentError::BattlesDisabled);
         }
         Ok(Self {
-            pack,
-            trainers,
-            profiles,
+            pack: data.battle_pack(),
+            trainers: data
+                .trainers()
+                .records()
+                .iter()
+                .map(|t| (t.id.clone(), t.clone()))
+                .collect(),
+            profiles: data.ai_profiles().records().to_vec(),
         })
     }
 
@@ -140,17 +131,6 @@ impl BattleContent {
             pack,
             trainers: trainers.into_iter().map(|t| (t.id.clone(), t)).collect(),
             profiles,
-        }
-    }
-
-    /// Adds or replaces every move of the merged content database `db` (the game's and the
-    /// plugins' `data/moves`, plus `data.register_move`), so plugin moves can be used in
-    /// battle.
-    pub fn merge_moves(&mut self, db: &ContentDb) {
-        for id in db.ids(ContentKind::Move) {
-            if let Some(mv) = db.move_def(id) {
-                self.pack.moves.insert(mv.id.clone(), mv.clone());
-            }
         }
     }
 
@@ -276,8 +256,8 @@ impl BattleContent {
                 id: mv.id.clone(),
                 priority: mv.priority,
                 power: mv.power,
-                pp: DEFAULT_PP,
-                max_pp: DEFAULT_PP,
+                pp: mv.pp.unwrap_or(DEFAULT_PP),
+                max_pp: mv.pp.unwrap_or(DEFAULT_PP),
             });
         }
         if slots.iter().all(Option::is_none) {
@@ -294,8 +274,8 @@ impl BattleContent {
     }
 
     /// Species data errors that only show once moves are known: learnset moves and
-    /// evolution targets that do not exist (§8.2 stage 3). Call it after
-    /// [`merge_moves`](Self::merge_moves) so plugin moves count.
+    /// evolution targets that do not exist (§8.2 stage 3). Plugin moves count when the
+    /// content was built from a [`GameData`] that merged the plugins' content database.
     #[must_use]
     pub fn check_species(&self) -> Vec<DataError> {
         pkrs_data::check_species_refs(&self.pack.species, &self.pack.moves)
@@ -337,10 +317,10 @@ pub fn level_stats(species: &SpeciesDef, level: u8) -> CreatureStats {
     let l = u32::from(level);
     let stat = |base: u32| 2 * base * l / 100 + 5;
     CreatureStats::new(
-        2 * species.hp * l / 100 + l + 10,
-        stat(species.attack),
-        stat(species.defense),
-        stat(species.speed),
+        2 * species.base_stats.hp * l / 100 + l + 10,
+        stat(species.base_stats.atk),
+        stat(species.base_stats.def),
+        stat(species.base_stats.spe),
     )
 }
 
@@ -359,38 +339,13 @@ pub fn display_name(id: &str) -> String {
     out
 }
 
-fn read_optional(vfs: &dyn Vfs, path: &str) -> Result<Option<String>, BattleContentError> {
-    let path = VfsPath::new(path)?;
-    if !vfs.exists(&path) {
-        return Ok(None);
-    }
-    read_text(vfs, &path).map(Some)
-}
-
-fn read_text(vfs: &dyn Vfs, path: &VfsPath) -> Result<String, BattleContentError> {
-    String::from_utf8(vfs.read(path)?).map_err(|_| BattleContentError::Utf8(path.to_string()))
-}
-
-/// `(path, source)` of every `*.ron` file directly in `dir` (none when `dir` is missing).
-fn read_dir(vfs: &dyn Vfs, dir: &str) -> Result<Vec<(String, String)>, BattleContentError> {
-    let dir = VfsPath::new(dir)?;
-    let Ok(entries) = vfs.list(&dir) else {
-        return Ok(Vec::new());
-    };
-    entries
-        .into_iter()
-        .filter(|e| e.kind == EntryKind::File && e.path.as_str().ends_with(".ron"))
-        .map(|e| Ok((e.path.to_string(), read_text(vfs, &e.path)?)))
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
     use pkrs_assets::MemoryVfs;
-    use pkrs_data::{MoveDef, SpeciesDef, TrainerMember};
+    use pkrs_data::{MoveDef, SpeciesDef, TrainerMember, TypeChart};
 
     fn vfs() -> MemoryVfs {
         let mut vfs = MemoryVfs::new();

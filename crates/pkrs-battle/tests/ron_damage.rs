@@ -47,7 +47,12 @@ fn setup_from_pack(pack: &BattlePack) -> BattleSetup {
                 types: splash.types.clone(),
                 nickname: "Hero".into(),
                 level: 10,
-                stats: CreatureStats::new(splash.hp, splash.attack, splash.defense, splash.speed),
+                stats: CreatureStats::new(
+                    splash.base_stats.hp,
+                    splash.base_stats.atk,
+                    splash.base_stats.def,
+                    splash.base_stats.spe,
+                ),
                 moves: [
                     Some(MoveSlot {
                         id: "ember".into(),
@@ -71,10 +76,10 @@ fn setup_from_pack(pack: &BattlePack) -> BattleSetup {
                 nickname: "Foe".into(),
                 level: 10,
                 stats: CreatureStats::new(
-                    leafkit.hp,
-                    leafkit.attack,
-                    leafkit.defense,
-                    leafkit.speed,
+                    leafkit.base_stats.hp,
+                    leafkit.base_stats.atk,
+                    leafkit.base_stats.def,
+                    leafkit.base_stats.spe,
                 ),
                 moves: [
                     Some(MoveSlot {

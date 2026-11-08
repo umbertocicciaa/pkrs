@@ -136,6 +136,7 @@ fn namespaces_belong_to_their_plugin() {
             def: ContentDef::Item(ItemDef {
                 id: bad.into(),
                 name: String::new(),
+                description: String::new(),
                 price: 0,
                 pocket: "items".into(),
             }),

@@ -1,0 +1,7 @@
+AiProfile(
+    id: "keeper",
+    tier: Smart,
+    weights: (aggression: 0.7, switch: 0.4, predict: 0.6),
+    allow_items: true,
+    heal_below_percent: 30,
+)

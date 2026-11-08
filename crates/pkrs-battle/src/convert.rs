@@ -40,6 +40,7 @@ pub mod testkit {
             priority: 0,
             targeting: Default::default(),
             effects: vec![MoveEffect::Damage],
+            ..MoveDef::default()
         }
     }
 

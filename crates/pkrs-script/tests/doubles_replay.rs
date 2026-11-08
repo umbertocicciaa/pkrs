@@ -81,6 +81,7 @@ fn doubles_battle_replay_snapshot() {
             priority: 0,
             targeting: MoveTargetScope::AllFoes,
             effects: vec![MoveEffect::Damage],
+            ..MoveDef::default()
         })
         .expect("spread");
     let mut hooks = NullBattleHooks;

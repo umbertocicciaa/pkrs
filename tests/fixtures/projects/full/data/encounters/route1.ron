@@ -1,0 +1,15 @@
+[
+    EncounterTable(
+        id: "route1_grass",
+        terrains: ["tall_grass"],
+        slots: [
+            (species: "sproutling", min_level: 2, max_level: 4, weight: 60),
+            (species: "puddlefin", min_level: 3, max_level: 5, weight: 40),
+        ],
+    ),
+    EncounterTable(
+        id: "shore_water",
+        terrains: ["water"],
+        slots: [(species: "puddlefin", min_level: 4, max_level: 8, weight: 1)],
+    ),
+]

@@ -1,0 +1,19 @@
+// English names of the fixture's content (§8.1 `text:` keys).
+{
+    "species.emberkit": "Emberkit",
+    "species.blazecat": "Blazecat",
+    "species.puddlefin": "Puddlefin",
+    "species.sproutling": "Sproutling",
+    "moves.ember": "Ember",
+    "moves.flame_burst": "Flame Burst",
+    "moves.scratch": "Scratch",
+    "moves.quick_attack": "Quick Attack",
+    "items.potion": "Potion",
+    "items.potion_desc": "Restores 20 HP.",
+    "items.capture_orb": "Capture Orb",
+    "items.lighthouse_key": "Lighthouse Key",
+    "abilities.kindle": "Kindle",
+    "abilities.kindle_desc": "Powers up fire moves in a pinch.",
+    "abilities.torrent": "Torrent",
+    "abilities.overgrow": "Overgrow",
+}

@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use pkrs_assets::{FolderVfs, Vfs, VfsPath};
 use pkrs_battle::{BattleResult, NullBattleHooks, RngPolicy};
 use pkrs_core::{Direction, GridPos, Pcg64Rng, ProjectManifest, Version};
+use pkrs_data::{GameData, LoadOptions};
 use pkrs_platform::{
     Action, BuiltinAction, DisplaySettings, Input, InputFacadeConfig, Key, Platform, UserPaths,
 };
@@ -25,6 +26,7 @@ use pkrs_world::{
 };
 
 use crate::battle::{BattleContent, BattleScreen, PostBattle};
+use crate::data::load_game_data;
 use crate::default_theme::build_default_ui_theme;
 use crate::encounters::{Encounters, wild_battle_request};
 use crate::main_loop::SimulationHost;
@@ -352,7 +354,10 @@ pub struct ProjectHost {
     /// The running battle and the script task waiting on it (§7.2); no task for a wild
     /// encounter started by a step.
     battle: Option<(Option<TaskId>, BattleScreen)>,
-    /// Battle data, loaded on the first battle.
+    /// The project's content database (§8.1, merged with the plugins' content), loaded on
+    /// the first battle or encounter.
+    game_data: Option<GameData>,
+    /// Battle data taken from `game_data`, on the first battle.
     battle_content: Option<BattleContent>,
     /// Stream battle RNG policies derive from (`RngPolicy::Local`, §7.2).
     battle_rng: Pcg64Rng,
@@ -454,6 +459,7 @@ impl ProjectHost {
             neighbors: Vec::new(),
             active_textures: textures,
             battle: None,
+            game_data: None,
             battle_content: None,
             battle_rng: Pcg64Rng::from_seed(DEFAULT_BATTLE_SEED),
             battle_texts: 0,
@@ -1094,13 +1100,31 @@ impl ProjectHost {
         .map_err(|e| e.to_string())
     }
 
-    /// The project's battle content, loaded (and merged with the plugins' moves) on first use.
+    /// The project's content database, loaded (and merged with the plugins' content
+    /// database, §9.4) on first use; `features.battles = false` skips battle data.
+    fn ensure_game_data(&mut self) -> Result<&GameData, String> {
+        if self.game_data.is_none() {
+            let options = LoadOptions::from_features(&self.project.manifest.features);
+            let vfs = &self.project.vfs;
+            let data = match self.scripts.as_ref() {
+                Some(scripts) => scripts
+                    .host()
+                    .with_content(|db| load_game_data(vfs, options, Some(db))),
+                None => load_game_data(vfs, options, None),
+            }
+            .map_err(|e| e.to_string())?;
+            self.game_data = Some(data);
+        }
+        self.game_data
+            .as_ref()
+            .ok_or_else(|| "no content database".to_owned())
+    }
+
+    /// The project's battle content, taken from the content database on first use.
     fn ensure_battle_content(&mut self) -> Result<(), String> {
         if self.battle_content.is_none() {
-            let mut content = BattleContent::load(&self.project.vfs).map_err(|e| e.to_string())?;
-            if let Some(scripts) = self.scripts.as_ref() {
-                scripts.host().with_content(|db| content.merge_moves(db));
-            }
+            let content =
+                BattleContent::from_data(self.ensure_game_data()?).map_err(|e| e.to_string())?;
             for err in content.check_species() {
                 tracing::warn!(target: "battle", "species data: {err}");
             }
@@ -1126,10 +1150,8 @@ impl ProjectHost {
                 self.encounters.disable();
                 return false;
             }
-            if let Some(content) = self.battle_content.as_ref() {
-                let species = &content.pack().species;
-                self.encounters
-                    .ensure_loaded(&self.project.vfs, |id| species.contains_key(id));
+            if let Some(data) = self.game_data.as_ref() {
+                self.encounters.ensure_loaded(data);
             }
         }
         let Some(encounter) = self.encounters.on_step(self.scene.map(), pos) else {

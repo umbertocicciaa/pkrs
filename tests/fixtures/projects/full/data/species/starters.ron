@@ -1,0 +1,27 @@
+// A list file: two species, one in the flat (pre-§8.1) base-stat form.
+[
+    Species(
+        id: "blazecat",
+        name: "text:species.blazecat",
+        types: ["fire"],
+        base_stats: (hp: 65, atk: 72, def: 60, spa: 85, spd: 70, spe: 90),
+        abilities: ["kindle"],
+        learnset: [(level: 1, move: "ember"), (level: 20, move: "flame_burst")],
+        exp_yield: 142,
+        growth: MediumFast,
+    ),
+    (
+        id: "puddlefin",
+        name: "text:species.puddlefin",
+        types: ["water"],
+        hp: 44,
+        attack: 30,
+        defense: 35,
+        speed: 25,
+        abilities: ["torrent"],
+        learnset: [(level: 1, move: "tackle"), (level: 7, move: "water_gun")],
+        exp_yield: 63,
+        growth: MediumSlow,
+        catch_rate: 190,
+    ),
+]

@@ -29,6 +29,7 @@ pub enum ResidualKind {
 
 /// Data-defined status behaviour.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename = "Status")]
 pub struct StatusDef {
     /// Content id (`burn`, `sleep`, …).
     pub id: String,

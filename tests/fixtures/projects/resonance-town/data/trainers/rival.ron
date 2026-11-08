@@ -1,0 +1,9 @@
+Trainer(
+    id: "rival",
+    name: "Rival",
+    party: [
+        (species: "leafkit", level: 5, moves: ["tackle"]),
+        (species: "sproutling", level: 4, moves: ["tackle"]),
+    ],
+    ai_profile: "basic",
+)

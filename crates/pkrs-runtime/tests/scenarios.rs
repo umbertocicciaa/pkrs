@@ -83,6 +83,10 @@ fn battle_town() -> PathBuf {
     fixture_root().join("battle-town")
 }
 
+fn resonance_town() -> PathBuf {
+    fixture_root().join("resonance-town")
+}
+
 #[test]
 fn acceptance_trainer_battle_win_and_back_to_overworld() {
     let dir = battle_town();
@@ -98,6 +102,23 @@ fn acceptance_trainer_battle_win_and_back_to_overworld() {
     let (a, b) = (run(), run());
     assert!(a.passed(), "{a}");
     assert_eq!(a, b, "battle scenarios replay identically");
+}
+
+#[test]
+fn acceptance_resonance_plugin_menu_and_battle() {
+    let dir = resonance_town();
+    let run = || {
+        run_scenario(
+            &open(&dir),
+            &dir.join("tests/resonance_battle.lua"),
+            "tests/resonance_battle.lua",
+            &ScenarioOptions::default(),
+        )
+        .unwrap()
+    };
+    let (a, b) = (run(), run());
+    assert!(a.passed(), "{a}");
+    assert_eq!(a, b, "resonance scenarios replay identically");
 }
 
 #[test]

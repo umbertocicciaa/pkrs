@@ -1,0 +1,27 @@
+# Fixture for the Resonance plugin (design §9.5, issue #48): enables `plugins/resonance`
+# and starts a wild battle from a map script.
+[game]
+name    = "Resonance Town"
+id      = "com.example.resonance-town"
+version = "0.1.0"
+
+[engine]
+version = "0.0"
+api     = 1
+
+[display]
+width  = 240
+height = 160
+scale  = 3
+
+[start]
+map      = "town"
+position = [5, 7]
+facing   = "up"
+
+[features]
+battles = true
+party   = true
+
+[plugins]
+enabled = ["resonance"]

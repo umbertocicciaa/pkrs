@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<map version="1.10" tiledversion="1.10.2" orientation="orthogonal" renderorder="right-down" width="12" height="10" tilewidth="16" tileheight="16" infinite="0" nextlayerid="3" nextobjectid="4">
+ <properties>
+  <property name="bgm" value="town"/>
+ </properties>
+ <tileset firstgid="1" source="../tilesets/overworld.tsx"/>
+ <layer id="1" name="ground" width="12" height="10">
+  <data encoding="csv">
+1,1,1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,1,1
+</data>
+ </layer>
+ <objectgroup id="2" name="objects">
+  <object id="1" name="rival" type="npc" x="80" y="64" width="16" height="16">
+   <properties>
+    <property name="facing" value="down"/>
+    <property name="script" value="maps/town.lua:rival"/>
+   </properties>
+  </object>
+  <object id="2" name="house_door" type="warp" x="144" y="128" width="16" height="16">
+   <properties>
+    <property name="to_map" value="house"/>
+    <property name="to_x" type="int" value="2"/>
+    <property name="to_y" type="int" value="2"/>
+    <property name="facing" value="down"/>
+   </properties>
+  </object>
+  <object id="3" name="yard_gate" type="warp" x="16" y="128" width="16" height="16">
+   <properties>
+    <property name="to_map" value="yard"/>
+    <property name="to_x" type="int" value="2"/>
+    <property name="to_y" type="int" value="2"/>
+    <property name="facing" value="down"/>
+   </properties>
+  </object>
+ </objectgroup>
+</map>

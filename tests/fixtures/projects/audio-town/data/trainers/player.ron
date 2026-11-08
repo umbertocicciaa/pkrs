@@ -1,0 +1,7 @@
+// The player's party (design §7.2 implementation notes) until saves own the party.
+Trainer(
+    id: "player",
+    name: "Player",
+    party: [(species: "emberkit", level: 12, moves: ["ember", "tackle"])],
+    ai_profile: "basic",
+)

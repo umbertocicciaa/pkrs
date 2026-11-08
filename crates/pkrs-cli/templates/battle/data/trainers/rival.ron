@@ -1,0 +1,10 @@
+// The opponent of every battle in scripts/arena_battle.lua.
+Trainer(
+    id: "rival",
+    name: "Rival",
+    party: [
+        (species: "leafkit", level: 8),
+        (species: "puddlefin", level: 6),
+    ],
+    ai_profile: "basic",
+)

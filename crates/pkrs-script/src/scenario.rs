@@ -59,7 +59,8 @@ pub struct Placement {
 pub struct ScenarioSnapshot {
     /// Simulation ticks run so far.
     pub tick: u64,
-    /// Name of the active game state: `Overworld`, `Dialogue`, `Choice`, `Warp`, …
+    /// Name of the active game state: `Overworld`, `Dialogue`, `Choice`, `Warp`, `Battle`,
+    /// `Evolution`, …
     pub state: String,
     /// Active map id.
     pub map: Option<String>,
@@ -89,6 +90,31 @@ pub struct ScenarioSnapshot {
     pub actions: BTreeSet<String>,
     /// The battle on screen while the state is `Battle` (§7.2).
     pub battle: Option<BattleSnapshot>,
+    /// The player's party (empty before the first battle loaded it).
+    pub party: Vec<PartyMemberSnapshot>,
+}
+
+/// One member of the player's party (`party()` in the test API).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PartyMemberSnapshot {
+    /// Species id.
+    pub species: String,
+    /// Display name.
+    pub name: String,
+    /// Level.
+    pub level: u8,
+    /// Total experience.
+    pub exp: u32,
+    /// Known move ids, in slot order.
+    pub moves: Vec<String>,
+    /// Maximum HP at the current level.
+    pub max_hp: u32,
+    /// Attack at the current level.
+    pub attack: u32,
+    /// Defense at the current level.
+    pub defense: u32,
+    /// Speed at the current level.
+    pub speed: u32,
 }
 
 /// What a scenario sees of a running battle (`battle()` in the test API).

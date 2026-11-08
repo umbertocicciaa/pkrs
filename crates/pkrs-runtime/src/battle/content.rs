@@ -12,8 +12,10 @@
 //!   save-backed party model lands (§12).
 //!
 //! Stats follow the Gen-3 formula with zero IVs/EVs; moves get [`DEFAULT_PP`] PP since move
-//! data has no PP field yet. A creature with no explicit moves (every wild creature, since
-//! species have no learnset yet) gets up to four damaging moves of its own types, then any
+//! data has no PP field yet. A creature with no explicit moves (every wild creature) knows
+//! the last four moves of its species' learnset up to its level
+//! ([`SpeciesDef::moves_at_level`]); a species without a learnset (or with nothing learned
+//! yet at that level) falls back to up to four damaging moves of its own types, then any
 //! damaging moves, in id order.
 
 use std::collections::BTreeMap;
@@ -232,7 +234,7 @@ impl BattleContent {
                 id: species.to_owned(),
             })?;
         let ids: Vec<String> = if moves.is_empty() {
-            self.default_moves(def)
+            self.default_moves(def, level)
         } else {
             moves.to_vec()
         };
@@ -266,7 +268,21 @@ impl BattleContent {
         })
     }
 
-    fn default_moves(&self, species: &SpeciesDef) -> Vec<String> {
+    /// Species data errors that only show once moves are known: learnset moves and
+    /// evolution targets that do not exist (§8.2 stage 3). Call it after
+    /// [`merge_moves`](Self::merge_moves) so plugin moves count.
+    #[must_use]
+    pub fn check_species(&self) -> Vec<DataError> {
+        pkrs_data::check_species_refs(&self.pack.species, &self.pack.moves)
+    }
+
+    /// Moves of a creature without explicit moves: its learnset up to `level`, else the
+    /// damaging-move stand-in.
+    fn default_moves(&self, species: &SpeciesDef, level: u8) -> Vec<String> {
+        let learned = species.moves_at_level(level);
+        if !learned.is_empty() {
+            return learned;
+        }
         let damaging = || {
             self.pack
                 .moves
@@ -429,6 +445,37 @@ mod tests {
         let empty = BattleContent::load(&MemoryVfs::new()).unwrap();
         let no_party = empty.prepare(&BattleRequest::Trainer { id: "x".into() }, &policy);
         assert!(matches!(no_party, Err(BattleContentError::NoPlayerParty)));
+    }
+
+    #[test]
+    fn learnsets_replace_the_default_move_stand_in() {
+        let mut vfs = vfs();
+        vfs.insert(
+            "data/species/budling.ron",
+            br#"(id: "budling", types: ["grass"], hp: 30, attack: 10, defense: 10, speed: 10,
+                learnset: [(level: 1, move: "tackle"), (level: 4, move: "leaf"), (level: 9, move: "nope")],
+                evolutions: [(into: "missing", trigger: Level(9))])"#
+                .to_vec(),
+        )
+        .unwrap();
+        let content = BattleContent::load(&vfs).unwrap();
+        let ids = |level| {
+            let c = content.creature("budling", level, &[]).unwrap();
+            c.moves
+                .iter()
+                .flatten()
+                .map(|m| m.id.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(3), ["tackle"]);
+        assert_eq!(ids(5), ["tackle", "leaf"]);
+        // Learnset entries are checked once the moves are known.
+        let errors: Vec<String> = content
+            .check_species()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(errors, ["unknown move `nope`", "unknown species `missing`"]);
     }
 
     #[test]

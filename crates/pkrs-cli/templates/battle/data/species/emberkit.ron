@@ -1,0 +1,10 @@
+(
+    id: "emberkit",
+    types: ["fire"],
+    hp: 45,
+    attack: 60,
+    defense: 40,
+    speed: 65,
+    exp_yield: 62,
+    learnset: [(level: 1, move: "tackle"), (level: 7, move: "ember")],
+)

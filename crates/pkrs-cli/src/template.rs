@@ -15,12 +15,15 @@ use std::path::{Path, PathBuf};
 use include_dir::{Dir, DirEntry, include_dir};
 
 static ONE_SHOT: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/templates/one-shot");
+static BATTLE: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/templates/battle");
 
 /// Available templates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Template {
     /// One small map and the player; no battle data (§2.4).
     OneShot,
+    /// One arena whose game starts straight in a trainer battle, with editable battle data.
+    Battle,
     /// Two maps, battles and a plugin (§2.4; ships with M8).
     FullGame,
 }
@@ -31,6 +34,7 @@ impl Template {
     pub fn name(self) -> &'static str {
         match self {
             Self::OneShot => "one-shot",
+            Self::Battle => "battle",
             Self::FullGame => "full-game",
         }
     }
@@ -38,6 +42,7 @@ impl Template {
     fn dir(self) -> Option<&'static Dir<'static>> {
         match self {
             Self::OneShot => Some(&ONE_SHOT),
+            Self::Battle => Some(&BATTLE),
             Self::FullGame => None,
         }
     }
@@ -307,6 +312,37 @@ mod tests {
             .and_then(|f| f.contents_utf8())
             .unwrap();
         assert!(gitignore.lines().any(|l| l == "saves/"));
+    }
+
+    #[test]
+    fn battle_template_starts_on_the_arena_with_battle_data() {
+        let vars = TemplateVars::for_project("Arena").unwrap();
+        let src = BATTLE
+            .get_file("pkrs.toml")
+            .and_then(|f| f.contents_utf8())
+            .unwrap();
+        let manifest = pkrs_core::ProjectManifest::from_toml_str(&render(src, &vars)).unwrap();
+        assert_eq!(manifest.start.map, "arena");
+        assert!(manifest.features.battles);
+        for path in [
+            "_gitignore",
+            "LICENSES.md",
+            "README.md",
+            "maps/arena.tmx",
+            "tilesets/overworld.tsx",
+            "tilesets/overworld.png",
+            "sprites/player.png",
+            "scripts/main.lua",
+            "scripts/arena_battle.lua",
+            "scripts/maps/arena.lua",
+            "data/types.ron",
+            "data/moves/moves.ron",
+            "data/trainers/player.ron",
+            "data/trainers/rival.ron",
+            "tests/battle.lua",
+        ] {
+            assert!(BATTLE.get_file(path).is_some(), "{path}");
+        }
     }
 
     #[test]

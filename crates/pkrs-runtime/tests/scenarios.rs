@@ -154,6 +154,69 @@ fn battle_state_and_queries_are_visible_to_scenarios() {
     assert!(report.passed(), "{report}");
 }
 
+fn training_grounds() -> PathBuf {
+    fixture_root().join("training-grounds")
+}
+
+/// Issue #41 acceptance: a won battle gives exp (modded by `on_battle_end`), the creature
+/// levels up, replaces a move through the prompt, evolves at the configured level in the
+/// evolution scene, play returns to the overworld, and the next battle uses the result.
+#[test]
+fn acceptance_battle_win_levels_up_and_evolves() {
+    let dir = training_grounds();
+    let run = || {
+        run_scenario(
+            &open(&dir),
+            &dir.join("tests/level_up_and_evolve.lua"),
+            "tests/level_up_and_evolve.lua",
+            &ScenarioOptions::default(),
+        )
+        .unwrap()
+    };
+    let (a, b) = (run(), run());
+    assert!(a.passed(), "{a}");
+    assert_eq!(a, b, "the post-battle flow replays identically");
+}
+
+#[test]
+fn declining_the_move_keeps_the_old_moves_and_still_evolves() {
+    let source = r#"
+        walk("up", 2)
+        press("confirm")
+        advance_dialogue()
+        wait_for_state("Battle")
+        advance_battle()
+        while battle().menu == "action" do
+          choose(1)
+          choose(4)
+          advance_battle() -- reads the reward texts up to the move prompt
+        end
+        expect_state("Battle")
+        expect_dialogue("Which move should Sproutling forget?")
+        press("cancel")
+        wait_until(function() return dialogue() == "Sproutling did not learn Vine whip." end, 60)
+        expect_eq(party()[1].moves, { "tackle", "scratch", "pound", "leafage" })
+        while state() == "Battle" do
+          if dialogue() ~= nil then press("confirm") else wait_ticks(1) end
+        end
+        expect_state("Evolution")
+        while state() == "Evolution" do
+          if dialogue() ~= nil then press("confirm") else wait_ticks(1) end
+        end
+        expect_eq(party()[1].species, "bloomling")
+        expect_state("Dialogue")
+        expect_dialogue("Well fought!")
+    "#;
+    let report = run_scenario_source(
+        &open(&training_grounds()),
+        "tests/x.lua",
+        source,
+        &ScenarioOptions::default(),
+    )
+    .unwrap();
+    assert!(report.passed(), "{report}");
+}
+
 #[test]
 fn scenario_runs_are_deterministic() {
     let dir = town();
@@ -217,6 +280,61 @@ fn tick_limit_and_load_errors_fail() {
     )
     .unwrap();
     assert!(matches!(&report.outcome, ScenarioOutcome::Failed(f) if f.check == "load"));
+}
+
+fn grass_route() -> PathBuf {
+    fixture_root().join("grass-route")
+}
+
+#[test]
+fn acceptance_wild_encounter_flee_and_back_to_overworld() {
+    let dir = grass_route();
+    let run = || {
+        run_scenario(
+            &open(&dir),
+            &dir.join("tests/wild_encounter.lua"),
+            "tests/wild_encounter.lua",
+            &ScenarioOptions::default(),
+        )
+        .unwrap()
+    };
+    let (a, b) = (run(), run());
+    assert!(a.passed(), "{a}");
+    assert_eq!(a, b, "encounter scenarios replay identically");
+}
+
+#[test]
+fn the_step_that_starts_an_encounter_depends_only_on_the_seed() {
+    // Pace in the grass until a battle starts, then fail on purpose: the failure reports
+    // the tick, which pins the step the encounter happened on.
+    let source = r#"
+        walk("up", 3)
+        local dir = "left"
+        while state() ~= "Battle" do
+          walk(dir)
+          local x = player()
+          if x <= 3 then dir = "right" elseif x >= 8 then dir = "left" end
+        end
+        local x = player()
+        fail("encounter at x = " .. x)
+    "#;
+    let ticks = |seed| {
+        let options = ScenarioOptions {
+            seed,
+            ..ScenarioOptions::default()
+        };
+        let report =
+            run_scenario_source(&open(&grass_route()), "tests/x.lua", source, &options).unwrap();
+        let failure = report.failure().expect("the scenario fails on purpose");
+        assert_eq!(failure.check, "fail", "{report}");
+        (failure.tick, failure.to_string())
+    };
+    assert_eq!(ticks(1), ticks(1));
+    let seeds: Vec<_> = (1..=4).map(ticks).collect();
+    assert!(
+        seeds.iter().any(|t| t.0 != seeds[0].0),
+        "different seeds should meet the first creature on different steps: {seeds:?}"
+    );
 }
 
 #[test]

@@ -1,0 +1,20 @@
+// The player's creature: knows four moves at level 5, wants Vine Whip at level 6 and
+// evolves into Bloomling at level 6.
+(
+    id: "sproutling",
+    types: ["grass"],
+    hp: 40,
+    attack: 50,
+    defense: 30,
+    speed: 25,
+    exp_yield: 64,
+    growth: MediumFast,
+    learnset: [
+        (level: 1, move: "tackle"),
+        (level: 1, move: "scratch"),
+        (level: 3, move: "pound"),
+        (level: 5, move: "leafage"),
+        (level: 6, move: "vine_whip"),
+    ],
+    evolutions: [(into: "bloomling", trigger: Level(6))],
+)

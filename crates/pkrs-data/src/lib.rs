@@ -6,7 +6,9 @@
 mod battle_pack;
 mod battle_rules;
 pub mod content;
+mod encounter;
 mod error;
+mod growth;
 mod move_def;
 mod species;
 mod trainer;
@@ -22,9 +24,14 @@ pub use content::{
     ContentValue, ContentValueError, EffectDef, ItemDef, Record, TerrainDef, is_content_id,
     parse_content,
 };
+pub use encounter::{
+    EncounterPick, EncounterSlot, EncounterTable, EncounterTables, MAX_ENCOUNTER_LEVEL,
+    roll_encounter_rate,
+};
 pub use error::{DataError, Result};
+pub use growth::{GrowthRate, MAX_LEVEL};
 pub use move_def::{EffectTarget, MoveCategory, MoveDef, MoveEffect, StatId};
-pub use species::SpeciesDef;
+pub use species::{EvolutionDef, EvolutionTrigger, LearnsetEntry, SpeciesDef, check_species_refs};
 pub use trainer::{
     AiProfile, AiTier, AiVisibility, AiWeights, BUILTIN_PROFILES, TrainerDef, TrainerMember,
     check_ai_profiles, resolve_ai_profile,

@@ -1,0 +1,5 @@
+[
+    Ability(id: "kindle", name: "text:abilities.kindle", description: "text:abilities.kindle_desc"),
+    Ability(id: "torrent", name: "text:abilities.torrent"),
+    Ability(id: "overgrow", name: "text:abilities.overgrow"),
+]

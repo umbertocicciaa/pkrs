@@ -26,6 +26,7 @@ fn resources() -> BattleResources {
             target: pkrs_data::EffectTarget::User,
             chance: 100,
         }],
+        ..MoveDef::default()
     })
     .expect("growth");
     pack.insert_move(MoveDef {
@@ -37,6 +38,7 @@ fn resources() -> BattleResources {
         priority: 0,
         targeting: Default::default(),
         effects: vec![MoveEffect::Damage],
+        ..MoveDef::default()
     })
     .expect("tackle");
     BattleResources::new(pack)

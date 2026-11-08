@@ -2,13 +2,13 @@
 //! an `encounters` rect, roll against the rect's rate with the game RNG and, on a hit, start
 //! a wild battle through the same path as `battle.start_wild`.
 //!
-//! Tables are read from `data/encounters/*.ron` ([`EncounterTables`]) the first time the
-//! player steps onto an encounter rect, validated, and checked against the project's species.
-//! A project whose tables fail to load logs the error once and has no encounters.
+//! Tables come from the project's content database ([`GameData`], `data/encounters/*.ron`,
+//! §8.1) the first time the player steps onto an encounter rect, and are checked against the
+//! project's species. A project whose content fails to load (or whose tables name unknown
+//! species) logs the error once and has no encounters.
 
-use pkrs_assets::{EntryKind, Vfs, VfsPath};
 use pkrs_core::{GridPos, Pcg64Rng};
-use pkrs_data::{DataError, EncounterTables};
+use pkrs_data::{DataError, EncounterTables, GameData};
 use pkrs_script::BattleRequest;
 use pkrs_world::{Map, WildEncounter, roll_step_encounter, unknown_encounter_tables};
 
@@ -21,40 +21,15 @@ pub const DEFAULT_ENCOUNTER_SEED: u64 = 0x0065_6e63_6f75_6e74;
 /// Why the encounter tables could not be loaded.
 #[derive(Debug, thiserror::Error)]
 pub enum EncounterLoadError {
-    /// A table file could not be listed or read.
-    #[error(transparent)]
-    Assets(#[from] pkrs_assets::AssetsError),
-    /// A table is invalid, duplicated or names an unknown species.
+    /// A table names an unknown species.
     #[error(transparent)]
     Data(#[from] DataError),
-    /// A table file is not UTF-8.
-    #[error("`{0}` is not valid UTF-8")]
-    Utf8(String),
 }
 
-/// Reads and validates every `data/encounters/*.ron` table of the project in `vfs`; each
-/// slot's species must satisfy `known_species`. No folder means no tables.
-pub fn load_encounter_tables(
-    vfs: &dyn Vfs,
-    known_species: impl Fn(&str) -> bool,
-) -> Result<EncounterTables, EncounterLoadError> {
-    let mut tables = EncounterTables::new();
-    let dir = VfsPath::new(ENCOUNTERS_DIR)?;
-    let Ok(entries) = vfs.list(&dir) else {
-        return Ok(tables);
-    };
-    let mut files: Vec<VfsPath> = entries
-        .into_iter()
-        .filter(|e| e.kind == EntryKind::File && e.path.as_str().ends_with(".ron"))
-        .map(|e| e.path)
-        .collect();
-    files.sort_by(|a, b| a.as_str().cmp(b.as_str()));
-    for path in files {
-        let source = String::from_utf8(vfs.read(&path)?)
-            .map_err(|_| EncounterLoadError::Utf8(path.to_string()))?;
-        tables.insert_ron(&source, path.as_str())?;
-    }
-    tables.check_species(known_species)?;
+/// The encounter tables of `data`, after checking that every slot's species exists.
+pub fn load_encounter_tables(data: &GameData) -> Result<EncounterTables, EncounterLoadError> {
+    let tables = data.encounter_tables().clone();
+    tables.check_species(|id| data.species().contains(id))?;
     Ok(tables)
 }
 
@@ -117,13 +92,13 @@ impl Encounters {
         matches!(self.tables, Tables::Unloaded) && map.encounters_at(pos).next().is_some()
     }
 
-    /// Loads the tables with [`load_encounter_tables`] unless that was already attempted. A
-    /// failure is logged and disables encounters.
-    pub fn ensure_loaded(&mut self, vfs: &dyn Vfs, known_species: impl Fn(&str) -> bool) {
+    /// Takes the tables from `data` with [`load_encounter_tables`] unless that was already
+    /// attempted. A failure is logged and disables encounters.
+    pub fn ensure_loaded(&mut self, data: &GameData) {
         if !matches!(self.tables, Tables::Unloaded) {
             return;
         }
-        self.tables = match load_encounter_tables(vfs, known_species) {
+        self.tables = match load_encounter_tables(data) {
             Ok(tables) => {
                 tracing::info!(target: "encounter", tables = tables.len(), "encounter tables loaded");
                 Tables::Loaded(tables)
@@ -177,7 +152,7 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
-    use pkrs_assets::MemoryVfs;
+    use pkrs_data::{LoadOptions, MemoryDataFiles};
     use pkrs_world::{EncounterZone, LogicalGrid, Properties, Terrain, TileRect};
 
     const TABLE: &str = r#"EncounterTable(
@@ -186,12 +161,22 @@ mod tests {
         slots: [(species: "sproutling", min_level: 2, max_level: 4, weight: 1)],
     )"#;
 
-    fn vfs(files: &[(&str, &str)]) -> MemoryVfs {
-        let mut vfs = MemoryVfs::new();
+    const SPROUTLING: &str =
+        r#"(id: "sproutling", types: ["grass"], hp: 1, attack: 1, defense: 1, speed: 1)"#;
+
+    fn data(files: &[(&str, &str)]) -> GameData {
+        let mut mem = MemoryDataFiles::new();
         for (path, text) in files {
-            vfs.insert(path, text.as_bytes().to_vec()).unwrap();
+            mem.insert(*path, *text);
         }
-        vfs
+        GameData::load(&mem, LoadOptions::default()).unwrap()
+    }
+
+    fn route() -> GameData {
+        data(&[
+            ("data/encounters/route.ron", TABLE),
+            ("data/species/sproutling.ron", SPROUTLING),
+        ])
     }
 
     fn map(table: &str) -> Map {
@@ -221,26 +206,12 @@ mod tests {
 
     #[test]
     fn loads_tables_and_checks_species() {
-        let files = vfs(&[("data/encounters/route.ron", TABLE)]);
-        let tables = load_encounter_tables(&files, |s| s == "sproutling").unwrap();
+        let tables = load_encounter_tables(&route()).unwrap();
         assert!(tables.get("route_grass").is_some());
-        let err = load_encounter_tables(&files, |_| false).unwrap_err();
+        let no_species = data(&[("data/encounters/route.ron", TABLE)]);
+        let err = load_encounter_tables(&no_species).unwrap_err();
         assert_eq!(err.to_string(), "unknown species `sproutling`");
-        assert!(
-            load_encounter_tables(&MemoryVfs::new(), |_| true)
-                .unwrap()
-                .is_empty()
-        );
-        let dup = vfs(&[
-            ("data/encounters/a.ron", TABLE),
-            ("data/encounters/b.ron", TABLE),
-        ]);
-        assert_eq!(
-            load_encounter_tables(&dup, |_| true)
-                .unwrap_err()
-                .to_string(),
-            "duplicate encounter table `route_grass`"
-        );
+        assert!(load_encounter_tables(&data(&[])).unwrap().is_empty());
     }
 
     #[test]
@@ -257,7 +228,7 @@ mod tests {
             None,
             "not loaded yet"
         );
-        enc.ensure_loaded(&vfs(&[("data/encounters/route.ron", TABLE)]), |_| true);
+        enc.ensure_loaded(&route());
         assert!(enc.tables_loaded());
         assert!(!enc.needs_tables(&map, GridPos::new(0, 0)));
 
@@ -284,7 +255,7 @@ mod tests {
         let map = map("route_grass");
         let run = |seed| {
             let mut enc = Encounters::new(seed);
-            enc.ensure_loaded(&vfs(&[("data/encounters/route.ron", TABLE)]), |_| true);
+            enc.ensure_loaded(&route());
             (0..100)
                 .map(|_| enc.on_step(&map, GridPos::new(0, 0)))
                 .collect::<Vec<_>>()
@@ -296,7 +267,7 @@ mod tests {
     #[test]
     fn failures_disable_encounters() {
         let mut enc = Encounters::default();
-        enc.ensure_loaded(&vfs(&[("data/encounters/bad.ron", "(id: 1)")]), |_| true);
+        enc.ensure_loaded(&data(&[("data/encounters/route.ron", TABLE)]));
         assert!(!enc.tables_loaded());
         let route = map("route_grass");
         assert!(

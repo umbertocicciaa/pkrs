@@ -1,8 +1,10 @@
-//! `pkrs check` (§2.3): validates `pkrs.toml` and the plugin set; with `--plugins` it also
-//! merges the content `data/` folders and loads the plugins in a sandboxed script host, and
+//! `pkrs check` (§2.3): validates `pkrs.toml`, the plugin set and the game's `data/` folder
+//! (every RON schema loads into the content database, no duplicate ids; battle data is
+//! skipped with `features.battles = false`, §8.1); with `--plugins` it also merges the
+//! plugins' content `data/` folders and loads the plugins in a sandboxed script host, and
 //! returns the resolved hook table and any content errors (§9.4).
 //!
-//! Further checks (RON data, Tiled maps, Lua syntax of game scripts) arrive with M7.
+//! Further checks (cross-references, Tiled maps, Lua syntax of game scripts) arrive with M7.
 
 use std::fmt;
 use std::ops::RangeInclusive;
@@ -10,6 +12,7 @@ use std::path::Path;
 
 use pkrs_assets::{EntryKind, FolderVfs, Vfs, VfsPath};
 use pkrs_core::{ManifestError, Pcg64Rng, ProjectManifest, Version};
+use pkrs_data::{DataError, DataFiles, GameData, LoadOptions};
 use pkrs_script::{
     ContentError, HookTable, LuaScriptHost, PluginErrors, PluginInitError, ScriptError,
     ScriptFiles, ScriptLimits, load_plugins, plan_plugins,
@@ -51,6 +54,8 @@ pub struct CheckReport {
     /// Problems in `data/` folders: duplicate ids without `override`, parse and schema
     /// errors (only with `--plugins`, §9.4).
     pub content_errors: Vec<ContentError>,
+    /// Problems loading the game's `data/` folder into the content database (§8.1).
+    pub data_errors: Vec<DataError>,
     /// The resolved hook table (only with `--plugins`).
     pub hooks: Option<HookTable>,
 }
@@ -59,7 +64,7 @@ impl CheckReport {
     /// `true` when nothing failed.
     #[must_use]
     pub fn is_ok(&self) -> bool {
-        self.failed.is_empty() && self.content_errors.is_empty()
+        self.failed.is_empty() && self.content_errors.is_empty() && self.data_errors.is_empty()
     }
 }
 
@@ -97,8 +102,13 @@ pub fn check_project(dir: &Path, plugins: bool) -> Result<CheckReport, CheckErro
     manifest.check_engine(&engine, SUPPORTED_API)?;
     let files = FolderScripts(FolderVfs::new(dir)?);
     let plan = plan_plugins(&files, &manifest.plugins.enabled, SUPPORTED_API)?;
+    let data_errors = match GameData::load(&files, LoadOptions::from_features(&manifest.features)) {
+        Ok(_) => Vec::new(),
+        Err(errors) => errors.0,
+    };
     let mut report = CheckReport {
         load_order: plan.ids().iter().map(|s| (*s).to_owned()).collect(),
+        data_errors,
         ..CheckReport::default()
     };
     if plugins {
@@ -115,8 +125,45 @@ pub fn check_project(dir: &Path, plugins: bool) -> Result<CheckReport, CheckErro
     Ok(report)
 }
 
-/// [`ScriptFiles`] over the project folder (read-only, through the assets VFS).
+/// [`ScriptFiles`] and [`DataFiles`] over the project folder (read-only, through the assets
+/// VFS).
 struct FolderScripts(FolderVfs);
+
+impl FolderScripts {
+    fn names(&self, dir: &str, kind: EntryKind) -> Vec<String> {
+        let Ok(dir) = VfsPath::new(dir) else {
+            return Vec::new();
+        };
+        let mut names: Vec<String> = self
+            .0
+            .list(&dir)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|entry| entry.kind == kind)
+            .filter_map(|entry| entry.path.file_name().map(str::to_owned))
+            .collect();
+        names.sort();
+        names
+    }
+}
+
+impl DataFiles for FolderScripts {
+    fn list_files(&self, dir: &str) -> Vec<String> {
+        self.names(dir, EntryKind::File)
+    }
+
+    fn list_dirs(&self, dir: &str) -> Vec<String> {
+        self.names(dir, EntryKind::Dir)
+    }
+
+    fn exists(&self, path: &str) -> bool {
+        ScriptFiles::exists(self, path)
+    }
+
+    fn read_text(&self, path: &str) -> Result<String, String> {
+        self.read_script(path).map_err(|e| e.to_string())
+    }
+}
 
 impl ScriptFiles for FolderScripts {
     fn read_script(&self, path: &str) -> pkrs_script::Result<String> {
@@ -137,35 +184,11 @@ impl ScriptFiles for FolderScripts {
     }
 
     fn list_dirs(&self, dir: &str) -> Vec<String> {
-        let Ok(dir) = VfsPath::new(dir) else {
-            return Vec::new();
-        };
-        let mut names: Vec<String> = self
-            .0
-            .list(&dir)
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|entry| entry.kind == EntryKind::Dir)
-            .filter_map(|entry| entry.path.file_name().map(str::to_owned))
-            .collect();
-        names.sort();
-        names
+        self.names(dir, EntryKind::Dir)
     }
 
     fn list_files(&self, dir: &str) -> Vec<String> {
-        let Ok(dir) = VfsPath::new(dir) else {
-            return Vec::new();
-        };
-        let mut names: Vec<String> = self
-            .0
-            .list(&dir)
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|entry| entry.kind == EntryKind::File)
-            .filter_map(|entry| entry.path.file_name().map(str::to_owned))
-            .collect();
-        names.sort();
-        names
+        self.names(dir, EntryKind::File)
     }
 }
 
@@ -280,6 +303,40 @@ mod tests {
         ] {
             assert!(table.contains(line), "{table}");
         }
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn data_folder_is_loaded_and_battle_data_follows_the_feature() {
+        let species = "(id: \"a\", types: [\"normal\"], hp: 1, attack: 1, defense: 1, speed: 1)";
+        let project = |tag: &str, battles: &str| {
+            let toml = format!("{}[features]\nbattles = {battles}\n", manifest(""));
+            temp_project(
+                tag,
+                &[
+                    ("pkrs.toml", &toml),
+                    ("data/species/a.ron", species),
+                    ("data/species/b.ron", species),
+                    ("data/items/potion.ron", "(id: \"potion\")"),
+                ],
+            )
+        };
+        let dir = project("data-on", "true");
+        let report = check_project(&dir, false).unwrap();
+        assert!(!report.is_ok());
+        let errors: Vec<String> = report.data_errors.iter().map(ToString::to_string).collect();
+        assert_eq!(
+            errors,
+            [
+                "duplicate species `a` in `data/species/b.ron` (already defined in `data/species/a.ron`)"
+            ]
+        );
+        std::fs::remove_dir_all(dir).ok();
+
+        // Story-only: the broken battle data is not even read.
+        let dir = project("data-off", "false");
+        let report = check_project(&dir, false).unwrap();
+        assert!(report.is_ok(), "{:?}", report.data_errors);
         std::fs::remove_dir_all(dir).ok();
     }
 

@@ -32,6 +32,7 @@ fn resources(extra_moves: Vec<MoveDef>) -> BattleResources {
             status: "poison".into(),
             chance: 100,
         }],
+        ..MoveDef::default()
     })
     .expect("poison_powder");
     pack.insert_move(MoveDef {
@@ -43,6 +44,7 @@ fn resources(extra_moves: Vec<MoveDef>) -> BattleResources {
         priority: 0,
         targeting: Default::default(),
         effects: vec![],
+        ..MoveDef::default()
     })
     .expect("pass");
     for mv in extra_moves {
@@ -220,6 +222,7 @@ fn fire_type_cannot_be_burned() {
             status: "burn".into(),
             chance: 100,
         }],
+        ..MoveDef::default()
     };
     let (mut battle, mut hooks) = start_battle(
         resources(vec![burn_move]),
@@ -268,6 +271,7 @@ fn sleep_wakes_with_status_cured_event() {
             status: "sleep".into(),
             chance: 100,
         }],
+        ..MoveDef::default()
     };
     let (mut battle, mut hooks) = start_battle(
         resources(vec![sleep_move]),

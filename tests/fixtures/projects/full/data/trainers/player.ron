@@ -1,0 +1,7 @@
+// The player's party (data/trainers/player.ron is the party until saves own it).
+Trainer(
+    id: "player",
+    name: "Player",
+    party: [(species: "emberkit", level: 5, moves: ["scratch", "ember"])],
+    ai_profile: "basic",
+)

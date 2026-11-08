@@ -28,6 +28,7 @@ fn resources() -> BattleResources {
             priority: 0,
             targeting: Default::default(),
             effects: vec![MoveEffect::Damage],
+            ..MoveDef::default()
         },
         MoveDef {
             id: "spore".into(),
@@ -41,6 +42,7 @@ fn resources() -> BattleResources {
                 status: "sleep".into(),
                 chance: 100,
             }],
+            ..MoveDef::default()
         },
     ] {
         pack.insert_move(def).unwrap();

@@ -2,6 +2,7 @@
 
 pub mod battle;
 mod ctx;
+pub mod data;
 mod default_theme;
 mod demo;
 pub mod encounters;

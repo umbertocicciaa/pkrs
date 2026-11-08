@@ -2,17 +2,22 @@
 
 use serde::Deserialize;
 
-use crate::error::{DataError, Result};
+use crate::codec::RonCodec;
+use crate::error::Result;
 
-/// Physical / special / status category.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+/// Physical / special / status category (`physical` or §8.1's `Physical`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MoveCategory {
-    /// Uses attack and defense.
+    /// Uses attack and defense (default).
+    #[default]
+    #[serde(alias = "Physical")]
     Physical,
     /// Uses special attack and special defense (SpA/SpD stubbed to Atk/Def in M1).
+    #[serde(alias = "Special")]
     Special,
     /// No damage calc.
+    #[serde(alias = "Status")]
     Status,
 }
 
@@ -32,14 +37,17 @@ pub enum StatId {
     Evasion,
 }
 
-/// Which foes a move can hit in multi-active battles (§7.3 formats).
+/// Which foes a move can hit in multi-active battles (§7.3 formats). §8.1's
+/// `SingleOpponent` / `AllOpponents` are accepted as aliases.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum MoveTargetScope {
     /// One chosen foe (default).
     #[default]
+    #[serde(alias = "SingleOpponent", alias = "single_opponent")]
     SingleFoe,
     /// Every non-fainted foe (`Spread` moves in doubles).
+    #[serde(alias = "AllOpponents", alias = "all_opponents")]
     AllFoes,
 }
 
@@ -117,11 +125,28 @@ pub enum MoveEffect {
     SwitchOut,
 }
 
-/// One move loaded from RON.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+/// One move (§7.3, §8.1).
+///
+/// ```ron
+/// // data/moves/ember.ron
+/// Move(
+///   id: "ember", name: "text:moves.ember", type: "fire", category: Special,
+///   power: 40, accuracy: 100, pp: 25, priority: 0, target: SingleOpponent,
+///   effects: [ (effect: "damage"), (effect: "apply_status", status: "burn", chance: 10) ],
+/// )
+/// ```
+///
+/// The `Move` name is optional; `name`, `pp`, `target`, `flags` and `script` have defaults.
+/// Effects are written as tagged records (`(effect: "apply_status", …)`), the same shape
+/// `data.register_move` takes from Lua.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename = "Move")]
 pub struct MoveDef {
     /// Content id.
     pub id: String,
+    /// Display name: literal text or a `text:` key (empty: derived from the id).
+    #[serde(default)]
+    pub name: String,
     /// Element type id.
     #[serde(rename = "type")]
     pub type_id: String,
@@ -131,11 +156,20 @@ pub struct MoveDef {
     pub power: u16,
     /// Accuracy 0–100 (`0` = always hits for status).
     pub accuracy: u8,
+    /// Power points; `None` uses the engine default.
+    #[serde(default)]
+    pub pp: Option<u8>,
     /// Priority for turn order.
     pub priority: i8,
-    /// Who the move hits in multi-active battles.
-    #[serde(default)]
+    /// Who the move hits in multi-active battles (`targeting` or §8.1's `target`).
+    #[serde(default, alias = "target")]
     pub targeting: MoveTargetScope,
+    /// Free-form flags (`contact`, `sound`, …) for hooks and plugins.
+    #[serde(default)]
+    pub flags: Vec<String>,
+    /// Bespoke logic: `plugin_id:function` (§7.3).
+    #[serde(default)]
+    pub script: Option<String>,
     /// Effect pipeline executed after a successful hit check.
     pub effects: Vec<MoveEffect>,
 }
@@ -143,9 +177,6 @@ pub struct MoveDef {
 impl MoveDef {
     /// Parses a single move RON document.
     pub fn parse_ron(source: &str, file: &str) -> Result<Self> {
-        ron::from_str(source).map_err(|e| DataError::Parse {
-            file: file.into(),
-            message: e.to_string(),
-        })
+        RonCodec::decode(source, file)
     }
 }

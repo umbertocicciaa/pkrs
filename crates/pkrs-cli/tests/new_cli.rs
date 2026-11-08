@@ -19,6 +19,22 @@ fn pkrs() -> Command {
     Command::new(env!("CARGO_BIN_EXE_pkrs"))
 }
 
+/// `pkrs check --project <dir>` passes: the manifest, plugins and the template's `data/`
+/// folder load (§8.1 acceptance: template data loads; story-only projects need none).
+fn assert_check_passes(dir: &std::path::Path) {
+    let out = pkrs()
+        .args(["check", "--project"])
+        .arg(dir)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains("check passed"));
+}
+
 #[test]
 fn new_scaffolds_a_pinned_one_shot_project() {
     let root = temp_dir("new");
@@ -49,6 +65,7 @@ fn new_scaffolds_a_pinned_one_shot_project() {
         assert!(dest.join(file).is_file(), "missing {file}");
     }
     assert!(!dest.join("_gitignore").exists());
+    assert_check_passes(&dest);
 
     let manifest = std::fs::read_to_string(dest.join("pkrs.toml")).unwrap();
     assert!(manifest.contains("name    = \"Demo Quest\""), "{manifest}");
@@ -102,6 +119,7 @@ fn new_scaffolds_the_battle_template() {
     let manifest = std::fs::read_to_string(dest.join("pkrs.toml")).unwrap();
     assert!(manifest.contains("battles = true"), "{manifest}");
     assert!(!manifest.contains("{{"), "every placeholder is rendered");
+    assert_check_passes(&dest);
     std::fs::remove_dir_all(&root).unwrap();
 }
 

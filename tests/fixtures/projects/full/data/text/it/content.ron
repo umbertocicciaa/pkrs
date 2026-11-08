@@ -1,0 +1,7 @@
+// Partial Italian text: missing keys fall back to the default language.
+{
+    "species.emberkit": "Braciolino",
+    "moves.ember": "Brace",
+    "items.potion": "Pozione",
+    "dialogue.keeper.greeting": "La luce non deve mai spegnersi.",
+}

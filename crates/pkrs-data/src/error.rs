@@ -48,6 +48,35 @@ pub enum DataError {
         /// Who tried to define it again.
         by: String,
     },
+    /// The same id is defined twice in the game's data folders (and the later record does
+    /// not declare `override: true`).
+    #[error("duplicate {kind} `{id}` in `{file}` (already defined in `{first}`)")]
+    DuplicateId {
+        /// Kind of record (`species`, `move`, `text key`, …).
+        kind: String,
+        /// The repeated id.
+        id: String,
+        /// File of the second definition.
+        file: String,
+        /// File (or source) of the first definition.
+        first: String,
+    },
+    /// A data file could not be read.
+    #[error("cannot read `{file}`: {message}")]
+    Read {
+        /// Content file path, relative to the project root.
+        file: String,
+        /// Why reading failed.
+        message: String,
+    },
+    /// A problem in a record of `file` (the inner error names the record).
+    #[error("{file}: {source}")]
+    InFile {
+        /// Content file path, relative to the project root.
+        file: String,
+        /// The problem.
+        source: Box<DataError>,
+    },
     /// Invalid field value in content data.
     #[error("invalid {field} in `{context}`: {message}")]
     InvalidField {

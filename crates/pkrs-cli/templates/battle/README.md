@@ -11,6 +11,9 @@ A pkrs battle playground: the game opens straight into a trainer battle.
   - `data/trainers/player.ron`: your party,
   - `data/trainers/rival.ron`: the opponent,
   - `data/species/`, `data/moves/`, `data/types.ron`: creatures, moves and the type chart.
+
+  A file holds one record or a list; every file of a folder is merged, and an id defined
+  twice is an error. `pkrs check` loads all of `data/` and reports every problem.
 - `scripts/arena_battle.lua` starts the battles; `scripts/main.lua` runs it when the game
   starts.
 - `tests/battle.lua` plays one battle with scripted input:

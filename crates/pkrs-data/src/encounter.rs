@@ -71,13 +71,7 @@ impl EncounterTable {
     /// Parses a file holding one `EncounterTable(...)` or a list of them, and validates each
     /// table ([`validate`](Self::validate)).
     pub fn parse_ron(source: &str, file: &str) -> Result<Vec<Self>> {
-        let tables = match ron::from_str::<Vec<Self>>(source) {
-            Ok(tables) => tables,
-            Err(_) => vec![ron::from_str::<Self>(source).map_err(|e| DataError::Parse {
-                file: file.into(),
-                message: e.to_string(),
-            })?],
-        };
+        let tables: Vec<Self> = crate::codec::RonCodec::decode_one_or_many(source, file)?;
         for table in &tables {
             table.validate()?;
         }

@@ -295,13 +295,7 @@ pub fn check_ai_profiles(trainers: &[TrainerDef], profiles: &[AiProfile]) -> Vec
 }
 
 fn parse<T: for<'de> Deserialize<'de>>(source: &str, file: &str) -> Result<T> {
-    ron::Options::default()
-        .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
-        .from_str(source)
-        .map_err(|e| DataError::Parse {
-            file: file.into(),
-            message: e.to_string(),
-        })
+    crate::codec::RonCodec::decode(source, file)
 }
 
 #[cfg(test)]

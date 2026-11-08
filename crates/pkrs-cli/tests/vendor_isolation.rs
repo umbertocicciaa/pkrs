@@ -13,6 +13,7 @@ const ROWS: &[(&str, &str, &str)] = &[
     ("pkrs-core", "rand_pcg", "rng/adapter.rs"),
     ("pkrs-core", "toml", "manifest/toml_codec.rs"),
     ("pkrs-core", "semver", "version.rs"),
+    ("pkrs-data", "ron", "codec.rs"),
     ("pkrs-script", "mlua", "lua/"),
 ];
 

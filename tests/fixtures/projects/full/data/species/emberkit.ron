@@ -1,0 +1,18 @@
+// §8.1 species form: nested base stats, abilities, sprites.
+Species(
+    id: "emberkit",
+    name: "text:species.emberkit",
+    types: ["fire"],
+    base_stats: (hp: 45, atk: 52, def: 40, spa: 60, spd: 50, spe: 65),
+    abilities: ["kindle"],
+    learnset: [(level: 1, move: "scratch"), (level: 7, move: "ember")],
+    evolutions: [(into: "blazecat", trigger: Level(16))],
+    sprites: (
+        front: "sprites/creatures/emberkit_front.png",
+        back: "sprites/creatures/emberkit_back.png",
+        icon: "sprites/icons/emberkit.png",
+    ),
+    catch_rate: 45,
+    exp_yield: 62,
+    growth: MediumFast,
+)

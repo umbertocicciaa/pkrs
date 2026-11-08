@@ -1,0 +1,10 @@
+Trainer(
+    id: "keeper_mara",
+    name: "Keeper Mara",
+    party: [
+        (species: "puddlefin", level: 6),
+        (species: "sproutling", level: 7, moves: ["tackle", "vine_whip"]),
+    ],
+    ai_profile: "profiles/keeper",
+    items: ["potion"],
+)

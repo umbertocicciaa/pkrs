@@ -1,0 +1,5 @@
+[
+    Item(id: "potion", name: "text:items.potion", description: "text:items.potion_desc", price: 300),
+    Item(id: "capture_orb", name: "text:items.capture_orb", price: 200, pocket: "balls"),
+    Item(id: "lighthouse_key", name: "text:items.lighthouse_key", pocket: "key_items"),
+]

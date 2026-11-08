@@ -19,6 +19,8 @@ use pkrs_core::{is_action_name, is_plugin_id};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
+use crate::codec::RonCodec;
+
 pub use value::{ContentValue, ContentValueError};
 
 use crate::battle_rules::StatusDef;
@@ -92,9 +94,11 @@ impl fmt::Display for ContentKind {
     }
 }
 
-/// An ability. Its behaviour is written as battle hooks (§7.4); the record makes the id
-/// known so species and validation can reference it.
+/// An ability (`data/abilities/*.ron`, optional `Ability(…)` name). Its behaviour is
+/// written as battle hooks (§7.4); the record makes the id known so species and validation
+/// can reference it.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename = "Ability")]
 pub struct AbilityDef {
     /// Content id.
     pub id: String,
@@ -110,14 +114,23 @@ fn default_pocket() -> String {
     "items".into()
 }
 
-/// A bag item.
+/// A bag item (`data/items/*.ron`, optional `Item(…)` name).
+///
+/// ```ron
+/// Item(id: "potion", name: "text:items.potion", description: "text:items.potion_desc",
+///      price: 300, pocket: "items")
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename = "Item")]
 pub struct ItemDef {
     /// Content id.
     pub id: String,
     /// Display name (text key).
     #[serde(default)]
     pub name: String,
+    /// Description (text key).
+    #[serde(default)]
+    pub description: String,
     /// Shop price (`0` = cannot be bought).
     #[serde(default)]
     pub price: u32,
@@ -134,6 +147,7 @@ fn default_true() -> bool {
 /// (`grass`, `water`, `ice`, `ledge_*`, …) cannot be redefined. A Lua rule registered with
 /// `world.register_terrain` takes precedence over these data rules.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename = "Terrain")]
 pub struct TerrainDef {
     /// Terrain name as used by `terrain=`.
     pub id: String,
@@ -151,6 +165,7 @@ pub struct TerrainDef {
 /// A data effect primitive: a named effect whose behaviour a plugin implements in Lua
 /// (`data.register_effect(def, fn)`).
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename = "Effect")]
 pub struct EffectDef {
     /// Content id.
     pub id: String,
@@ -539,27 +554,11 @@ fn check_namespace(kind: ContentKind, id: &str, source: &ContentSource) -> Resul
     }
 }
 
-#[derive(Deserialize)]
-struct OverrideFlag {
-    #[serde(default, rename = "override")]
-    value: bool,
-}
-
 fn ron_records<T: DeserializeOwned>(source: &str, file: &str) -> Result<Vec<(T, bool)>> {
-    let parse_err = |e: ron::error::SpannedError| DataError::Parse {
-        file: file.into(),
-        message: e.to_string(),
-    };
-    if let Ok(flags) = ron::from_str::<Vec<OverrideFlag>>(source) {
-        let defs: Vec<T> = ron::from_str(source).map_err(parse_err)?;
-        return Ok(defs
-            .into_iter()
-            .zip(flags.into_iter().map(|f| f.value))
-            .collect());
-    }
-    let def: T = ron::from_str(source).map_err(parse_err)?;
-    let flag = ron::from_str::<OverrideFlag>(source).is_ok_and(|f| f.value);
-    Ok(vec![(def, flag)])
+    Ok(RonCodec::decode_records(source, file)?
+        .into_iter()
+        .map(|d| (d.value, d.override_existing))
+        .collect())
 }
 
 /// Parses a content file of `kind`: one unnamed record `( id: "…", … )` or a list of them.

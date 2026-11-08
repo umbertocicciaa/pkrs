@@ -43,6 +43,7 @@ pub fn resources() -> BattleResources {
         priority,
         targeting: Default::default(),
         effects: vec![MoveEffect::Damage],
+        ..MoveDef::default()
     };
     for def in [
         mk("tackle", "normal", MoveCategory::Physical, 40, 0),

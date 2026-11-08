@@ -1,0 +1,13 @@
+// The eighth move, alone in its file.
+Move(
+    id: "quick_attack",
+    name: "text:moves.quick_attack",
+    type: "normal",
+    category: Physical,
+    power: 40,
+    accuracy: 100,
+    pp: 30,
+    priority: 1,
+    flags: ["contact"],
+    effects: [(effect: "damage")],
+)

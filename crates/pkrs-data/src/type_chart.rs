@@ -48,15 +48,13 @@ impl TypeChart {
 
     /// Parses the `types.ron` document shape used in project fixtures.
     pub fn parse_ron(source: &str, file: &str) -> Result<Self> {
-        let raw: RawTypeChart = ron::from_str(source).map_err(|e| DataError::Parse {
-            file: file.into(),
-            message: e.to_string(),
-        })?;
+        let raw: RawTypeChart = crate::codec::RonCodec::decode(source, file)?;
         raw.into_chart(file)
     }
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename = "TypeChart")]
 struct RawTypeChart {
     types: Vec<String>,
     chart: HashMap<(String, String), f64>,

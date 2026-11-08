@@ -165,9 +165,9 @@ mod tests {
 
     #[test]
     fn parses_from_ron() {
-        let g: GrowthRate = ron::from_str("MediumSlow").unwrap();
+        let g: GrowthRate = crate::RonCodec::decode("MediumSlow", "g.ron").unwrap();
         assert_eq!(g, GrowthRate::MediumSlow);
         assert_eq!(GrowthRate::default(), GrowthRate::MediumFast);
-        assert!(ron::from_str::<GrowthRate>("Sluggish").is_err());
+        assert!(crate::RonCodec::decode::<GrowthRate>("Sluggish", "g.ron").is_err());
     }
 }

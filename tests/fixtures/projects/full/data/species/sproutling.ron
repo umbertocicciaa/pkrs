@@ -1,0 +1,9 @@
+(
+    id: "sproutling",
+    name: "text:species.sproutling",
+    types: ["grass"],
+    base_stats: (hp: 40, atk: 30, def: 30, spa: 35, spd: 35, spe: 30),
+    abilities: ["overgrow"],
+    learnset: [(level: 1, move: "tackle"), (level: 6, move: "vine_whip"), (level: 12, move: "growth")],
+    exp_yield: 60,
+)

@@ -1,0 +1,10 @@
+Trainer(
+    id: "twins",
+    name: "Twins",
+    active_slots: 2,
+    party: [
+        (species: "leafkit", level: 6, moves: ["tackle"]),
+        (species: "sproutling", level: 5, moves: ["tackle"]),
+    ],
+    ai_profile: "basic",
+)

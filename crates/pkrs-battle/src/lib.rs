@@ -22,6 +22,7 @@ mod resources;
 mod rng;
 mod stat_stage;
 mod status;
+mod targeting;
 
 pub use accuracy::AccuracyCalc;
 pub use action::{BattleAction, BattleInput, SideInput};
@@ -51,6 +52,7 @@ pub use replay::{BattleReplayRecord, config_hash, record_battle, replay_with_nul
 pub use resources::BattleResources;
 pub use rng::{BattleRng, RngPolicy};
 pub use stat_stage::StatStages;
+pub use targeting::{fight_targets, needs_foe_target_ui};
 
 #[cfg(test)]
 mod tests {

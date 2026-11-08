@@ -1,0 +1,6 @@
+[plugin]
+id          = "doubles"
+name        = "Double battles"
+version     = "1.0.0"
+api         = 1
+description = "Default doubles format: trainers with active_slots = 2 and spread moves."

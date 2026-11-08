@@ -22,8 +22,8 @@ use std::collections::BTreeMap;
 
 use pkrs_assets::{EntryKind, Vfs, VfsPath};
 use pkrs_battle::{
-    BattleCreature, BattleResources, BattleSetup, BattleSideSetup, CreatureStats, MoveSlot,
-    RngPolicy, SideId, TrainerAi,
+    BattleConfig, BattleCreature, BattleResources, BattleSetup, BattleSideSetup, CreatureStats,
+    MoveSlot, PartyIndex, RngPolicy, SideId, TrainerAi,
 };
 use pkrs_data::{
     AiProfile, AiTier, BattlePack, ContentDb, ContentDef, ContentKind, DataError, MoveCategory,
@@ -77,6 +77,8 @@ pub enum BattleKind {
 pub struct PreparedBattle {
     /// Wild or trainer.
     pub kind: BattleKind,
+    /// Active slots per side (singles by default; doubles plugin uses `2`).
+    pub config: BattleConfig,
     /// Both parties.
     pub setup: BattleSetup,
     /// Content the battle resolves moves against.
@@ -168,8 +170,8 @@ impl BattleContent {
             .trainers
             .get(PLAYER_TRAINER)
             .ok_or(BattleContentError::NoPlayerParty)?;
-        let player = self.side(player_def, "Player")?;
-        let (kind, opponent, ai) = match request {
+        let player_slots = player_def.battle_active_slots();
+        let (kind, opponent, ai, side_size) = match request {
             BattleRequest::Wild { species, level } => {
                 let creature = self.creature(species, *level, &[])?;
                 let side = BattleSideSetup {
@@ -179,7 +181,7 @@ impl BattleContent {
                 };
                 let profile = AiProfile::builtin(WILD_AI_PROFILE, AiTier::Random);
                 let ai = TrainerAi::for_battle(&profile, Vec::new(), policy, SideId::Opponent);
-                (BattleKind::Wild, side, ai)
+                (BattleKind::Wild, side, ai, 1u8)
             }
             BattleRequest::Trainer { id } => {
                 let def = self
@@ -190,22 +192,33 @@ impl BattleContent {
                         id: id.clone(),
                     })?;
                 let name = def.name.clone().unwrap_or_else(|| display_name(&def.id));
-                let side = self.side(def, &name)?;
+                let opp_slots = def.battle_active_slots();
+                let side_size = player_slots.max(opp_slots);
+                let side = self.side(def, &name, side_size)?;
                 let profile = resolve_ai_profile(def, &self.profiles)?;
                 let ai =
                     TrainerAi::for_battle(&profile, def.items.clone(), policy, SideId::Opponent);
-                (BattleKind::Trainer { name }, side, ai)
+                (BattleKind::Trainer { name }, side, ai, side_size)
             }
         };
+        let player = self.side(player_def, "Player", side_size)?;
+        let config = BattleConfig::with_side_size(side_size);
         Ok(PreparedBattle {
             kind,
+            config,
             setup: BattleSetup { player, opponent },
             resources: BattleResources::new(self.pack.clone()),
             ai,
         })
     }
 
-    fn side(&self, def: &TrainerDef, name: &str) -> Result<BattleSideSetup, BattleContentError> {
+    fn side(
+        &self,
+        def: &TrainerDef,
+        name: &str,
+        side_size: u8,
+    ) -> Result<BattleSideSetup, BattleContentError> {
+        let party_len = def.party.len();
         let party = def
             .party
             .iter()
@@ -214,8 +227,20 @@ impl BattleContent {
         Ok(BattleSideSetup {
             name: name.to_owned(),
             party,
-            leading: vec![Some(0)],
+            leading: Self::leading_for_side(side_size, party_len),
         })
+    }
+
+    /// Leading party indices for `side_size` active slots.
+    #[must_use]
+    pub fn leading_for_side(side_size: u8, party_len: usize) -> Vec<Option<PartyIndex>> {
+        (0..usize::from(side_size))
+            .map(|slot| {
+                u8::try_from(slot)
+                    .ok()
+                    .filter(|&i| usize::from(i) < party_len)
+            })
+            .collect()
     }
 
     /// A level-`level` creature of `species` with `moves` (or its default moves).
@@ -365,6 +390,7 @@ mod tests {
 
     use super::*;
     use pkrs_assets::MemoryVfs;
+    use pkrs_data::{MoveDef, SpeciesDef, TrainerMember};
 
     fn vfs() -> MemoryVfs {
         let mut vfs = MemoryVfs::new();
@@ -398,6 +424,60 @@ mod tests {
             vfs.insert(path, text.as_bytes().to_vec()).unwrap();
         }
         vfs
+    }
+
+    #[test]
+    fn doubles_trainer_prepares_side_size_two() {
+        let mut pack = BattlePack::new(TypeChart::from_parts(Vec::new(), Default::default()));
+        pack.insert_species(
+            SpeciesDef::parse_ron(
+                r#"(id: "leafkit", types: ["grass"], hp: 40, attack: 18, defense: 16, speed: 14)"#,
+                "leafkit.ron",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        pack.insert_move(
+            MoveDef::parse_ron(
+                r#"(id: "tackle", type: "normal", category: physical, power: 35, accuracy: 100, priority: 0, effects: [(effect: "damage")])"#,
+                "tackle.ron",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let mk_member = |species: &str, level: u8| TrainerMember {
+            species: species.into(),
+            level,
+            moves: vec!["tackle".into()],
+        };
+        let trainers = vec![
+            TrainerDef {
+                id: PLAYER_TRAINER.into(),
+                name: Some("Player".into()),
+                party: vec![mk_member("leafkit", 10), mk_member("leafkit", 9)],
+                ai_profile: "basic".into(),
+                items: vec![],
+                active_slots: Some(2),
+            },
+            TrainerDef {
+                id: "twins".into(),
+                name: Some("Twins".into()),
+                party: vec![mk_member("leafkit", 6), mk_member("leafkit", 5)],
+                ai_profile: "basic".into(),
+                items: vec![],
+                active_slots: Some(2),
+            },
+        ];
+        let content = BattleContent::from_parts(pack, trainers, Vec::new());
+        let prepared = content
+            .prepare(
+                &BattleRequest::Trainer { id: "twins".into() },
+                &RngPolicy::Fixed { seed: 0 },
+            )
+            .unwrap();
+        assert_eq!(prepared.config.side_size, 2);
+        assert_eq!(prepared.setup.player.leading, vec![Some(0), Some(1)]);
+        assert_eq!(prepared.setup.opponent.leading, vec![Some(0), Some(1)]);
     }
 
     #[test]

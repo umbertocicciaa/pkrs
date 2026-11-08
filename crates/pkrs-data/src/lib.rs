@@ -30,7 +30,7 @@ pub use encounter::{
 };
 pub use error::{DataError, Result};
 pub use growth::{GrowthRate, MAX_LEVEL};
-pub use move_def::{EffectTarget, MoveCategory, MoveDef, MoveEffect, StatId};
+pub use move_def::{EffectTarget, MoveCategory, MoveDef, MoveEffect, MoveTargetScope, StatId};
 pub use species::{EvolutionDef, EvolutionTrigger, LearnsetEntry, SpeciesDef, check_species_refs};
 pub use trainer::{
     AiProfile, AiTier, AiVisibility, AiWeights, BUILTIN_PROFILES, TrainerDef, TrainerMember,

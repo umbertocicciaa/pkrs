@@ -38,6 +38,7 @@ pub mod testkit {
             power: 35,
             accuracy: 100,
             priority: 0,
+            targeting: Default::default(),
             effects: vec![MoveEffect::Damage],
         }
     }

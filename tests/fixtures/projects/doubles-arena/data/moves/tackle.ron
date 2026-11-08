@@ -1,0 +1,9 @@
+(
+    id: "tackle",
+    type: "normal",
+    category: physical,
+    power: 35,
+    accuracy: 100,
+    priority: 0,
+    effects: [(effect: "damage")],
+)

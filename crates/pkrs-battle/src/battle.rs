@@ -646,13 +646,11 @@ impl Battle {
                 move_slot,
                 target_side,
                 target_slot,
-            } => self.execute_fight(
-                SlotRef::new(action.side, action.slot),
-                move_slot,
-                SlotRef::new(target_side, target_slot),
-                hooks,
-                out,
-            )?,
+            } => {
+                let user = SlotRef::new(action.side, action.slot);
+                let chosen = SlotRef::new(target_side, target_slot);
+                self.execute_fight(user, move_slot, chosen, hooks, out)?;
+            }
             BattleAction::Switch { to_party } => {
                 self.perform_switch(action.side, action.slot, to_party, false, hooks, out)?;
             }
@@ -702,7 +700,15 @@ impl Battle {
         hooks: &mut dyn BattleHooks,
         out: &mut Vec<BattleEvent>,
     ) -> Result<()> {
-        let result = self.execute_fight_inner(user, move_slot, target, hooks, out);
+        let Some(move_id) = self.move_id_at(user, move_slot) else {
+            self.current_move = None;
+            return Ok(());
+        };
+        let targets = crate::targeting::fight_targets(self, user, &move_id, target);
+        let result = targets.iter().try_for_each(|&t| {
+            self.execute_fight_inner(user, move_slot, t, hooks, out)?;
+            Ok::<(), BattleError>(())
+        });
         self.current_move = None;
         result
     }

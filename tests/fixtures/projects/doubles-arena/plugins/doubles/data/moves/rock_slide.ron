@@ -1,0 +1,10 @@
+(
+    id: "doubles:rock_slide",
+    type: "normal",
+    category: physical,
+    power: 30,
+    accuracy: 100,
+    priority: 0,
+    targeting: all_foes,
+    effects: [(effect: "damage")],
+)

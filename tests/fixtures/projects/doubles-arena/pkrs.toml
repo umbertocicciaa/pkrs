@@ -1,0 +1,26 @@
+# Fixture for doubles battles (issue #50): the doubles plugin sets active_slots = 2.
+[game]
+name    = "Doubles Arena"
+id      = "com.example.doubles-arena"
+version = "0.1.0"
+
+[engine]
+version = "0.0"
+api     = 1
+
+[display]
+width  = 240
+height = 160
+scale  = 3
+
+[start]
+map      = "town"
+position = [5, 7]
+facing   = "up"
+
+[features]
+battles = true
+party   = true
+
+[plugins]
+enabled = ["doubles"]

@@ -1,0 +1,10 @@
+Trainer(
+    id: "player",
+    name: "Player",
+    active_slots: 2,
+    party: [
+        (species: "emberkit", level: 12, moves: ["ember", "tackle"]),
+        (species: "emberkit", level: 11, moves: ["ember", "tackle"]),
+    ],
+    ai_profile: "basic",
+)

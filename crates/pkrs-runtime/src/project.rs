@@ -1033,7 +1033,11 @@ impl ProjectHost {
             None => PlayerParty::from_side(&prepared.setup.player, content.pack()),
         };
         prepared.setup.player = party
-            .battle_side(content, &prepared.setup.player.name)
+            .battle_side(
+                content,
+                &prepared.setup.player.name,
+                prepared.config.side_size,
+            )
             .map_err(|e| e.to_string())?;
         self.party = Some(party);
         let bag = scripts.world().get().state.bag().clone();

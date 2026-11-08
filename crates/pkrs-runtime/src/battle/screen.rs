@@ -12,8 +12,8 @@ use std::rc::Rc;
 
 use pkrs_battle::{
     ActionMenu, Battle, BattleAction, BattleError, BattleEvent, BattleHooks, BattleInput,
-    BattleOutcome, BattlePhase, BattleResult, PartyIndex, RngPolicy, SideId, SideInput, SlotRef,
-    TrainerAi, ai_side_input,
+    BattleOutcome, BattlePhase, BattleResult, PartyIndex, RngPolicy, SideId, SideInput, SlotIndex,
+    SlotRef, TrainerAi, ai_side_input,
 };
 use pkrs_data::BattlePack;
 use pkrs_platform::{Action, BuiltinAction, Input};
@@ -151,6 +151,8 @@ pub struct BattleScreen {
     action_menu: Option<(u32, ActionMenu)>,
     bag: BTreeMap<String, u32>,
     sprites: [SpriteFx; 2],
+    /// Active FX asset id per side's lead slot (`ctx.play_fx`, §9.5).
+    slot_fx: [Option<String>; 2],
     theme: UiTheme,
     view: (u32, u32),
     texts_shown: u64,
@@ -203,6 +205,7 @@ impl BattleScreen {
             action_menu: None,
             bag,
             sprites: [SpriteFx { visible: true }; 2],
+            slot_fx: [None, None],
             theme,
             view,
             texts_shown: 0,
@@ -589,11 +592,16 @@ impl BattleScreen {
     // --- playback ----------------------------------------------------------------------
 
     fn tick_playback(&mut self, confirm: bool) {
-        if self.playing.is_none() {
+        while self.playing.is_none() {
             let Some(cue) = self.queue.pop_front() else {
                 return;
             };
+            if let Cue::Fx { side, slot, id } = cue {
+                self.set_slot_fx(side, slot, id);
+                continue;
+            }
             self.playing = Some(self.start_cue(cue));
+            break;
         }
         let done = match self.playing.as_mut() {
             None => false,
@@ -688,6 +696,28 @@ impl BattleScreen {
                 total: FAINT_TICKS,
                 left: FAINT_TICKS,
             },
+            Cue::Fx { .. } => {
+                tracing::error!(target: "battle", "Fx cue must not reach start_cue");
+                Playing::Anim {
+                    cue,
+                    total: 0,
+                    left: 0,
+                }
+            }
+        }
+    }
+
+    fn set_slot_fx(&mut self, side: SideId, slot: SlotIndex, id: Option<String>) {
+        if slot != 0 {
+            tracing::warn!(target: "battle", ?side, slot, "battle FX on non-lead slots is ignored");
+            return;
+        }
+        let idx = side_index(side);
+        if let Some(id) = id {
+            tracing::debug!(target: "battle", fx = %id, ?side, "play battle FX");
+            self.slot_fx[idx] = Some(id);
+        } else {
+            self.slot_fx[idx] = None;
         }
     }
 
@@ -771,6 +801,20 @@ impl BattleScreen {
         let h = (size * scale).round();
         let x = base.x + (base.width - size) / 2.0;
         let y = base.y + base.height / 2.0 - h;
+        if self.slot_fx[side_index(side)].is_some() {
+            const AURA: Color = Color {
+                r: 255,
+                g: 220,
+                b: 80,
+                a: 200,
+            };
+            let pad = 4.0;
+            renderer.draw_filled_rect(
+                Rect::new(x - pad, y - pad, size + pad * 2.0, h + pad * 2.0),
+                AURA,
+                Layer::Entities,
+            );
+        }
         renderer.draw_filled_rect(
             Rect::new(x, y, size, h),
             creature_color(&member.name),

@@ -51,6 +51,15 @@ pub enum Cue {
         /// Party member sent out.
         party: PartyIndex,
     },
+    /// Show or clear a battle FX on a creature (`ctx.play_fx`, §9.5).
+    Fx {
+        /// Side.
+        side: SideId,
+        /// Active slot.
+        slot: SlotIndex,
+        /// Asset id (`resonance:aura`, …); `None` clears the effect on this slot.
+        id: Option<String>,
+    },
 }
 
 /// One party member as the UI knows it.
@@ -158,7 +167,7 @@ impl Roster {
                     *a = Some(party);
                 }
             }
-            Cue::Text(_) | Cue::Faint { .. } | Cue::SwitchOut { .. } => {}
+            Cue::Text(_) | Cue::Faint { .. } | Cue::SwitchOut { .. } | Cue::Fx { .. } => {}
         }
     }
 }
@@ -260,11 +269,22 @@ impl Presenter {
                 target_side,
                 target_slot,
                 volatile,
-            } => vec![Cue::Text(format!(
-                "{}'s {} ended.",
-                self.name(*target_side, *target_slot),
-                display_name(volatile).to_lowercase()
-            ))],
+            } => {
+                let mut cues = Vec::new();
+                if volatile == "resonating" {
+                    cues.push(Cue::Fx {
+                        side: *target_side,
+                        slot: *target_slot,
+                        id: None,
+                    });
+                }
+                cues.push(Cue::Text(format!(
+                    "{}'s {} ended.",
+                    self.name(*target_side, *target_slot),
+                    display_name(volatile).to_lowercase()
+                )));
+                cues
+            }
             BattleEvent::WeatherSet { weather } => vec![Cue::Text(format!(
                 "The weather turned to {}.",
                 display_name(weather).to_lowercase()
@@ -292,7 +312,17 @@ impl Presenter {
                     self.name(SideId::Opponent, 0)
                 ))],
             },
-            BattleEvent::Message { key } => vec![Cue::Text(message_text(key))],
+            BattleEvent::Message { key } => {
+                if let Some(id) = key.strip_prefix("fx:") {
+                    vec![Cue::Fx {
+                        side: SideId::Player,
+                        slot: 0,
+                        id: Some(id.to_owned()),
+                    }]
+                } else {
+                    vec![Cue::Text(message_text(key))]
+                }
+            }
             BattleEvent::BattleEnded { outcome } => self.ended(*outcome),
             BattleEvent::MoveCancelled {
                 user_side,
@@ -692,6 +722,21 @@ mod tests {
             outcome: BattleOutcome::OpponentWin,
         });
         assert_eq!(lost.len(), 2);
+    }
+
+    #[test]
+    fn fx_message_maps_to_fx_cue() {
+        let cues = trainer().present(&BattleEvent::Message {
+            key: "fx:resonance:aura".into(),
+        });
+        assert_eq!(
+            cues,
+            vec![Cue::Fx {
+                side: SideId::Player,
+                slot: 0,
+                id: Some("resonance:aura".into()),
+            }]
+        );
     }
 
     #[test]

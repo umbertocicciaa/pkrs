@@ -207,8 +207,10 @@ pub struct BattleResult {
     pub outcome: BattleOutcome,
     /// Number of full turns completed.
     pub turns: u32,
-    /// Experience awarded (set by `on_battle_end` hooks; 0 by default).
+    /// Experience awarded: on a player win it starts at the battle's default rewards
+    /// ([`Battle::set_rewards`](crate::Battle::set_rewards), 0 unless set), then
+    /// `on_battle_end` hooks may change it.
     pub exp: u32,
-    /// Money awarded (set by `on_battle_end` hooks; 0 by default).
+    /// Money awarded (same rules as `exp`).
     pub money: u32,
 }

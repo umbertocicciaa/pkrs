@@ -1,0 +1,12 @@
+// The coach's training partner: weak, and worth 50 base exp.
+(
+    id: "pebblit",
+    types: ["normal"],
+    hp: 20,
+    attack: 20,
+    defense: 20,
+    speed: 10,
+    exp_yield: 50,
+    growth: Fast,
+    learnset: [(level: 1, move: "tackle")],
+)

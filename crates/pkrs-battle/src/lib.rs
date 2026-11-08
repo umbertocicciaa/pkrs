@@ -12,6 +12,7 @@ mod damage;
 mod effects;
 mod error;
 mod event;
+mod exp;
 mod hooks;
 mod model;
 mod order;
@@ -34,6 +35,7 @@ pub use convert::{IntoBattleSetup, testkit as battle_testkit};
 pub use damage::{DamageCalc, DamageModifierStage};
 pub use error::{BattleError, Result};
 pub use event::BattleEvent;
+pub use exp::{BattleRewards, defeat_exp, split_exp};
 pub use hooks::{
     ActionMenu, ActionOrder, BattleHookCtx, BattleHooks, BattleValue, BattleView, CreatureView,
     CurrentMove, CustomAction, DamageTaken, FaintEvent, HookResult, MenuOption, MoveRequest,

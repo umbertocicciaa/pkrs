@@ -5,6 +5,8 @@
 //!   `battle.start_trainer` requests.
 //! - [`present`]: maps events to presentation [`Cue`]s (text, HP bar, faint, switch).
 //! - [`menu`]: builds the action (incl. hook-added entries), fight, bag and party menus.
+//! - [`rewards`]: after a won battle, exp, level ups, learned moves and evolutions
+//!   ([`PostBattle`]).
 //! - [`screen`]: the [`BattleScreen`] that steps the logic on player input and plays the
 //!   cues back; [`BattleState`](crate::BattleState) puts it on the state stack, and the
 //!   project host runs it as its battle mode.
@@ -12,11 +14,13 @@
 pub mod content;
 pub mod menu;
 pub mod present;
+pub mod rewards;
 pub mod screen;
 
 pub use content::{BattleContent, BattleContentError, BattleKind, PreparedBattle};
 pub use menu::{ActionKind, MenuEntry};
 pub use present::{Cue, Member, Presenter, Roster, SideRoster};
+pub use rewards::{PostBattle, PostBattlePhase, battle_rewards};
 pub use screen::{BattleScreen, MenuKind};
 
 #[cfg(test)]

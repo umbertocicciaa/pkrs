@@ -3,10 +3,12 @@
 pub mod battle;
 mod ctx;
 mod demo;
+pub mod evolution;
 mod fixed_step;
 mod game_host;
 mod main_loop;
 pub mod overworld;
+pub mod party;
 pub mod plugins;
 pub mod project;
 pub mod scene;

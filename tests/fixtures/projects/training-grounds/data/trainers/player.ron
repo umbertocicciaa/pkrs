@@ -1,0 +1,8 @@
+// The player's party at the first battle (design §7.2 implementation notes). No explicit
+// moves: the creature knows the last four moves of its learnset up to level 5.
+Trainer(
+    id: "player",
+    name: "Player",
+    party: [(species: "sproutling", level: 5)],
+    ai_profile: "basic",
+)

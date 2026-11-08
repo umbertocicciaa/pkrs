@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use pkrs_assets::{FolderVfs, Vfs, VfsPath};
-use pkrs_battle::{NullBattleHooks, RngPolicy};
+use pkrs_battle::{BattleResult, NullBattleHooks, RngPolicy};
 use pkrs_core::{Direction, GridPos, Pcg64Rng, ProjectManifest, Version};
 use pkrs_platform::{
     Action, BuiltinAction, DisplaySettings, Input, InputFacadeConfig, Key, Platform, UserPaths,
@@ -24,9 +24,10 @@ use pkrs_world::{
     Transition as WarpTransition, WORLD_RON, Warp, WorldLayout, neighbor_pixel_offset,
 };
 
-use crate::battle::{BattleContent, BattleScreen};
+use crate::battle::{BattleContent, BattleScreen, PostBattle};
 use crate::main_loop::SimulationHost;
 use crate::overworld::{EntityKind, OverworldScripts, ScreenFade, ScriptOverlay};
+use crate::party::PlayerParty;
 use crate::scene::{MapScene, NeighborBackdrop, PLAYER_ENTITY, tile_sheet};
 use crate::ui_assets::build_test_ui_theme;
 use crate::ui_theme::UiTheme;
@@ -353,6 +354,12 @@ pub struct ProjectHost {
     battle_rng: Pcg64Rng,
     /// Battle messages shown by finished battles.
     battle_texts: u64,
+    /// The player's party for the session, built from `data/trainers/player.ron` on the
+    /// first battle (§7.3, until saves own it).
+    party: Option<PlayerParty>,
+    /// After a won battle: exp, level ups, moves and evolutions, with the battle's result
+    /// (the finished screen stays in `battle` behind it).
+    post_battle: Option<(BattleResult, PostBattle)>,
 }
 
 /// Seed of the stream battles derive their RNG from until the save owns the game RNG (§12).
@@ -443,6 +450,8 @@ impl ProjectHost {
             battle_content: None,
             battle_rng: Pcg64Rng::from_seed(DEFAULT_BATTLE_SEED),
             battle_texts: 0,
+            party: None,
+            post_battle: None,
         };
         host.bootstrap_world_layout()?;
         if let Some(scripts) = host.scripts.as_mut() {
@@ -462,11 +471,33 @@ impl ProjectHost {
         self.battle.as_ref().map(|(_, screen)| screen)
     }
 
-    /// Battle messages shown so far, over all battles.
+    /// Battle messages shown so far, over all battles (post-battle texts included).
     #[must_use]
     pub fn battle_texts_shown(&self) -> u64 {
         self.battle_texts
             .saturating_add(self.battle().map_or(0, BattleScreen::texts_shown))
+            .saturating_add(self.post_battle().map_or(0, PostBattle::texts_shown))
+    }
+
+    /// The post-battle flow (exp, level ups, moves, evolutions) while it runs.
+    #[must_use]
+    pub fn post_battle(&self) -> Option<&PostBattle> {
+        self.post_battle.as_ref().map(|(_, flow)| flow)
+    }
+
+    /// The player's party as it is now (with the running post-battle flow's changes);
+    /// `None` before the first battle.
+    #[must_use]
+    pub fn party(&self) -> Option<&PlayerParty> {
+        self.post_battle()
+            .map(PostBattle::party)
+            .or(self.party.as_ref())
+    }
+
+    /// Battle content, once the first battle loaded it.
+    #[must_use]
+    pub fn battle_content(&self) -> Option<&BattleContent> {
+        self.battle_content.as_ref()
     }
 
     /// Reseeds the stream battle RNGs derive from (scenario runs pin it, §15.2).
@@ -980,6 +1011,9 @@ impl ProjectHost {
         if self.battle_content.is_none() {
             let mut content = BattleContent::load(&self.project.vfs).map_err(|e| e.to_string())?;
             scripts.host().with_content(|db| content.merge_moves(db));
+            for err in content.check_species() {
+                tracing::warn!(target: "battle", "species data: {err}");
+            }
             self.battle_content = Some(content);
         }
         let content = self
@@ -987,9 +1021,18 @@ impl ProjectHost {
             .as_ref()
             .ok_or_else(|| "battle content missing".to_owned())?;
         let policy = RngPolicy::local_from_game_rng(&mut self.battle_rng);
-        let prepared = content
+        let mut prepared = content
             .prepare(request, &policy)
             .map_err(|e| e.to_string())?;
+        // The session's party replaces `player.ron` from the second battle on.
+        let party = match &self.party {
+            Some(party) => party.clone(),
+            None => PlayerParty::from_side(&prepared.setup.player, content.pack()),
+        };
+        prepared.setup.player = party
+            .battle_side(content, &prepared.setup.player.name)
+            .map_err(|e| e.to_string())?;
+        self.party = Some(party);
         let bag = scripts.world().get().state.bag().clone();
         BattleScreen::with_scripts(
             prepared,
@@ -1006,7 +1049,11 @@ impl ProjectHost {
     /// not update). When it ends, the waiting task resumes next tick with
     /// [`battle_result_value`] and play returns to the overworld.
     fn tick_battle(&mut self) -> bool {
-        let Some((task, screen)) = self.battle.as_mut() else {
+        if self.post_battle.is_some() {
+            self.tick_post_battle();
+            return true;
+        }
+        let Some((_, screen)) = self.battle.as_mut() else {
             return false;
         };
         let result = match self.scripts.as_ref() {
@@ -1014,16 +1061,57 @@ impl ProjectHost {
             None => screen.update(&mut self.input, &mut NullBattleHooks),
         };
         if let Some(result) = result {
-            let task = *task;
-            if let Some((_, screen)) = self.battle.take() {
-                self.battle_texts = self.battle_texts.saturating_add(screen.texts_shown());
-            }
             tracing::info!(target: "battle", ?result, "battle ended");
-            if let Some(scripts) = self.scripts.as_mut() {
-                scripts.finish_battle(task, battle_result_value(&result));
+            match self.begin_post_battle(&result) {
+                Some(flow) => self.post_battle = Some((result, flow)),
+                None => self.end_battle(&result),
             }
         }
         true
+    }
+
+    /// The post-battle flow for `result`, if there is anything to show (§7.3).
+    fn begin_post_battle(&self, result: &BattleResult) -> Option<PostBattle> {
+        let (_, screen) = self.battle.as_ref()?;
+        let party = self.party.as_ref()?;
+        let content = self.battle_content.as_ref()?;
+        let theme = self.ui_theme.clone()?;
+        PostBattle::new(
+            result,
+            &screen.exp_earners(),
+            party,
+            content.pack(),
+            theme,
+            self.renderer.view_size(),
+        )
+    }
+
+    /// One tick of the post-battle flow; when it is done, the party keeps its changes and
+    /// the battle ends.
+    fn tick_post_battle(&mut self) {
+        let Some((_, flow)) = self.post_battle.as_mut() else {
+            return;
+        };
+        if !flow.update(&mut self.input) {
+            return;
+        }
+        if let Some((result, flow)) = self.post_battle.take() {
+            self.battle_texts = self.battle_texts.saturating_add(flow.texts_shown());
+            self.party = Some(flow.into_party());
+            self.end_battle(&result);
+        }
+    }
+
+    /// Leaves the battle: the waiting task resumes next tick with [`battle_result_value`]
+    /// and play returns to the overworld.
+    fn end_battle(&mut self, result: &BattleResult) {
+        let Some((task, screen)) = self.battle.take() else {
+            return;
+        };
+        self.battle_texts = self.battle_texts.saturating_add(screen.texts_shown());
+        if let Some(scripts) = self.scripts.as_mut() {
+            scripts.finish_battle(task, battle_result_value(result));
+        }
     }
 
     fn apply_camera(&mut self, command: CameraCommand) {
@@ -1300,7 +1388,14 @@ impl SimulationHost for ProjectHost {
         let (w, h) = platform.window_size();
         self.renderer.begin_frame(w, h);
         if let Some((_, screen)) = &self.battle {
-            screen.render(&mut self.renderer);
+            match self.post_battle.as_ref().map(|(_, flow)| flow) {
+                Some(flow) if flow.scene().is_some() => flow.render(&mut self.renderer),
+                Some(flow) => {
+                    screen.render(&mut self.renderer);
+                    flow.render(&mut self.renderer);
+                }
+                None => screen.render(&mut self.renderer),
+            }
             self.renderer.end_frame();
             return;
         }

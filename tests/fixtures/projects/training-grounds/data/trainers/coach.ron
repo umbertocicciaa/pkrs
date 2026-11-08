@@ -1,0 +1,6 @@
+Trainer(
+    id: "coach",
+    name: "Coach",
+    party: [(species: "pebblit", level: 5)],
+    ai_profile: "basic",
+)

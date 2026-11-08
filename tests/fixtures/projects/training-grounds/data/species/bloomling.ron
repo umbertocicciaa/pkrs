@@ -1,0 +1,19 @@
+// Sproutling's evolution.
+(
+    id: "bloomling",
+    types: ["grass"],
+    hp: 60,
+    attack: 70,
+    defense: 50,
+    speed: 40,
+    exp_yield: 142,
+    growth: MediumFast,
+    learnset: [
+        (level: 1, move: "tackle"),
+        (level: 1, move: "scratch"),
+        (level: 3, move: "pound"),
+        (level: 5, move: "leafage"),
+        (level: 6, move: "vine_whip"),
+        (level: 10, move: "razor_leaf"),
+    ],
+)

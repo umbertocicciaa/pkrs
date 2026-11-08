@@ -8,6 +8,9 @@
 //! - [`GameData`]: the immutable content database of a project, loaded through the
 //!   [`DataFiles`] port with folder merging, duplicate detection and ids interned into
 //!   [`Handle`]s; `features.battles = false` skips battle data ([`LoadOptions`]).
+//! - [`validate`]: §8.2 validation as vendor-free diagnostics: load errors with file and
+//!   line/column, stage-2 schema rules and stage-3 cross-references (ids, sprites, `text:`
+//!   keys).
 //! - [`content`]: the mutable content database plugins register into (§9.4), merged into
 //!   [`GameData`] by [`GameDataBuilder::merge_content`].
 
@@ -27,6 +30,7 @@ mod species;
 mod text;
 mod trainer;
 mod type_chart;
+pub mod validate;
 
 pub use battle_pack::BattlePack;
 pub use battle_rules::{

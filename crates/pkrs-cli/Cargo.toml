@@ -26,9 +26,11 @@ tracing-subscriber.workspace = true
 thiserror.workspace = true
 clap.workspace = true
 include_dir.workspace = true
+miette.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+insta.workspace = true
 
 [lints]
 workspace = true

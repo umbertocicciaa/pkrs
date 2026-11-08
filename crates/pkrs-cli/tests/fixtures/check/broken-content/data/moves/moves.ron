@@ -1,0 +1,10 @@
+[
+    Move(
+        id: "scratch", name: "text:moves.scratch", type: "normal", category: Physical,
+        power: 40, accuracy: 100, priority: 0, effects: [(effect: "damage")],
+    ),
+    Move(
+        id: "splash", type: "water", category: Status,
+        power: 0, accuracy: 100, pp: 0, priority: 0, effects: [],
+    ),
+]

@@ -27,7 +27,7 @@
 //!   [`GameDataBuilder`] merges that database in before the content is frozen.
 //! - Problems are collected, not fail-fast ([`DataErrors`]).
 //!
-//! Cross-reference checks (§8.2 stage 3) are not part of loading.
+//! Cross-reference checks (§8.2 stage 3) are not part of loading; see [`crate::validate`].
 
 use core::fmt;
 use std::collections::BTreeMap;
@@ -530,6 +530,19 @@ impl GameDataBuilder {
 
     /// Freezes the content, or returns every problem found.
     pub fn build(self) -> Result<GameData, DataErrors> {
+        let (data, errors) = self.finish();
+        if errors.is_empty() {
+            Ok(data)
+        } else {
+            Err(DataErrors(errors))
+        }
+    }
+
+    /// Freezes whatever loaded and returns it together with every problem found. Records
+    /// that failed are left out. Validation (§8.2) uses it to check the cross-references of
+    /// the rest of the content in the same run.
+    #[must_use]
+    pub fn finish(self) -> (GameData, Vec<DataError>) {
         let Self {
             mut data,
             mut errors,
@@ -541,11 +554,7 @@ impl GameDataBuilder {
             }
         }
         data.encounter_tables = tables;
-        if errors.is_empty() {
-            Ok(data)
-        } else {
-            Err(DataErrors(errors))
-        }
+        (data, errors)
     }
 }
 

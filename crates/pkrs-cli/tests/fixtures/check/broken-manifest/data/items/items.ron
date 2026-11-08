@@ -1,0 +1,4 @@
+[
+    Item(id: "potion", name: "text:items.potion", price: 300),
+    Item(id: "Super Potion", price: 700),
+]

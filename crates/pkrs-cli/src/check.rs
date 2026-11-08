@@ -1,22 +1,34 @@
-//! `pkrs check` (§2.3): validates `pkrs.toml`, the plugin set and the game's `data/` folder
-//! (every RON schema loads into the content database, no duplicate ids; battle data is
-//! skipped with `features.battles = false`, §8.1); with `--plugins` it also merges the
-//! plugins' content `data/` folders and loads the plugins in a sandboxed script host, and
-//! returns the resolved hook table and any content errors (§9.4).
+//! `pkrs check` (§2.3, §8.2): validates the whole project without running the game, through
+//! the shared [`validate_project`] (also run by the runtime at start-up):
 //!
-//! Further checks (cross-references, Tiled maps, Lua syntax of game scripts) arrive with M7.
+//! - `pkrs.toml` (parse, ranges, engine version and API level);
+//! - the plugin graph and every enabled `plugin.toml` (§9.4), and the plugins' `data/`;
+//! - every RON file of `data/`: parse (stage 1), schema (stage 2) and cross-references
+//!   (stage 3: types, abilities, moves, species, items, statuses, AI profiles, sprite paths,
+//!   `text:` keys); battle data is skipped with `features.battles = false` (§8.1);
+//! - every `maps/*.tmx` (Tiled layer conventions, warps, object scripts, sprites, items,
+//!   encounter tables, sign text) and `maps/world.ron`;
+//! - every Lua file of `scripts/` and `plugins/`, compiled but never run.
+//!
+//! Warnings: `events.on("tick")` listeners, `once` triggers whose script never sets a flag or
+//! variable (§6.5), untranslated text keys and undefined `"text:…"` literals in Lua.
+//!
+//! With `--plugins` the enabled plugins' `init.lua` also run in a sandboxed script host: the
+//! resolved hook table is printed, a failing plugin is an error, and content they register
+//! with `data.register_*` takes part in the cross-reference checks.
 
 use std::fmt;
 use std::ops::RangeInclusive;
 use std::path::Path;
 
 use pkrs_assets::{EntryKind, FolderVfs, Vfs, VfsPath};
-use pkrs_core::{ManifestError, Pcg64Rng, ProjectManifest, Version};
-use pkrs_data::{DataError, DataFiles, GameData, LoadOptions};
+use pkrs_core::{Diagnostics, Pcg64Rng, ProjectManifest, Version};
+use pkrs_data::DataFiles;
+use pkrs_script::validate::{ValidateOptions, plugin_init_diagnostic, validate_project};
 use pkrs_script::{
-    ContentError, HookTable, LuaScriptHost, PluginErrors, PluginInitError, ScriptError,
-    ScriptFiles, ScriptLimits, load_plugins, plan_plugins,
+    HookTable, LuaScriptHost, ScriptError, ScriptFiles, ScriptLimits, load_plugins, plan_plugins,
 };
+use pkrs_world::{Map, MapError, MapImporter, TiledImporter};
 
 /// Scripting API levels this CLI checks against (same as the runtime, §9.7).
 pub const SUPPORTED_API: RangeInclusive<u32> = 1..=1;
@@ -24,21 +36,15 @@ pub const SUPPORTED_API: RangeInclusive<u32> = 1..=1;
 /// Seed of the throwaway RNG plugins see while `check --plugins` loads them.
 const CHECK_SEED: u64 = 0;
 
-/// Why `pkrs check` failed.
+/// Why `pkrs check` could not run at all (content problems are diagnostics instead).
 #[derive(Debug, thiserror::Error)]
 pub enum CheckError {
-    /// `pkrs.toml` is missing, malformed or targets another engine.
-    #[error(transparent)]
-    Manifest(#[from] ManifestError),
     /// The engine version could not be parsed.
     #[error(transparent)]
     Core(#[from] pkrs_core::CoreError),
     /// The project folder cannot be mounted.
     #[error(transparent)]
     Assets(#[from] pkrs_assets::AssetsError),
-    /// The enabled plugin set is invalid (missing, cycle, conflict, version, API level).
-    #[error(transparent)]
-    Plugins(#[from] PluginErrors),
     /// The script host could not be created.
     #[error(transparent)]
     Script(#[from] ScriptError),
@@ -47,29 +53,30 @@ pub enum CheckError {
 /// What `pkrs check` found.
 #[derive(Debug, Default)]
 pub struct CheckReport {
-    /// Enabled plugins in resolved load order.
+    /// Enabled plugins in resolved load order (empty when the plugin set is invalid).
     pub load_order: Vec<String>,
-    /// Plugins whose `init.lua` failed (only with `--plugins`).
-    pub failed: Vec<PluginInitError>,
-    /// Problems in `data/` folders: duplicate ids without `override`, parse and schema
-    /// errors (only with `--plugins`, §9.4).
-    pub content_errors: Vec<ContentError>,
-    /// Problems loading the game's `data/` folder into the content database (§8.1).
-    pub data_errors: Vec<DataError>,
     /// The resolved hook table (only with `--plugins`).
     pub hooks: Option<HookTable>,
+    /// Every error and warning, in check order.
+    pub diagnostics: Diagnostics,
 }
 
 impl CheckReport {
-    /// `true` when nothing failed.
+    /// `true` when there is no error.
     #[must_use]
     pub fn is_ok(&self) -> bool {
-        self.failed.is_empty() && self.content_errors.is_empty() && self.data_errors.is_empty()
+        !self.diagnostics.has_errors()
+    }
+
+    /// `true` when the check passes: no error, and no warning either with `deny_warnings`.
+    #[must_use]
+    pub fn passes(&self, deny_warnings: bool) -> bool {
+        self.is_ok() && !(deny_warnings && self.diagnostics.warning_count() > 0)
     }
 }
 
 /// The stdout part of `pkrs check`: the resolved load order, then (with `--plugins`) the hook
-/// table. Failures are not included; the CLI prints them to stderr.
+/// table. Diagnostics are not included; the CLI renders them to stderr.
 ///
 /// ```text
 /// plugins (load order): shield, crit
@@ -97,32 +104,64 @@ impl fmt::Display for CheckReport {
 /// Checks the project at `dir`. With `plugins`, also runs every enabled plugin's `init.lua`
 /// (sandboxed, §9.6) and collects the hook table they register.
 pub fn check_project(dir: &Path, plugins: bool) -> Result<CheckReport, CheckError> {
-    let manifest = ProjectManifest::load(dir)?;
     let engine = Version::parse(env!("CARGO_PKG_VERSION"))?;
-    manifest.check_engine(&engine, SUPPORTED_API)?;
     let files = FolderScripts(FolderVfs::new(dir)?);
-    let plan = plan_plugins(&files, &manifest.plugins.enabled, SUPPORTED_API)?;
-    let data_errors = match GameData::load(&files, LoadOptions::from_features(&manifest.features)) {
-        Ok(_) => Vec::new(),
-        Err(errors) => errors.0,
+    let vfs = FolderVfs::new(dir)?;
+    let mut import = |path: &str| -> Result<Map, MapError> {
+        let vfs_path = VfsPath::new(path).map_err(|e| MapError::Parse {
+            path: path.to_owned(),
+            message: e.to_string(),
+        })?;
+        TiledImporter::new().import(&vfs, &vfs_path)
     };
-    let mut report = CheckReport {
-        load_order: plan.ids().iter().map(|s| (*s).to_owned()).collect(),
-        data_errors,
-        ..CheckReport::default()
-    };
-    if plugins {
+    let mut report = CheckReport::default();
+    let validation = if plugins {
         let mut host = LuaScriptHost::new(
             Box::new(FolderScripts(FolderVfs::new(dir)?)),
             Box::new(Pcg64Rng::from_seed(CHECK_SEED)),
             ScriptLimits::default(),
         )?;
-        let loaded = load_plugins(&mut host, &files, &plan);
-        report.failed = loaded.failed;
-        report.content_errors = loaded.content_errors;
-        report.hooks = Some(host.hook_table());
-    }
+        // An invalid plugin set is reported by the validation below.
+        let enabled = ProjectManifest::load(dir)
+            .map(|m| m.plugins.enabled)
+            .unwrap_or_default();
+        let mut init_errors = Vec::new();
+        if let Ok(plan) = plan_plugins(&files, &enabled, SUPPORTED_API) {
+            let loaded = load_plugins(&mut host, &files, &plan);
+            init_errors = loaded.failed.iter().map(plugin_init_diagnostic).collect();
+            report.hooks = Some(host.hook_table());
+        }
+        let mut validation = host.with_content(|db| {
+            let options = ValidateOptions {
+                engine,
+                supported_api: SUPPORTED_API,
+                plugin_content: Some(db),
+            };
+            validate_project(&files, &mut import, &options)
+        });
+        validation.diagnostics.extend(init_errors);
+        validation
+    } else {
+        let options = ValidateOptions {
+            engine,
+            supported_api: SUPPORTED_API,
+            plugin_content: None,
+        };
+        validate_project(&files, &mut import, &options)
+    };
+    report.load_order = validation
+        .plan
+        .as_ref()
+        .map(|p| p.ids().iter().map(|s| (*s).to_owned()).collect())
+        .unwrap_or_default();
+    report.diagnostics = validation.diagnostics;
     Ok(report)
+}
+
+/// Reads a project file for diagnostic snippets (`None` when it cannot be read).
+#[must_use]
+pub fn read_source(dir: &Path, path: &str) -> Option<String> {
+    std::fs::read_to_string(dir.join(path)).ok()
 }
 
 /// [`ScriptFiles`] and [`DataFiles`] over the project folder (read-only, through the assets
@@ -224,6 +263,10 @@ mod tests {
         format!("[plugin]\nid = \"{id}\"\nname = \"{id}\"\nversion = \"1.0.0\"\napi = 1\n")
     }
 
+    fn codes(report: &CheckReport) -> Vec<&str> {
+        report.diagnostics.iter().map(|d| d.code.as_str()).collect()
+    }
+
     #[test]
     fn reports_load_order_and_hook_table() {
         let dir = temp_project(
@@ -248,7 +291,7 @@ mod tests {
         assert!(without.hooks.is_none());
 
         let report = check_project(&dir, true).unwrap();
-        assert!(report.is_ok());
+        assert!(report.passes(true), "{}", report.diagnostics);
         assert_eq!(
             report.hooks.unwrap().to_string(),
             "battle hooks:\n  on_damage_taken\n       0  b\n       5  a\n  on_turn_start\n      -1  b\n\
@@ -294,7 +337,7 @@ mod tests {
         let out = crate::plugin::new_plugin(&dir, &vars).unwrap();
         assert!(out.enable_hint.is_none(), "already enabled");
         let report = check_project(&dir, true).unwrap();
-        assert!(report.is_ok(), "{:?}", report.failed);
+        assert!(report.is_ok(), "{}", report.diagnostics);
         assert_eq!(report.load_order, ["my-plugin"]);
         let table = report.hooks.unwrap().to_string();
         for line in [
@@ -324,7 +367,11 @@ mod tests {
         let dir = project("data-on", "true");
         let report = check_project(&dir, false).unwrap();
         assert!(!report.is_ok());
-        let errors: Vec<String> = report.data_errors.iter().map(ToString::to_string).collect();
+        let errors: Vec<&str> = report
+            .diagnostics
+            .iter()
+            .map(|d| d.message.as_str())
+            .collect();
         assert_eq!(
             errors,
             [
@@ -336,7 +383,7 @@ mod tests {
         // Story-only: the broken battle data is not even read.
         let dir = project("data-off", "false");
         let report = check_project(&dir, false).unwrap();
-        assert!(report.is_ok(), "{:?}", report.data_errors);
+        assert!(report.is_ok(), "{}", report.diagnostics);
         std::fs::remove_dir_all(dir).ok();
     }
 
@@ -352,14 +399,33 @@ mod tests {
         );
         let report = check_project(&dir, true).unwrap();
         assert!(!report.is_ok());
-        assert_eq!(report.failed[0].plugin(), "a");
+        assert_eq!(codes(&report), ["plugin::init"]);
+        assert_eq!(
+            report.diagnostics.items()[0].file.as_deref(),
+            Some("plugins/a/init.lua")
+        );
         std::fs::remove_dir_all(&dir).ok();
 
         let dir = temp_project("missing", &[("pkrs.toml", &manifest("\"ghost\""))]);
-        assert!(matches!(
-            check_project(&dir, false),
-            Err(CheckError::Plugins(_))
-        ));
+        let report = check_project(&dir, false).unwrap();
+        assert_eq!(codes(&report), ["plugin::not-found"]);
+        assert!(report.load_order.is_empty());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn warnings_only_fail_with_deny_warnings() {
+        let dir = temp_project(
+            "warn",
+            &[
+                ("pkrs.toml", &manifest("")),
+                ("scripts/main.lua", "events.on('tick', function() end)\n"),
+            ],
+        );
+        let report = check_project(&dir, false).unwrap();
+        assert_eq!(codes(&report), ["script::tick-listener"]);
+        assert!(report.passes(false));
+        assert!(!report.passes(true));
         std::fs::remove_dir_all(dir).ok();
     }
 }

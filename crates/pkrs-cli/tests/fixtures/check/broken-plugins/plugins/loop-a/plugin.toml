@@ -1,0 +1,8 @@
+[plugin]
+id      = "loop-a"
+name    = "Loop A"
+version = "1.0.0"
+api     = 1
+
+[dependencies]
+loop-b = "^1.0"

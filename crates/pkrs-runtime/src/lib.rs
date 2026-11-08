@@ -22,6 +22,7 @@ pub mod test_harness;
 mod tick;
 mod ui_assets;
 mod ui_theme;
+pub mod validation;
 pub mod wiring;
 
 pub use ctx::RuntimeCtx;

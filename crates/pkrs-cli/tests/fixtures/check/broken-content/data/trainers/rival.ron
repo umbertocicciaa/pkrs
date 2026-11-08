@@ -1,0 +1,5 @@
+Trainer(
+    id: "rival",
+    party: [(species: "ghostkit", level: 5, moves: ["scratch", "shadow_ball"])],
+    ai_profile: "profiles/boss",
+)

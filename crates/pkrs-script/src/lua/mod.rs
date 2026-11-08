@@ -23,12 +23,14 @@ mod plugin;
 mod registry;
 mod sandbox;
 mod scenario;
+mod syntax;
 mod time;
 mod ui;
 
 pub use ai::{DEFAULT_AI_MAX_FAILURES, LuaAi};
 pub use battle::{DEFAULT_MAX_FAILURES, HOOK_NAMES, LuaBattleHooks};
 pub use scenario::{LuaScenario, SCENARIO_API};
+pub use syntax::{LuaSyntaxError, check_lua_syntax};
 pub use ui::GfxOp;
 
 use std::cell::Cell;

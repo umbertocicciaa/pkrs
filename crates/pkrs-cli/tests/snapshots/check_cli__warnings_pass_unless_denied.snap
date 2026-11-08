@@ -1,0 +1,35 @@
+---
+source: crates/pkrs-cli/tests/check_cli.rs
+expression: "transcript(&dir, &[\"--deny-warnings\"])"
+---
+exit code: 1
+--- stdout
+plugins: none enabled
+--- stderr
+script::tick-listener
+
+  ⚠ `events.on("tick")` runs Lua every tick
+    ╭─[scripts/maps/town.lua:15:11]
+ 14 │ 
+ 15 │ events.on("tick", function()
+    ·           ───┬──
+    ·              ╰── runs 60 times per second
+ 16 │   -- a per-tick listener: performance warning
+    ╰────
+  help: prefer `step`, `map_enter` or `time.wait` in a task; tick listeners cost frame time (§9.8)
+
+map::once-trigger-without-state
+
+  ⚠ trigger `greeting` is `once`, but `greet` in `scripts/maps/town.lua` never sets a flag or
+  │ variable
+    ╭─[maps/town.tmx:16:46]
+ 15 │     <property name="on_enter" value="greet"/>
+ 16 │     <property name="once" type="bool" value="true"/>
+    ·                                              ──┬─
+    ·                                                ╰── fires once per save
+ 17 │    </properties>
+    ╰────
+  help: record the story progress with `game.set_flag`, `game.set_var` or `map.set_var` (§6.5)
+
+0 errors, 2 warnings
+check failed: warnings are denied

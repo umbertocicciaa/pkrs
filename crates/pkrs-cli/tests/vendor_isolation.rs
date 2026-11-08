@@ -15,6 +15,7 @@ const ROWS: &[(&str, &str, &str)] = &[
     ("pkrs-core", "semver", "version.rs"),
     ("pkrs-data", "ron", "codec.rs"),
     ("pkrs-script", "mlua", "lua/"),
+    ("pkrs-cli", "miette", "report.rs"),
 ];
 
 fn workspace_root() -> PathBuf {

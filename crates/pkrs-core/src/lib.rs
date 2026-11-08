@@ -1,9 +1,11 @@
 //! Shared engine types: ids, `Direction`, `GridPos`, `Ctx` traits, events, errors, the `GameRng`
-//! port, semantic versions, the `pkrs.toml` project manifest and `plugin.toml` plugin manifests.
+//! port, semantic versions, the `pkrs.toml` project manifest and `plugin.toml` plugin manifests,
+//! and the vendor-free [`Diagnostic`] model of project validation (§8.2).
 //!
 //! See `docs/design.md` §4.2–§4.3 and §4.5 for crate boundaries.
 
 mod ctx;
+pub mod diagnostic;
 mod direction;
 mod error;
 mod events;
@@ -15,6 +17,7 @@ mod rng;
 mod version;
 
 pub use ctx::{EventSink, RngAccess};
+pub use diagnostic::{Diagnostic, Diagnostics, Severity, SourceSpan};
 pub use direction::Direction;
 pub use error::{CoreError, Result};
 pub use events::{EngineEvent, EventPayload, EventQueue};

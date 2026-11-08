@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<map version="1.10" tiledversion="1.10.2" orientation="orthogonal" renderorder="right-down" width="4" height="4" tilewidth="16" tileheight="16" infinite="0" nextlayerid="3" nextobjectid="6">
+ <tileset firstgid="1" source="../tilesets/overworld.tsx"/>
+ <layer id="1" name="ground" width="4" height="4">
+  <data encoding="csv">
+1,1,1,1,
+1,1,1,1,
+1,1,1,1,
+1,1,1,1
+</data>
+ </layer>
+ <objectgroup id="2" name="objects">
+  <object id="1" type="warp" x="0" y="0" width="16" height="16">
+   <properties>
+    <property name="to_map" value="cave"/>
+    <property name="to_x" type="int" value="1"/>
+    <property name="to_y" type="int" value="1"/>
+   </properties>
+  </object>
+  <object id="2" name="keeper" type="npc" x="16" y="16" width="16" height="16">
+   <properties>
+    <property name="script" value="maps/town.lua:keeper"/>
+   </properties>
+  </object>
+  <object id="3" name="intro" type="trigger" x="32" y="0" width="16" height="16">
+   <properties>
+    <property name="on_enter" value="intro"/>
+    <property name="once" type="bool" value="true"/>
+   </properties>
+  </object>
+  <object id="4" type="sign" x="48" y="0" width="16" height="16">
+   <properties>
+    <property name="text" value="text:sign.missing"/>
+   </properties>
+  </object>
+  <object id="5" type="item" x="48" y="32" width="16" height="16">
+   <properties>
+    <property name="item" value="potion"/>
+   </properties>
+  </object>
+ </objectgroup>
+</map>

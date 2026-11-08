@@ -50,6 +50,8 @@ tiled = { version = "0.16", default-features = false }
 # Binaries only (not wrapped, §4.5): CLI parsing and embedded templates.
 clap = { version = "4", features = ["derive"] }
 include_dir = "0.7"
+# `pkrs check` diagnostics rendering (CLI report adapter only, §4.5).
+miette = { version = "7", default-features = false, features = ["fancy-no-backtrace"] }
 
 # Dev-only.
 serde_json = "1"

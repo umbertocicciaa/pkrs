@@ -332,6 +332,7 @@ mod tests {
             "tilesets/overworld.tsx",
             "tilesets/overworld.png",
             "sprites/player.png",
+            "sprites/rival.png",
             "scripts/main.lua",
             "scripts/arena_battle.lua",
             "scripts/maps/arena.lua",

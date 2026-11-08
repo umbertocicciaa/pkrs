@@ -26,7 +26,7 @@ win_battle()
 wait_for_state("Choice")
 expect_choices({ "Yes", "No" })
 answer(false)
-expect_dialogue("Talk to the rival when you want another battle.")
+expect_dialogue("Walk up to the rival and talk to them for another battle.")
 advance_dialogue()
 wait_for_state("Overworld")
 

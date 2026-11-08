@@ -240,6 +240,71 @@ fn battle_template_opens_in_a_battle_and_its_scenario_passes() {
 }
 
 #[test]
+fn npcs_use_their_sprite_property_and_fall_back_to_the_marker() {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("pkrs-npc-sprite-{}-{nanos}", std::process::id()));
+    scaffold(
+        Template::Battle,
+        &dir,
+        &TemplateVars::for_project("arena").unwrap(),
+    )
+    .unwrap();
+    let rival = |host: &ProjectHost| {
+        host.scene()
+            .entities()
+            .iter()
+            .find(|e| e.id != pkrs_runtime::PLAYER_ENTITY)
+            .map(|e| (e.texture, e.src))
+            .expect("the rival is on the map")
+    };
+
+    let scripted_host = |dir: &Path| {
+        let project = Project::open(&ProjectOptions {
+            dir: dir.to_path_buf(),
+            ..ProjectOptions::default()
+        })
+        .unwrap();
+        let (scripts, _) = pkrs_runtime::plugins::start_project_scripts(
+            &project,
+            Box::new(pkrs_core::Pcg64Rng::from_seed(1)),
+        )
+        .unwrap();
+        let renderer = Renderer::new(
+            Box::new(NullRenderer::new()),
+            project.display(),
+            RendererConfig::default(),
+        );
+        ProjectHost::with_scripts(&project, renderer, scripts).unwrap()
+    };
+
+    let mut with_sprite = scripted_host(&dir);
+    run_idle_ticks(&mut with_sprite, &dir, 2);
+    let (texture, src) = rival(&with_sprite);
+    let player = with_sprite
+        .scene()
+        .entities()
+        .iter()
+        .find(|e| e.id == pkrs_runtime::PLAYER_ENTITY)
+        .unwrap()
+        .texture;
+    assert_ne!(texture, player, "the rival has its own sprite sheet");
+    assert_eq!((src.width, src.height), (16.0, 16.0));
+
+    std::fs::remove_file(dir.join("sprites/rival.png")).unwrap();
+    let mut marker = scripted_host(&dir);
+    run_idle_ticks(&mut marker, &dir, 2);
+    let (fallback, fallback_src) = rival(&marker);
+    // Both hosts create the same textures in the same order up to the NPC sprite, so the
+    // rival only gets a different handle when `sprites/rival.png` is actually loaded.
+    assert_ne!(texture, fallback, "the rival is not drawn with the marker");
+    assert_eq!((fallback_src.width, fallback_src.height), (16.0, 16.0));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn dev_saves_go_under_the_project() {
     let dir = new_project("saves");
     let project = Project::open(&ProjectOptions {

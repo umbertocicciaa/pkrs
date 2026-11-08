@@ -28,8 +28,8 @@ use pkrs_save::{
     Value, WorldState,
 };
 use pkrs_script::{
-    LuaScriptHost, MIGRATE_SCRIPT, ScriptError, ScriptFiles, ScriptLimits, ScriptSaveMigration,
-    ScriptValue,
+    LuaScriptHost, MIGRATE_SCRIPT, ScriptError, ScriptEvent, ScriptFiles, ScriptHost, ScriptLimits,
+    ScriptSaveMigration, ScriptValue,
 };
 
 use super::{Project, ProjectError, ProjectHost};
@@ -282,6 +282,13 @@ impl ProjectHost {
 
     /// Takes a [`snapshot`](Self::snapshot) and writes it into `slot` atomically.
     pub fn save_to_slot(&mut self, slot: SaveSlot) -> Result<SaveData, GameSaveError> {
+        self.ensure_saveable()?;
+        if let Some(scripts) = self.scripts.as_mut() {
+            scripts
+                .host_mut()
+                .emit_event(ScriptEvent::save_before(&slot.to_string()));
+            scripts.flush_events();
+        }
         let save = self.snapshot()?;
         self.save_store().write(slot, &save)?;
         Ok(save)
@@ -300,6 +307,14 @@ impl ProjectHost {
         }
         let loaded = self.save_store().load(slot, &mut loader)?;
         self.restore(&loaded.data)?;
+        self.game_started = true;
+        if let Some(scripts) = self.scripts.as_mut() {
+            scripts.host_mut().emit_event(ScriptEvent::load_after(
+                &slot.to_string(),
+                loaded.from_backup,
+            ));
+            scripts.flush_events();
+        }
         Ok(loaded)
     }
 }

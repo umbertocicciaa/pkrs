@@ -36,8 +36,10 @@ use crate::scene::{MapScene, NeighborBackdrop, PLAYER_ENTITY, tile_sheet};
 use crate::ui_theme::UiTheme;
 
 mod save;
+mod session;
 
 pub use save::{GameSaveError, game_migration, save_store};
+pub use session::ProjectSessionHost;
 
 /// Scripting API levels this runtime supports (§9.7).
 pub const SUPPORTED_API: std::ops::RangeInclusive<u32> = 1..=1;
@@ -84,6 +86,15 @@ pub enum ProjectError {
         /// Map height.
         height: u32,
     },
+}
+
+/// When the overworld runs `game_start` and related script hooks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProjectBoot {
+    /// Start play immediately (scenario runs, `--map` / `--warp` overrides).
+    Immediate,
+    /// Build the world but defer `game_start` until New Game or Continue.
+    AtTitle,
 }
 
 /// Overrides from `pkrs run --map <id> --warp x,y`.
@@ -380,6 +391,7 @@ pub struct ProjectHost {
     /// Active language and text tables (§5.5); the script world holds the live copy when
     /// scripting is on ([`localizer`](Self::localizer)).
     localizer: Localizer,
+    game_started: bool,
 }
 
 /// Seed of the stream battles derive their RNG from until the save owns the game RNG (§12).
@@ -389,7 +401,7 @@ impl ProjectHost {
     /// Loads the start map of `project` and uploads its textures through `renderer`. No
     /// scripts run; see [`with_scripts`](Self::with_scripts).
     pub fn new(project: &Project, renderer: Renderer) -> Result<Self, ProjectError> {
-        Self::build(project, renderer, None)
+        Self::build(project, renderer, None, ProjectBoot::Immediate)
     }
 
     /// Like [`new`](Self::new), with the overworld driven by `scripts` (plugins already
@@ -400,13 +412,48 @@ impl ProjectHost {
         renderer: Renderer,
         scripts: LuaScriptHost,
     ) -> Result<Self, ProjectError> {
-        Self::build(project, renderer, Some(scripts))
+        Self::build(project, renderer, Some(scripts), ProjectBoot::Immediate)
+    }
+
+    /// Like [`with_scripts`](Self::with_scripts), with controlled `game_start` timing.
+    pub fn with_scripts_boot(
+        project: &Project,
+        renderer: Renderer,
+        scripts: LuaScriptHost,
+        boot: ProjectBoot,
+    ) -> Result<Self, ProjectError> {
+        Self::build(project, renderer, Some(scripts), boot)
+    }
+
+    /// Runs `game_start` and map setup after the title screen chose New Game.
+    pub fn begin_new_game(&mut self) -> Result<(), ProjectError> {
+        if self.game_started {
+            return Ok(());
+        }
+        if self.scripts.is_none() {
+            self.game_started = true;
+            return Ok(());
+        }
+        let map = self.scene.map().clone();
+        let start = self.walker.pos();
+        let facing = self.walker.facing();
+        if let Some(scripts) = self.scripts.as_mut() {
+            scripts.start_game(&map, start, facing);
+        }
+        self.place_npcs();
+        if let Some(scripts) = self.scripts.as_mut() {
+            scripts.flush_events();
+        }
+        self.apply_script_requests();
+        self.game_started = true;
+        Ok(())
     }
 
     fn build(
         project: &Project,
         mut renderer: Renderer,
         scripts: Option<LuaScriptHost>,
+        boot: ProjectBoot,
     ) -> Result<Self, ProjectError> {
         let map = project.load_map()?;
         let textures = upload_map_textures(project, &mut renderer, &map)?;
@@ -481,14 +528,21 @@ impl ProjectHost {
                 &project.manifest.locale,
                 &text_plugins(project),
             ),
+            game_started: false,
         };
         if let Some(scripts) = host.scripts.as_ref() {
             scripts.world().get_mut().localizer = host.localizer.clone();
         }
         host.bootstrap_world_layout()?;
         if let Some(scripts) = host.scripts.as_mut() {
-            scripts.start_game(host.scene.map(), start, facing);
-            host.place_npcs();
+            match boot {
+                ProjectBoot::Immediate => {
+                    scripts.start_game(host.scene.map(), start, facing);
+                    host.place_npcs();
+                    host.game_started = true;
+                }
+                ProjectBoot::AtTitle => {}
+            }
         }
         if let Some(scripts) = host.scripts.as_mut() {
             scripts.flush_events();

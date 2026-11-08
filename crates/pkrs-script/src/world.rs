@@ -10,6 +10,7 @@
 
 use core::fmt;
 
+use pkrs_audio::AudioRequest;
 use pkrs_core::{Direction, GridPos};
 use pkrs_data::{ENGINE_LANGUAGE, TextArgs, format_text};
 
@@ -207,6 +208,15 @@ pub trait ScriptWorld {
 
     /// `camera.*`.
     fn camera(&mut self, command: CameraCommand) -> ApiResult<()>;
+
+    // --- audio (§9.1, §11) ---
+
+    /// `audio.*`: queues `request` for the engine's [`Audio`](pkrs_audio::Audio) facade (it
+    /// runs in the tick's audio flush, §3.3 step 6). Default: refused.
+    fn audio(&mut self, request: AudioRequest) -> ApiResult<()> {
+        let _ = request;
+        Err(ApiError::new("this world has no audio"))
+    }
 }
 
 /// Direction from `from` toward `to` along the dominant axis (ties prefer vertical); `None`

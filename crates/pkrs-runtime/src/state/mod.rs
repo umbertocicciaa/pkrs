@@ -5,6 +5,7 @@ mod choice_state;
 mod dialogue;
 mod fade;
 mod lua_ui;
+mod save_screen;
 mod stack;
 mod title;
 

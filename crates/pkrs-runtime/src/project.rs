@@ -32,14 +32,19 @@ use crate::debug::{DebugOverlaySnapshot, DevRuntime, script_overlay_fields};
 use crate::default_theme::build_default_ui_theme;
 use crate::encounters::{Encounters, wild_battle_request};
 use crate::main_loop::SimulationHost;
+use crate::menu::FieldMenu;
 use crate::overworld::{EntityKind, OverworldScripts, ScreenFade, ScriptOverlay};
 use crate::party::PlayerParty;
 use crate::scene::{MapScene, NeighborBackdrop, PLAYER_ENTITY, tile_sheet};
 use crate::ui_theme::UiTheme;
 
+mod audio;
+mod field_menu;
 mod save;
+mod session;
 
 pub use save::{GameSaveError, game_migration, save_store};
+pub use session::ProjectSessionHost;
 
 /// Scripting API levels this runtime supports (§9.7).
 pub const SUPPORTED_API: std::ops::RangeInclusive<u32> = 1..=1;
@@ -86,6 +91,15 @@ pub enum ProjectError {
         /// Map height.
         height: u32,
     },
+}
+
+/// When the overworld runs `game_start` and related script hooks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProjectBoot {
+    /// Start play immediately (scenario runs, `--map` / `--warp` overrides).
+    Immediate,
+    /// Build the world but defer `game_start` until New Game or Continue.
+    AtTitle,
 }
 
 /// Overrides from `pkrs run --map <id> --warp x,y`.
@@ -351,6 +365,7 @@ pub struct ProjectHost {
     scripts: Option<OverworldScripts>,
     ui_theme: Option<UiTheme>,
     overlay: Option<ScriptOverlay>,
+    field_menu: Option<FieldMenu>,
     fade: ScreenFade,
     /// Tile the player last stood on between steps (trigger zones fire on entry).
     player_tile: GridPos,
@@ -382,6 +397,9 @@ pub struct ProjectHost {
     /// Active language and text tables (§5.5); the script world holds the live copy when
     /// scripting is on ([`localizer`](Self::localizer)).
     localizer: Localizer,
+    game_started: bool,
+    /// Music and sounds (§11).
+    audio: audio::ProjectAudio,
     /// Dev overlays, console and hot reload (`pkrs run`, §15.1).
     dev: Option<DevRuntime>,
     /// Plugin ids used when scripts are reloaded (§8.3).
@@ -395,7 +413,7 @@ impl ProjectHost {
     /// Loads the start map of `project` and uploads its textures through `renderer`. No
     /// scripts run; see [`with_scripts`](Self::with_scripts).
     pub fn new(project: &Project, renderer: Renderer) -> Result<Self, ProjectError> {
-        Self::build(project, renderer, None)
+        Self::build(project, renderer, None, ProjectBoot::Immediate)
     }
 
     /// Like [`new`](Self::new), with the overworld driven by `scripts` (plugins already
@@ -406,13 +424,48 @@ impl ProjectHost {
         renderer: Renderer,
         scripts: LuaScriptHost,
     ) -> Result<Self, ProjectError> {
-        Self::build(project, renderer, Some(scripts))
+        Self::build(project, renderer, Some(scripts), ProjectBoot::Immediate)
+    }
+
+    /// Like [`with_scripts`](Self::with_scripts), with controlled `game_start` timing.
+    pub fn with_scripts_boot(
+        project: &Project,
+        renderer: Renderer,
+        scripts: LuaScriptHost,
+        boot: ProjectBoot,
+    ) -> Result<Self, ProjectError> {
+        Self::build(project, renderer, Some(scripts), boot)
+    }
+
+    /// Runs `game_start` and map setup after the title screen chose New Game.
+    pub fn begin_new_game(&mut self) -> Result<(), ProjectError> {
+        if self.game_started {
+            return Ok(());
+        }
+        if self.scripts.is_none() {
+            self.game_started = true;
+            return Ok(());
+        }
+        let map = self.scene.map().clone();
+        let start = self.walker.pos();
+        let facing = self.walker.facing();
+        if let Some(scripts) = self.scripts.as_mut() {
+            scripts.start_game(&map, start, facing);
+        }
+        self.place_npcs();
+        if let Some(scripts) = self.scripts.as_mut() {
+            scripts.flush_events();
+        }
+        self.apply_script_requests();
+        self.game_started = true;
+        Ok(())
     }
 
     fn build(
         project: &Project,
         mut renderer: Renderer,
         scripts: Option<LuaScriptHost>,
+        boot: ProjectBoot,
     ) -> Result<Self, ProjectError> {
         let map = project.load_map()?;
         let textures = upload_map_textures(project, &mut renderer, &map)?;
@@ -468,6 +521,7 @@ impl ProjectHost {
             scripts: scripts.map(OverworldScripts::new),
             ui_theme,
             overlay: None,
+            field_menu: None,
             fade: ScreenFade::default(),
             player_tile: start,
             crossing: None,
@@ -487,16 +541,25 @@ impl ProjectHost {
                 &project.manifest.locale,
                 &text_plugins(project),
             ),
+            game_started: false,
+            audio: audio::ProjectAudio::for_project(project),
             dev: None,
             dev_plugins: Vec::new(),
         };
+        host.audio.enter_map(host.scene.map());
         if let Some(scripts) = host.scripts.as_ref() {
             scripts.world().get_mut().localizer = host.localizer.clone();
         }
         host.bootstrap_world_layout()?;
         if let Some(scripts) = host.scripts.as_mut() {
-            scripts.start_game(host.scene.map(), start, facing);
-            host.place_npcs();
+            match boot {
+                ProjectBoot::Immediate => {
+                    scripts.start_game(host.scene.map(), start, facing);
+                    host.place_npcs();
+                    host.game_started = true;
+                }
+                ProjectBoot::AtTitle => {}
+            }
         }
         if let Some(scripts) = host.scripts.as_mut() {
             scripts.flush_events();
@@ -529,6 +592,9 @@ impl ProjectHost {
     /// `None` before the first battle.
     #[must_use]
     pub fn party(&self) -> Option<&PlayerParty> {
+        if let Some(menu) = &self.field_menu {
+            return Some(menu.party());
+        }
         self.post_battle()
             .map(PostBattle::party)
             .or(self.party.as_ref())
@@ -646,6 +712,16 @@ impl ProjectHost {
         &self.input
     }
 
+    /// Headless tests and harnesses that build a [`UiTheme`] after the host exists.
+    pub fn renderer_mut(&mut self) -> &mut Renderer {
+        &mut self.renderer
+    }
+
+    /// Installs a UI theme when project assets did not provide one (headless tests).
+    pub fn set_ui_theme(&mut self, theme: UiTheme) {
+        self.ui_theme = Some(theme);
+    }
+
     /// Shared custom-terrain rule registry (§6.3).
     pub fn terrain_rules_mut(&mut self) -> &mut TerrainRuleRegistry {
         &mut self.terrain_rules
@@ -735,6 +811,7 @@ impl ProjectHost {
         self.walker = GridStepper::new(to, facing);
         self.player_tile = to;
         tracing::info!(map = %self.scene.map().id, pos = %to, "map_enter (warp)");
+        self.audio.enter_map(self.scene.map());
         if let Some(scripts) = self.scripts.as_mut() {
             scripts.enter_map(self.scene.map(), to, facing);
         }
@@ -902,6 +979,7 @@ impl ProjectHost {
         self.walker.relocate(entry);
         self.player_tile = entry;
         tracing::info!(map = %self.scene.map().id, pos = %entry, "map_enter (seamless)");
+        self.audio.enter_map(self.scene.map());
         if let Some(scripts) = self.scripts.as_mut() {
             scripts.enter_map(self.scene.map(), entry, facing);
         }
@@ -1076,10 +1154,13 @@ impl ProjectHost {
                 }
             }
         }
+        for request in scripts.take_audio_requests() {
+            self.audio.request(request);
+        }
         if let Some(dir) = scripts.take_player_face() {
             self.walker.face(dir);
         }
-        if self.overlay.is_none() && self.battle.is_none() {
+        if self.overlay.is_none() && self.battle.is_none() && self.field_menu.is_none() {
             if let Some(request) = scripts.take_ui_request() {
                 match &self.ui_theme {
                     Some(theme) => {
@@ -1114,7 +1195,11 @@ impl ProjectHost {
     /// once no dialogue or warp is running. A battle that cannot be set up is logged and its
     /// task resumes with `nil`.
     fn start_requested_battle(&mut self) {
-        if self.battle.is_some() || self.overlay.is_some() || self.is_warping() {
+        if self.battle.is_some()
+            || self.overlay.is_some()
+            || self.field_menu.is_some()
+            || self.is_warping()
+        {
             return;
         }
         let Some(scripts) = self.scripts.as_mut() else {
@@ -1126,6 +1211,7 @@ impl ProjectHost {
         match self.open_battle(&request) {
             Ok(screen) => {
                 tracing::info!(target: "battle", ?request, task, "battle started");
+                self.audio.start_battle(&request);
                 self.battle = Some((Some(task), screen));
             }
             Err(err) => {
@@ -1256,7 +1342,11 @@ impl ProjectHost {
         let Some(scripts) = self.scripts.as_ref() else {
             return false;
         };
-        if self.battle.is_some() || self.overlay.is_some() || scripts.player_locked() {
+        if self.battle.is_some()
+            || self.overlay.is_some()
+            || self.field_menu.is_some()
+            || scripts.player_locked()
+        {
             return false;
         }
         if self.encounters.needs_tables(self.scene.map(), pos) {
@@ -1276,6 +1366,7 @@ impl ProjectHost {
         match self.open_battle(&request) {
             Ok(screen) => {
                 tracing::info!(target: "encounter", ?encounter, "wild encounter");
+                self.audio.start_battle(&request);
                 self.battle = Some((None, screen));
                 true
             }
@@ -1303,6 +1394,7 @@ impl ProjectHost {
         };
         if let Some(result) = result {
             tracing::info!(target: "battle", ?result, "battle ended");
+            self.audio.end_battle(&result);
             match self.begin_post_battle(&result) {
                 Some(flow) => self.post_battle = Some((result, flow)),
                 None => self.end_battle(&result),
@@ -1402,6 +1494,10 @@ impl ProjectHost {
                     scripts.close_dialogue(answer);
                 }
             }
+            return;
+        }
+        self.try_menu_hotkey();
+        if self.tick_field_menu_if_open() {
             return;
         }
         let held = self.held_direction();
@@ -1703,6 +1799,7 @@ fn marker_sprite(
 impl SimulationHost for ProjectHost {
     fn poll_input(&mut self, platform: &Platform) {
         self.input.poll(platform);
+        self.audio.set_focus(platform.is_focused());
         if let Some(mut dev) = self.dev.take() {
             dev.poll(platform, self);
             self.dev = Some(dev);
@@ -1753,6 +1850,9 @@ impl SimulationHost for ProjectHost {
         self.sync_npc_sprites();
         self.fade.tick();
         self.scene.tick();
+
+        // §3.3 step 6: audio commands to the backend.
+        self.audio.flush();
     }
 
     fn render(&mut self, platform: &Platform, alpha: f32) {
@@ -1776,6 +1876,7 @@ impl SimulationHost for ProjectHost {
         if let (Some(overlay), Some(theme)) = (&self.overlay, &self.ui_theme) {
             overlay.render(&mut self.renderer, theme);
         }
+        self.render_field_menu_overlay();
         self.fade.render(&mut self.renderer);
         if let Some(dev) = self.dev.as_ref() {
             let frame_ms = (platform.raw_frame_time() * 1000.0) as f32;

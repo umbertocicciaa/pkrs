@@ -46,6 +46,17 @@ unused-allowed-license = "allow"
 exceptions = [
     # Weak, file-level copyleft; pulled in by `directories` (§14.3) via dirs-sys. Unmodified use.
     { allow = ["MPL-2.0"], crate = "option-ext" },
+    # Weak, file-level copyleft; the OGG/Vorbis + WAV decoders and the lock-free buffer behind
+    # kira (§11), used unmodified and confined to the KiraAudio adapter (§4.5).
+    { allow = ["MPL-2.0"], crate = "symphonia" },
+    { allow = ["MPL-2.0"], crate = "symphonia-core" },
+    { allow = ["MPL-2.0"], crate = "symphonia-common" },
+    { allow = ["MPL-2.0"], crate = "symphonia-metadata" },
+    { allow = ["MPL-2.0"], crate = "symphonia-codec-vorbis" },
+    { allow = ["MPL-2.0"], crate = "symphonia-codec-pcm" },
+    { allow = ["MPL-2.0"], crate = "symphonia-format-ogg" },
+    { allow = ["MPL-2.0"], crate = "symphonia-format-riff" },
+    { allow = ["MPL-2.0"], crate = "triple_buffer" },
 ]
 
 [licenses.private]
@@ -74,8 +85,8 @@ deny = [
     { crate = "mlua", wrappers = ["pkrs-script"], reason = "§4.5: mlua is wrapped by pkrs-script (LuaScriptHost, LuaBattleHooks)" },
     { crate = "rand_pcg", wrappers = ["pkrs-core"], reason = "§4.5: rand_pcg is wrapped by pkrs-core (Pcg64Rng)" },
     { crate = "toml", wrappers = ["pkrs-core"], reason = "§4.5: toml is wrapped by pkrs-core (manifest toml_codec)" },
-    { crate = "semver", wrappers = ["pkrs-core"], reason = "§4.5: semver is wrapped by pkrs-core (Version, VersionReq)" },
-    { crate = "ron", wrappers = ["pkrs-data", "pkrs-save", "pkrs-render", "pkrs-world"], reason = "§4.5: ron is wrapped by pkrs-data, pkrs-save (RonCodec), pkrs-render (sprite animation descriptors, §5.4) and pkrs-world (world.ron layout, §6.4)" },
+    { crate = "semver", wrappers = ["pkrs-core", "rustc_version"], reason = "§4.5: semver is wrapped by pkrs-core (Version, VersionReq); rustc_version is a build-time dependency of jni (cpal's Android backend, via kira) and never reaches pkrs code" },
+    { crate = "ron", wrappers = ["pkrs-data", "pkrs-save", "pkrs-render", "pkrs-world", "pkrs-audio"], reason = "§4.5: ron is wrapped by pkrs-data, pkrs-save (RonCodec), pkrs-render (sprite animation descriptors, §5.4), pkrs-world (world.ron layout, §6.4) and pkrs-audio (audio manifest codec, §11)" },
     { crate = "texture_packer", wrappers = ["pkrs-cli"], reason = "§4.5: texture_packer is wrapped by pkrs-cli (TexturePackerAdapter)" },
     { crate = "miette", wrappers = ["pkrs-cli"], reason = "§4.5, §8.2: miette renders `pkrs check` diagnostics in the pkrs-cli report adapter (report.rs) only" },
 ]

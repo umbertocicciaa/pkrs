@@ -12,6 +12,7 @@ mod fixed_step;
 mod game_host;
 pub mod locale;
 mod main_loop;
+pub mod menu;
 pub mod overworld;
 pub mod party;
 pub mod plugins;
@@ -43,4 +44,4 @@ pub use state::{
 pub use tick::{NullTickHooks, TickHooks, TickPhase, run_tick};
 pub use ui_assets::build_test_ui_theme;
 pub use ui_theme::UiTheme;
-pub use wiring::{AdapterSet, PlatformAdapter, RenderAdapter, RunMode};
+pub use wiring::{AdapterSet, AudioAdapter, PlatformAdapter, RenderAdapter, RunMode};

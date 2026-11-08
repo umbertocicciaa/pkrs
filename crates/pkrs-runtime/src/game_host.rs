@@ -8,6 +8,7 @@ use crate::ctx::RuntimeCtx;
 use crate::main_loop::SimulationHost;
 use crate::state::{LuaUiState, StateStack, TitleState};
 use crate::tick::{TickHooks, run_tick};
+use crate::ui_assets::build_test_ui_theme;
 
 /// Simulation host with an active [`StateStack`] starting at [`TitleState`].
 pub struct RuntimeHost {
@@ -20,9 +21,9 @@ impl RuntimeHost {
     /// Stack with title state and the given renderer (headless or windowed).
     #[must_use]
     pub fn new(renderer: Renderer) -> Self {
-        let mut ctx = RuntimeCtx::default();
-        let mut stack = StateStack::new();
-        stack.push(&mut ctx, Box::new(TitleState));
+        let ctx = RuntimeCtx::default();
+        let stack = StateStack::new();
+
         Self {
             stack,
             ctx,
@@ -33,11 +34,17 @@ impl RuntimeHost {
     /// Title screen with a [`NullRenderer`] (tests and headless runs).
     #[must_use]
     pub fn with_title() -> Self {
-        Self::new(Renderer::new(
+        let mut host = Self::new(Renderer::new(
             Box::new(NullRenderer::new()),
             DisplaySettings::default(),
             RendererConfig::default(),
-        ))
+        ));
+        if let Ok(theme) = build_test_ui_theme(host.renderer_mut()) {
+            if let Ok(title) = TitleState::for_stack_demo(theme, host.renderer_mut()) {
+                host.push_state(Box::new(title));
+            }
+        }
+        host
     }
 
     /// Title screen, headless renderer, and a paired Lua host + scheduler (§9.3, §9.5).
@@ -49,15 +56,21 @@ impl RuntimeHost {
             ..RuntimeCtx::default()
         };
         let mut stack = StateStack::new();
-        stack.push(&mut ctx, Box::new(TitleState));
+        let mut renderer = Renderer::new(
+            Box::new(NullRenderer::new()),
+            DisplaySettings::default(),
+            RendererConfig::default(),
+        );
+        if let Ok(theme) = build_test_ui_theme(&mut renderer) {
+            if let Ok(title) = TitleState::for_stack_demo(theme, &renderer) {
+                stack.push(&mut ctx, Box::new(title));
+            }
+        }
+
         Self {
             stack,
             ctx,
-            renderer: Renderer::new(
-                Box::new(NullRenderer::new()),
-                DisplaySettings::default(),
-                RendererConfig::default(),
-            ),
+            renderer,
         }
     }
 

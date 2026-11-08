@@ -10,12 +10,12 @@ use pkrs_platform::{
 };
 use pkrs_render::{MacroquadRenderer, Renderer, RendererConfig};
 use pkrs_runtime::plugins::start_project_scripts;
-use pkrs_runtime::project::{Project, ProjectHost, ProjectOptions};
+use pkrs_runtime::project::{Project, ProjectOptions, ProjectSessionHost};
 use pkrs_runtime::test_harness::{
     DEFAULT_SCENARIO_TICKS, ScenarioOptions, resolve_script, run_scenario,
 };
 use pkrs_runtime::validation::startup_check;
-use pkrs_runtime::wiring::{headless_platform, headless_renderer, window_config};
+use pkrs_runtime::wiring::{audio_backend, headless_platform, headless_renderer, window_config};
 use pkrs_runtime::{
     AdapterSet, AnimationDemoHost, LoopExit, PlatformAdapter, RenderAdapter, RunMode,
     RuntimeLoopConfig, block_on_loop, run_loop,
@@ -79,7 +79,8 @@ fn run_project_headless(opts: &ProjectOptions, config: RuntimeLoopConfig) -> any
     let (scripts, plugins) =
         start_project_scripts(&project, script_rng()).context("cannot load plugins")?;
     let (renderer, _log) = headless_renderer(project.display());
-    let mut host = ProjectHost::with_scripts(&project, renderer, scripts)
+    let skip_title = opts.map.is_some() || opts.warp.is_some();
+    let mut host = ProjectSessionHost::open(&project, renderer, scripts, skip_title)
         .context("cannot start the project")?;
     host.enable_dev(None, plugins.loaded);
     let mut platform = Platform::new(
@@ -121,6 +122,7 @@ fn run_project_windowed(opts: &ProjectOptions, config: RuntimeLoopConfig) -> any
     startup_check(&project)?;
     let display = project.display();
     let window = window_config(&project.manifest.game.name, &display, config.vsync);
+    let skip_title = opts.map.is_some() || opts.warp.is_some();
     let project_dir = opts.dir.clone();
     MacroquadPlatform::run(&window, move |backend| async move {
         let mut platform = Platform::new(
@@ -141,13 +143,17 @@ fn run_project_windowed(opts: &ProjectOptions, config: RuntimeLoopConfig) -> any
             display,
             RendererConfig::default(),
         );
-        let mut host = match ProjectHost::with_scripts(&project, renderer, scripts) {
+        let mut host = match ProjectSessionHost::open(&project, renderer, scripts, skip_title) {
             Ok(host) => host,
             Err(err) => {
                 tracing::error!(%err, "cannot start the project");
                 return;
             }
         };
+        host.set_audio_backend(audio_backend(
+            AdapterSet::for_mode(RunMode::Windowed).audio,
+            Box::new(project.vfs.clone()),
+        ));
         let watcher = NotifyWatcher::new(&project_dir)
             .ok()
             .map(|w| Box::new(w) as Box<dyn FileWatcher>);

@@ -228,6 +228,7 @@ pub(crate) enum HookCommand {
     SetVolatile(SlotRef, String, Option<BattleValue>),
     SetSideState(SideId, String, Option<BattleValue>),
     Message(String),
+    Fx(SlotRef, Option<String>),
 }
 
 /// What every hook receives (§7.4).
@@ -332,6 +333,18 @@ impl<'a> BattleHookCtx<'a> {
     /// Queues a [`BattleEvent::Message`] with `key`.
     pub fn message(&mut self, key: impl Into<String>) {
         self.commands.push(HookCommand::Message(key.into()));
+    }
+
+    /// Queues a [`BattleEvent::Fx`] that shows the visual effect `id` on the creature in
+    /// `slot` (`ctx.play_fx` in Lua). Ignored if `slot` has no active creature.
+    pub fn play_fx(&mut self, slot: SlotRef, id: impl Into<String>) {
+        self.commands.push(HookCommand::Fx(slot, Some(id.into())));
+    }
+
+    /// Queues a [`BattleEvent::Fx`] that clears the visual effect on the creature in `slot`
+    /// (`ctx.clear_fx` in Lua). Ignored if `slot` has no active creature.
+    pub fn clear_fx(&mut self, slot: SlotRef) {
+        self.commands.push(HookCommand::Fx(slot, None));
     }
 
     /// Number of state changes requested so far (see [`rollback`](Self::rollback)).

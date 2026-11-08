@@ -292,6 +292,17 @@ fn parse_slot(v: &Value) -> mlua::Result<SlotRef> {
     Ok(SlotRef::new(side, slot))
 }
 
+/// The creature argument of `ctx.play_fx` / `ctx.clear_fx`, with the call named in errors.
+fn fx_slot(call: &str, v: &Value) -> mlua::Result<SlotRef> {
+    parse_slot(v).map_err(|e| {
+        let reason = match e {
+            mlua::Error::RuntimeError(msg) => msg,
+            other => other.to_string(),
+        };
+        mlua::Error::runtime(format!("{call}: {reason}"))
+    })
+}
+
 /// [`BattleValue`] → Lua.
 pub(super) fn value_to_lua(lua: &Lua, v: &BattleValue) -> mlua::Result<Value> {
     Ok(match v {
@@ -514,12 +525,26 @@ fn install_ctx<'scope, 'env: 'scope, 'c: 'env>(
         "play_fx",
         scope.create_function(move |_, args: MultiValue| {
             let args = args_without_self(&me, args);
-            let Value::String(id) = arg(&args, 0) else {
-                return Err(mlua::Error::runtime(
-                    "ctx.play_fx(id, creature) needs a string id",
-                ));
+            let id = match arg(&args, 0) {
+                Value::String(id) if !id.as_bytes().is_empty() => id.to_str()?.to_owned(),
+                _ => {
+                    return Err(mlua::Error::runtime(
+                        "ctx.play_fx(id, creature) needs a non-empty string id",
+                    ));
+                }
             };
-            cell.borrow_mut().message(format!("fx:{}", id.to_str()?));
+            let slot = fx_slot("ctx.play_fx(id, creature)", &arg(&args, 1))?;
+            cell.borrow_mut().play_fx(slot, id);
+            Ok(())
+        })?,
+    )?;
+    let me = t.clone();
+    t.raw_set(
+        "clear_fx",
+        scope.create_function(move |_, args: MultiValue| {
+            let args = args_without_self(&me, args);
+            let slot = fx_slot("ctx.clear_fx(creature)", &arg(&args, 0))?;
+            cell.borrow_mut().clear_fx(slot);
             Ok(())
         })?,
     )?;

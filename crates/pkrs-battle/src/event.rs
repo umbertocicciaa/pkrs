@@ -157,6 +157,18 @@ pub enum BattleEvent {
         /// Message key.
         key: String,
     },
+    /// A hook showed (`Some`) or cleared (`None`) a visual effect on an active creature
+    /// (`ctx.play_fx` / `ctx.clear_fx`, section 9.5). Purely presentational: the battle logic
+    /// never reads it back. The UI keeps the effect on that slot until a later `Fx` event with
+    /// `id: None` for the same slot (or until the creature leaves the field).
+    Fx {
+        /// Side of the creature.
+        side: SideId,
+        /// Active slot of the creature.
+        slot: SlotIndex,
+        /// FX asset id (`plugin:asset`), or `None` to clear the slot's effect.
+        id: Option<String>,
+    },
     /// End-of-turn marker (residual effects land in later issues).
     TurnEnded {
         /// Turn that ended.

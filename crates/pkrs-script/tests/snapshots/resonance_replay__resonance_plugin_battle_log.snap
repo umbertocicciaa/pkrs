@@ -1,6 +1,5 @@
 ---
 source: crates/pkrs-script/tests/resonance_replay.rs
-assertion_line: 103
 expression: log
 ---
 BattleStarted
@@ -11,7 +10,7 @@ ActionCommitted { side: Player, slot: 0, action: Custom { id: "resonance:resonat
 SideStateChanged { side: Player, key: "resonance_used", value: Some(Bool(true)) }
 VolatileChanged { side: Player, slot: 0, key: "resonating", value: Some(Map({"turns": Int(3)})) }
 Message { key: "text:resonance.start" }
-Message { key: "fx:resonance:aura" }
+Fx { side: Player, slot: 0, id: Some("resonance:aura") }
 CustomActionUsed { side: Player, slot: 0, id: "resonance:resonate", handled: true }
 ActionCommitted { side: Opponent, slot: 0, action: Fight { move_slot: 0, target_side: Player, target_slot: 0 } }
 MoveUsed { user_side: Opponent, user_slot: 0, move_id: "tackle", target_side: Player, target_slot: 0 }

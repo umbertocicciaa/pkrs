@@ -434,6 +434,16 @@ impl Battle {
                     });
                 }
                 HookCommand::Message(key) => out.push(BattleEvent::Message { key }),
+                HookCommand::Fx(slot, id) => {
+                    if self.side(slot.side).creature(slot.slot).is_none() {
+                        continue;
+                    }
+                    out.push(BattleEvent::Fx {
+                        side: slot.side,
+                        slot: slot.slot,
+                        id,
+                    });
+                }
             }
         }
     }

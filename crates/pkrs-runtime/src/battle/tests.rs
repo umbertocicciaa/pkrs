@@ -511,3 +511,55 @@ fn doubles_two_active_slots_reopen_action_menu_after_one_turn() {
         s.is_finished()
     );
 }
+
+#[test]
+fn a_plugin_fx_shows_on_the_opponent_until_the_plugin_clears_it() {
+    use pkrs_core::Pcg64Rng;
+    use pkrs_script::{LuaScriptHost, MemoryScripts, ScriptHost, ScriptLimits, ScriptOwner};
+
+    let mut host = LuaScriptHost::new(
+        Box::new(MemoryScripts::new()),
+        Box::new(Pcg64Rng::from_seed(7)),
+        ScriptLimits::default(),
+    )
+    .unwrap();
+    host.run_source(
+        &ScriptOwner::plugin("glow"),
+        "plugins/glow/init.lua",
+        "battle.on('on_pre_turn', function(ctx)
+           if ctx.turn == 1 then ctx.play_fx('glow:aura', ctx.creature('opponent', 0)) end
+         end)
+         battle.on('on_end_of_turn', function(ctx)
+           if ctx.turn == 2 then ctx.clear_fx(ctx.creature('opponent', 0)) end
+         end)",
+    )
+    .unwrap();
+    let mut setup = battle_testkit::wild_1v1();
+    setup.opponent.party[0].stats.max_hp = 500;
+    setup.player.party[0].stats.max_hp = 500;
+    let mut hooks = host.battle_hooks();
+    let mut s = screen_with(rival(), setup, BTreeMap::new(), &mut hooks);
+    let mut input = input();
+    read_texts(&mut s, &mut input, &mut hooks);
+    assert_eq!(s.slot_fx(SideId::Opponent, 0), None);
+
+    let mut fight_turn = |s: &mut BattleScreen| {
+        press(s, &mut input, Key::Enter, &mut hooks); // FIGHT
+        press(s, &mut input, Key::Enter, &mut hooks); // Tackle
+        read_texts(s, &mut input, &mut hooks);
+        assert_eq!(s.menu(), Some(MenuKind::Action));
+    };
+    fight_turn(&mut s);
+    assert_eq!(s.slot_fx(SideId::Opponent, 0), Some("glow:aura"));
+    assert_eq!(
+        s.slot_fx(SideId::Player, 0),
+        None,
+        "only the opponent glows"
+    );
+    fight_turn(&mut s);
+    assert_eq!(
+        s.slot_fx(SideId::Opponent, 0),
+        None,
+        "the plugin cleared it"
+    );
+}

@@ -516,7 +516,10 @@ fn install_ctx<'scope, 'env: 'scope, 'c: 'env>(
             let Value::String(key) = arg(&args, 0) else {
                 return Err(mlua::Error::runtime("ctx.message(key) needs a string key"));
             };
-            cell.borrow_mut().message(key.to_str()?.to_owned());
+            let text_args = super::facade::text_args("ctx.message", &arg(&args, 1))
+                .map_err(mlua::Error::runtime)?;
+            cell.borrow_mut()
+                .message_with(key.to_str()?.to_owned(), text_args);
             Ok(())
         })?,
     )?;

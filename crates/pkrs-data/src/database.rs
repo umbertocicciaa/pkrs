@@ -27,7 +27,7 @@
 //!   [`GameDataBuilder`] merges that database in before the content is frozen.
 //! - Problems are collected, not fail-fast ([`DataErrors`]).
 //!
-//! Cross-reference checks (§8.2 stage 3) are not part of loading.
+//! Cross-reference checks (§8.2 stage 3) are not part of loading; see [`crate::validate`].
 
 use core::fmt;
 use std::collections::BTreeMap;
@@ -417,18 +417,8 @@ impl GameDataBuilder {
                     }
                 }
                 DataKind::Text => {
-                    for lang in sorted(files.list_dirs(&path)) {
-                        let dir = format!("{path}/{lang}");
-                        for name in ron_files(files, &dir) {
-                            let file = format!("{dir}/{name}");
-                            match files.read_text(&file) {
-                                Ok(source) => {
-                                    self.add_text(&lang, &file, &source);
-                                }
-                                Err(message) => self.errors.push(DataError::Read { file, message }),
-                            }
-                        }
-                    }
+                    let errors = self.data.text.load_dir(files, &path);
+                    self.errors.extend(errors);
                 }
                 _ => {
                     for name in ron_files(files, &path) {
@@ -540,6 +530,19 @@ impl GameDataBuilder {
 
     /// Freezes the content, or returns every problem found.
     pub fn build(self) -> Result<GameData, DataErrors> {
+        let (data, errors) = self.finish();
+        if errors.is_empty() {
+            Ok(data)
+        } else {
+            Err(DataErrors(errors))
+        }
+    }
+
+    /// Freezes whatever loaded and returns it together with every problem found. Records
+    /// that failed are left out. Validation (§8.2) uses it to check the cross-references of
+    /// the rest of the content in the same run.
+    #[must_use]
+    pub fn finish(self) -> (GameData, Vec<DataError>) {
         let Self {
             mut data,
             mut errors,
@@ -551,11 +554,7 @@ impl GameDataBuilder {
             }
         }
         data.encounter_tables = tables;
-        if errors.is_empty() {
-            Ok(data)
-        } else {
-            Err(DataErrors(errors))
-        }
+        (data, errors)
     }
 }
 
@@ -640,7 +639,7 @@ fn add_records<T: Keyed + DeserializeOwned>(
 }
 
 /// Adds the file to an error that does not name it yet.
-fn in_file(file: &str, err: DataError) -> DataError {
+pub(crate) fn in_file(file: &str, err: DataError) -> DataError {
     if err.to_string().contains(file) {
         err
     } else {
@@ -651,14 +650,14 @@ fn in_file(file: &str, err: DataError) -> DataError {
     }
 }
 
-fn sorted(mut names: Vec<String>) -> Vec<String> {
+pub(crate) fn sorted(mut names: Vec<String>) -> Vec<String> {
     names.sort();
     names.dedup();
     names
 }
 
 /// `*.ron` files directly in `dir`, in name order.
-fn ron_files(files: &dyn DataFiles, dir: &str) -> Vec<String> {
+pub(crate) fn ron_files(files: &dyn DataFiles, dir: &str) -> Vec<String> {
     sorted(
         files
             .list_files(dir)

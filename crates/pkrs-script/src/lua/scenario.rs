@@ -22,7 +22,8 @@
 //! `walk(direction [, tiles])`, `face(direction)`, `advance_battle([max_ticks])` (confirms
 //! battle messages until a battle menu opens or the battle ends).
 //!
-//! Queries: `tick()`, `state()`, `map()`, `player()` (x, y, facing), `idle()`, `locked()`,
+//! Queries: `tick()`, `state()`, `map()`, `language()` (the active text language),
+//! `player()` (x, y, facing), `idle()`, `locked()`,
 //! `npc(id)` (x, y, facing or nil), `flag(name)`, `var(name)`, `item(id)`, `dialogue()`,
 //! `dialogues_opened()`, `choices()`, `cursor()` (1-based), `battle()` (`nil` outside a battle,
 //! else `{ menu, turn, player = { name, level, hp, max_hp }, opponent = { … } }`), `party()`
@@ -77,6 +78,7 @@ pub const SCENARIO_API: &[&str] = &[
     "tick",
     "state",
     "map",
+    "language",
     "player",
     "idle",
     "locked",
@@ -706,6 +708,10 @@ fn install_queries(lua: &Lua, env: &Table) -> mlua::Result<()> {
     env.raw_set(
         "map",
         lua.create_function(|lua, ()| snapshot(lua, |s| s.map.clone()))?,
+    )?;
+    env.raw_set(
+        "language",
+        lua.create_function(|lua, ()| snapshot(lua, |s| s.language.clone()))?,
     )?;
     env.raw_set(
         "player",

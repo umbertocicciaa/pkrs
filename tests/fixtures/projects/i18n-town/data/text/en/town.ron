@@ -1,0 +1,8 @@
+// English: `town.sign` is missing on purpose, so it falls back to the default language.
+{
+    "guide.hello": "Welcome to {town}!",
+    "guide.switch": "Switch to {lang}?",
+    "guide.bye": "Language switched {0} times. Bye!",
+    "lang.it": "Italian",
+    "lang.en": "English",
+}

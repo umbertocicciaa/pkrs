@@ -240,10 +240,7 @@ impl OverworldScripts {
                 match (script, text) {
                     (Some(script), _) => self.spawn_script(&script, &[], TaskKind::Interact),
                     (None, Some(text)) => {
-                        self.world
-                            .get_mut()
-                            .ui_requests
-                            .push_back(UiRequest::Say(text));
+                        self.world.get_mut().say(&text, &pkrs_data::TextArgs::new());
                     }
                     (None, None) => {}
                 }

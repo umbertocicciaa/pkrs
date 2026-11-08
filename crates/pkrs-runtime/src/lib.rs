@@ -9,6 +9,7 @@ pub mod encounters;
 pub mod evolution;
 mod fixed_step;
 mod game_host;
+pub mod locale;
 mod main_loop;
 pub mod overworld;
 pub mod party;
@@ -21,6 +22,7 @@ pub mod test_harness;
 mod tick;
 mod ui_assets;
 mod ui_theme;
+pub mod validation;
 pub mod wiring;
 
 pub use ctx::RuntimeCtx;

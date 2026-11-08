@@ -1,0 +1,5 @@
+[plugin]
+id      = "bad-manifest"
+name    = "Bad Manifest"
+version = "one"
+api     = 1

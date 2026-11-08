@@ -1,6 +1,6 @@
 //! Append-only battle log entries (§7.2).
 
-use pkrs_data::StatId;
+use pkrs_data::{StatId, TextArgs};
 
 use crate::action::BattleAction;
 use crate::hooks::BattleValue;
@@ -152,10 +152,14 @@ pub enum BattleEvent {
         /// Who ran.
         side: SideId,
     },
-    /// Informational message key (localisation happens in UI).
+    /// Informational message key (localisation happens in UI): an engine key
+    /// (`status:cant_move`, `multi_hit:2`, …) or a `text:` key, with its arguments
+    /// (`{name}` placeholders, `ctx.message(key, args)`).
     Message {
         /// Message key.
         key: String,
+        /// Placeholder arguments (empty for engine keys).
+        args: TextArgs,
     },
     /// A hook showed (`Some`) or cleared (`None`) a visual effect on an active creature
     /// (`ctx.play_fx` / `ctx.clear_fx`, section 9.5). Purely presentational: the battle logic
@@ -255,4 +259,15 @@ pub enum BattleEvent {
         /// Hook name (`on_damage_calc`, ...).
         hook: String,
     },
+}
+
+impl BattleEvent {
+    /// A [`BattleEvent::Message`] with `key` and no arguments.
+    #[must_use]
+    pub fn message(key: impl Into<String>) -> Self {
+        Self::Message {
+            key: key.into(),
+            args: TextArgs::new(),
+        }
+    }
 }

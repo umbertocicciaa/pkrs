@@ -83,6 +83,24 @@ pub struct PreparedBattle {
     pub resources: BattleResources,
     /// The opponent's AI.
     pub ai: TrainerAi,
+    /// Texts and content names of the battle screens (§5.5); English engine texts unless the
+    /// runtime sets the project's ([`with_text`](Self::with_text)).
+    pub text: crate::locale::BattleText,
+}
+
+impl PreparedBattle {
+    /// Uses `text` for the battle's texts and renames every creature to its localized species
+    /// name (nicknames are the species name until nicknames land).
+    #[must_use]
+    pub fn with_text(mut self, text: crate::locale::BattleText) -> Self {
+        for side in [&mut self.setup.player, &mut self.setup.opponent] {
+            for creature in &mut side.party {
+                creature.nickname = text.species(&creature.species_id);
+            }
+        }
+        self.text = text;
+        self
+    }
 }
 
 /// Battle content of one project.
@@ -189,6 +207,7 @@ impl BattleContent {
             setup: BattleSetup { player, opponent },
             resources: BattleResources::new(self.pack.clone()),
             ai,
+            text: crate::locale::BattleText::default(),
         })
     }
 
@@ -324,7 +343,8 @@ pub fn level_stats(species: &SpeciesDef, level: u8) -> CreatureStats {
     )
 }
 
-/// `"tall_grass"` → `"Tall grass"`: a readable name for a content id until text data lands.
+/// `"tall_grass"` → `"Tall grass"`: a readable name for a content id without a localized
+/// name (no `name` field and no `<kind>.<id>` text key, §5.5).
 #[must_use]
 pub fn display_name(id: &str) -> String {
     let id = id.rsplit(':').next().unwrap_or(id);

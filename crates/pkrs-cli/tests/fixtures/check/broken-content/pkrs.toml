@@ -1,0 +1,16 @@
+# Broken on purpose: `pkrs check` must report every problem below in one run (§8.2).
+[game]
+name = "Broken Content"
+id   = "com.example.broken-content"
+
+[engine]
+version = "0.0"
+api     = 1
+
+[start]
+map      = "town"
+position = [1, 1]
+
+[locale]
+default   = "en"
+available = ["en", "it"]

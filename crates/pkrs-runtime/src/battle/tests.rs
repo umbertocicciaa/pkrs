@@ -42,6 +42,7 @@ fn prepared(kind: BattleKind, setup: pkrs_battle::BattleSetup) -> PreparedBattle
         setup,
         resources: battle_testkit::default_resources(),
         ai: TrainerAi::new(&AiProfile::builtin("basic", AiTier::Basic), Vec::new(), 3),
+        text: crate::locale::BattleText::default(),
     }
 }
 

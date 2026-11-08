@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use pkrs_assets::{FolderVfs, Vfs, VfsPath};
 use pkrs_battle::{BattleResult, NullBattleHooks, RngPolicy};
 use pkrs_core::{Direction, GridPos, Pcg64Rng, ProjectManifest, Version};
-use pkrs_data::{GameData, LoadOptions};
+use pkrs_data::{GameData, LoadOptions, Localizer, UnknownLanguage};
 use pkrs_platform::{
     Action, BuiltinAction, DisplaySettings, Input, InputFacadeConfig, Key, Platform, UserPaths,
 };
@@ -377,6 +377,9 @@ pub struct ProjectHost {
     encounters: Encounters,
     /// Play time and plugin data carried over from a loaded save (§12).
     save_session: save::SaveSession,
+    /// Active language and text tables (§5.5); the script world holds the live copy when
+    /// scripting is on ([`localizer`](Self::localizer)).
+    localizer: Localizer,
 }
 
 /// Seed of the stream battles derive their RNG from until the save owns the game RNG (§12).
@@ -473,7 +476,15 @@ impl ProjectHost {
             post_battle: None,
             encounters: Encounters::default(),
             save_session: save::SaveSession::default(),
+            localizer: crate::locale::project_localizer(
+                &project.vfs,
+                &project.manifest.locale,
+                &text_plugins(project),
+            ),
         };
+        if let Some(scripts) = host.scripts.as_ref() {
+            scripts.world().get_mut().localizer = host.localizer.clone();
+        }
         host.bootstrap_world_layout()?;
         if let Some(scripts) = host.scripts.as_mut() {
             scripts.start_game(host.scene.map(), start, facing);
@@ -1090,6 +1101,7 @@ impl ProjectHost {
             .as_ref()
             .ok_or_else(|| "battle content missing".to_owned())?;
         let policy = RngPolicy::local_from_game_rng(&mut self.battle_rng);
+        let text = self.battle_text();
         let mut prepared = content
             .prepare(request, &policy)
             .map_err(|e| e.to_string())?;
@@ -1105,6 +1117,7 @@ impl ProjectHost {
                 prepared.config.side_size,
             )
             .map_err(|e| e.to_string())?;
+        let prepared = prepared.with_text(text);
         self.party = Some(party);
         let bag = scripts.world().get().state.bag().clone();
         BattleScreen::with_scripts(
@@ -1116,6 +1129,39 @@ impl ProjectHost {
             scripts.host(),
         )
         .map_err(|e| e.to_string())
+    }
+
+    /// The active language and text tables (§5.5): the script world's (switched by
+    /// `game.set_language`), else the host's own.
+    #[must_use]
+    pub fn localizer(&self) -> Localizer {
+        match self.scripts.as_ref() {
+            Some(scripts) => scripts.world().get().localizer.clone(),
+            None => self.localizer.clone(),
+        }
+    }
+
+    /// The active text language.
+    #[must_use]
+    pub fn language(&self) -> String {
+        self.localizer().language().to_owned()
+    }
+
+    /// Switches every text shown from now on (dialogue, choices, battle screens opened
+    /// afterwards) to `language`, one of `[locale] available` (the options API; scripts use
+    /// `game.set_language`). The choice is not saved yet.
+    pub fn set_language(&mut self, language: &str) -> Result<(), UnknownLanguage> {
+        self.localizer.set_language(language)?;
+        if let Some(scripts) = self.scripts.as_ref() {
+            scripts.world().get_mut().localizer.set_language(language)?;
+        }
+        tracing::info!(language, "text language switched");
+        Ok(())
+    }
+
+    /// Battle texts in the active language with the content database's names.
+    fn battle_text(&self) -> crate::locale::BattleText {
+        crate::locale::BattleText::new(self.localizer(), self.game_data.as_ref())
     }
 
     /// The project's content database, loaded (and merged with the plugins' content
@@ -1220,13 +1266,14 @@ impl ProjectHost {
         let party = self.party.as_ref()?;
         let content = self.battle_content.as_ref()?;
         let theme = self.ui_theme.clone()?;
-        PostBattle::new(
+        PostBattle::with_text(
             result,
             &screen.exp_earners(),
             party,
             content.pack(),
             theme,
             self.renderer.view_size(),
+            self.battle_text(),
         )
     }
 
@@ -1437,6 +1484,15 @@ impl ProjectHost {
             player.texture = texture;
             player.src = src;
         }
+    }
+}
+
+/// Plugins whose `data/text/` tables load (load order; the enabled list when the plugin set
+/// cannot be resolved, which plugin loading reports itself).
+fn text_plugins(project: &Project) -> Vec<String> {
+    match crate::plugins::plan_project_plugins(project) {
+        Ok(plan) => plan.ids().into_iter().map(str::to_owned).collect(),
+        Err(_) => project.manifest.plugins.enabled.clone(),
     }
 }
 

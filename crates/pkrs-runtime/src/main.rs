@@ -13,6 +13,7 @@ use pkrs_runtime::project::{Project, ProjectHost, ProjectOptions};
 use pkrs_runtime::test_harness::{
     DEFAULT_SCENARIO_TICKS, ScenarioOptions, resolve_script, run_scenario,
 };
+use pkrs_runtime::validation::startup_check;
 use pkrs_runtime::wiring::{headless_platform, headless_renderer, window_config};
 use pkrs_runtime::{
     AdapterSet, AnimationDemoHost, LoopExit, PlatformAdapter, RenderAdapter, RunMode,
@@ -73,6 +74,7 @@ fn main() -> anyhow::Result<()> {
 fn run_project_headless(opts: &ProjectOptions, config: RuntimeLoopConfig) -> anyhow::Result<()> {
     let project = Project::open(opts)
         .with_context(|| format!("cannot open project `{}`", opts.dir.display()))?;
+    startup_check(&project)?;
     let (scripts, _plugins) =
         start_project_scripts(&project, script_rng()).context("cannot load plugins")?;
     let (renderer, _log) = headless_renderer(project.display());
@@ -114,6 +116,7 @@ fn run_script(
 fn run_project_windowed(opts: &ProjectOptions, config: RuntimeLoopConfig) -> anyhow::Result<()> {
     let project = Project::open(opts)
         .with_context(|| format!("cannot open project `{}`", opts.dir.display()))?;
+    startup_check(&project)?;
     let display = project.display();
     let window = window_config(&project.manifest.game.name, &display, config.vsync);
     MacroquadPlatform::run(&window, move |backend| async move {

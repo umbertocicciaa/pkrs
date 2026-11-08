@@ -641,9 +641,7 @@ fn menu_entry_and_custom_action_round_trip() {
                         .collect()
                 )),
             },
-            BattleEvent::Message {
-                key: "text:resonance.start".into()
-            },
+            BattleEvent::message("text:resonance.start"),
             BattleEvent::CustomActionUsed {
                 side: SideId::Player,
                 slot: 0,

@@ -19,7 +19,7 @@ pub mod screen;
 
 pub use content::{BattleContent, BattleContentError, BattleKind, PreparedBattle};
 pub use menu::{ActionKind, MenuEntry};
-pub use present::{Cue, Member, Presenter, Roster, SideRoster};
+pub use present::{Cue, Member, Presenter, Roster, SideRoster, message_text, message_text_in};
 pub use rewards::{PostBattle, PostBattlePhase, battle_rewards};
 pub use screen::{BattleScreen, MenuKind};
 

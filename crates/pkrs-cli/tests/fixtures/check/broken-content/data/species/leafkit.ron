@@ -1,0 +1,17 @@
+[
+    Species(
+        id: "leafkit",
+        name: "text:species.leafkit",
+        types: ["grass"],
+        base_stats: (hp: 40, atk: 30, def: 31, spa: 30, spd: 31, spe: 32),
+        learnset: [(level: 1, move: "scratch"), (level: 5, move: "vine_whip")],
+        evolutions: [(into: "leafcat", trigger: Level(16))],
+        sprites: (front: "sprites/creatures/leafkit.png"),
+    ),
+    // Same id as data/species/emberkit.ron without `override: true`.
+    Species(
+        id: "emberkit",
+        types: ["fire"],
+        base_stats: (hp: 1, atk: 1, def: 1, spa: 1, spd: 1, spe: 1),
+    ),
+]

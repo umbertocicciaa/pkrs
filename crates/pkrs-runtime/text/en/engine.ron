@@ -1,0 +1,98 @@
+// Engine texts (§5.5): every string the engine itself shows. Games override any key by
+// defining it in their own `data/text/<lang>/` table. Placeholders: `{name}` arguments.
+{
+    // Choice lists
+    "ui.yes": "Yes",
+    "ui.no": "No",
+
+    // Battle menus
+    "battle.menu.fight": "FIGHT",
+    "battle.menu.bag": "BAG",
+    "battle.menu.party": "PARTY",
+    "battle.menu.run": "RUN",
+    "battle.menu.move": "{move} {pp}/{max_pp}",
+    "battle.menu.creature": "{name} Lv{level} {hp}/{max_hp}",
+    "battle.menu.item": "{item} x{count}",
+    "battle.prompt.action": "What will {name} do?",
+    "battle.prompt.action_nobody": "What will you do?",
+    "battle.prompt.next": "Choose who goes next.",
+    "battle.hud.level": "Lv{level}",
+
+    // Refused menu choices
+    "battle.cant_do_now": "That can't be done now!",
+    "battle.bag_empty": "The bag is empty.",
+    "battle.nothing_to_choose": "There's nothing to choose.",
+    "battle.no_running": "There's no running from a trainer battle!",
+    "battle.no_pp": "There's no PP left for this move!",
+    "battle.no_energy": "{name} has no energy left to battle!",
+    "battle.already_in": "{name} is already in battle!",
+    "battle.cant_battle": "That creature can't battle.",
+
+    // Names in battle texts
+    "battle.wild_name": "Wild {name}",
+    "battle.foe_name": "Foe {name}",
+
+    // Opening and ending
+    "battle.wild_appeared": "A wild {name} appeared!",
+    "battle.trainer_challenge": "{trainer} wants to battle!",
+    "battle.trainer_sent_out": "{trainer} sent out {name}!",
+    "battle.go": "Go! {name}!",
+    "battle.player_won": "{player} defeated {trainer}!",
+    "battle.player_out": "{player} is out of usable creatures!",
+    "battle.blacked_out": "{player} blacked out!",
+    "battle.got_away": "Got away safely!",
+    "battle.fled": "{name} fled!",
+
+    // Switching
+    "battle.come_back": "{name}, come back!",
+    "battle.trainer_withdrew": "{trainer} withdrew {name}!",
+    "battle.withdrew": "{name} withdrew!",
+    "battle.appeared": "{name} appeared!",
+
+    // Turn events
+    "battle.used_move": "{name} used {move}!",
+    "battle.regained_health": "{name} regained health!",
+    "battle.recoil": "{name} is hit with recoil!",
+    "battle.missed": "The attack missed!",
+    "battle.fainted": "{name} fainted!",
+    "battle.status_applied": "{name} is now {status}!",
+    "battle.status_cured": "{name} is no longer {status}.",
+    "battle.volatile_ended": "{name}'s {effect} ended.",
+    "battle.weather_set": "The weather turned to {weather}.",
+    "battle.weather_ended": "The weather cleared.",
+    "battle.couldnt_use": "{name} couldn't use {move}!",
+    "battle.protected": "{name} protected itself!",
+    "battle.no_effect": "It doesn't affect {name}...",
+    "battle.cant_switch": "{name} can't be switched out!",
+    "battle.nothing_happened": "But nothing happened!",
+    "battle.stat_rose": "{name}'s {stat} rose!",
+    "battle.stat_fell": "{name}'s {stat} fell!",
+    "battle.stat_max": "{name}'s {stat} won't go any higher!",
+    "battle.stat_min": "{name}'s {stat} won't go any lower!",
+    "battle.stat.attack": "attack",
+    "battle.stat.defense": "defense",
+    "battle.stat.speed": "speed",
+    "battle.stat.accuracy": "accuracy",
+    "battle.stat.evasion": "evasiveness",
+
+    // Engine message keys (`BattleEvent::Message`)
+    "battle.cant_move": "It can't move!",
+    "battle.protect": "It protected itself!",
+    "battle.switch_out": "It was forced out!",
+    "battle.multi_hit": "Hit {count} more time(s)!",
+    "battle.item_used": "Used {item}!",
+    "battle.residual": "It is hurt by {source}!",
+
+    // After a won battle
+    "battle.exp_gained": "{name} gained {exp} Exp. Points!",
+    "battle.level_up": "{name} grew to level {level}!",
+    "battle.learned": "{name} learned {move}!",
+    "battle.moves_full": "{name} wants to learn {move}, but {name} already knows {max} moves.",
+    "battle.forget_prompt": "Which move should {name} forget?",
+    "battle.dont_learn": "Don't learn {move}",
+    "battle.forgot_and_learned": "{name} forgot {old} and learned {move}!",
+    "battle.poof": "1, 2 and... Poof!",
+    "battle.did_not_learn": "{name} did not learn {move}.",
+    "battle.evolving": "What? {name} is evolving!",
+    "battle.evolved": "Congratulations! Your {name} evolved into {into}!",
+}

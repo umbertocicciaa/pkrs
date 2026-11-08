@@ -1,12 +1,16 @@
 //! Data-driven content: RON schemas, loading, validation and cross-reference checks.
 //!
 //! - Schemas (§8.1): [`SpeciesDef`], [`MoveDef`], [`ItemDef`], [`AbilityDef`],
-//!   [`TypeChart`], [`TrainerDef`] / [`AiProfile`], [`EncounterTable`], text ([`TextDb`]),
+//!   [`TypeChart`], [`TrainerDef`] / [`AiProfile`], [`EncounterTable`], text ([`TextDb`],
+//!   layered and localized by [`Localizer`]),
 //!   plus statuses, terrains and effect primitives.
 //! - [`RonCodec`]: the only place the `ron` crate is used (§4.5).
 //! - [`GameData`]: the immutable content database of a project, loaded through the
 //!   [`DataFiles`] port with folder merging, duplicate detection and ids interned into
 //!   [`Handle`]s; `features.battles = false` skips battle data ([`LoadOptions`]).
+//! - [`validate`]: §8.2 validation as vendor-free diagnostics: load errors with file and
+//!   line/column, stage-2 schema rules and stage-3 cross-references (ids, sprites, `text:`
+//!   keys).
 //! - [`content`]: the mutable content database plugins register into (§9.4), merged into
 //!   [`GameData`] by [`GameDataBuilder::merge_content`].
 
@@ -20,11 +24,13 @@ mod error;
 mod files;
 mod growth;
 mod intern;
+mod locale;
 mod move_def;
 mod species;
 mod text;
 mod trainer;
 mod type_chart;
+pub mod validate;
 
 pub use battle_pack::BattlePack;
 pub use battle_rules::{
@@ -46,12 +52,13 @@ pub use error::{DataError, Result};
 pub use files::{DataFiles, MemoryDataFiles};
 pub use growth::{GrowthRate, MAX_LEVEL};
 pub use intern::{Handle, Keyed, Table};
+pub use locale::{ENGINE_LANGUAGE, Localizer, UnknownLanguage};
 pub use move_def::{EffectTarget, MoveCategory, MoveDef, MoveEffect, MoveTargetScope, StatId};
 pub use species::{
     BaseStats, DEFAULT_CATCH_RATE, EvolutionDef, EvolutionTrigger, LearnsetEntry, SpeciesDef,
     SpeciesSprites, check_species_refs,
 };
-pub use text::{TEXT_PREFIX, TextDb, is_text_key};
+pub use text::{TEXT_PREFIX, TextArgs, TextDb, TextLookup, format_text, is_text_key, text_key};
 pub use trainer::{
     AiProfile, AiTier, AiVisibility, AiWeights, BUILTIN_PROFILES, TrainerDef, TrainerMember,
     check_ai_profiles, resolve_ai_profile,

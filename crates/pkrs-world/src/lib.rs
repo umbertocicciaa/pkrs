@@ -6,11 +6,13 @@
 //! - **Port:** [`MapImporter`] loads a map file through the `pkrs-assets` [`Vfs`](pkrs_assets::Vfs).
 //! - **Adapter:** [`TiledImporter`] (feature `tiled`, default) reads `.tmx` + `.tsx` (§6.1).
 //! - **Conventions:** [`conventions`] maps layer names and properties onto the model and reports
-//!   every [`ConventionViolation`] at once, so `pkrs check` can reuse it.
+//!   every [`ConventionViolation`] at once, so `pkrs check` can reuse it; [`diagnostics`] turns
+//!   map errors into located §8.2 diagnostics.
 //! - **Encounters:** [`encounter`] finds the `encounters` rect and table of a tile and rolls
 //!   for a wild encounter after a step.
 
 pub mod conventions;
+pub mod diagnostics;
 pub mod encounter;
 mod error;
 mod importer;

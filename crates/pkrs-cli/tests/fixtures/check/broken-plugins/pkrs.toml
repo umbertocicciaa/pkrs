@@ -1,0 +1,15 @@
+# Broken on purpose: a missing plugin, a broken plugin manifest and a dependency cycle.
+[game]
+name = "Broken Plugins"
+id   = "com.example.broken-plugins"
+
+[engine]
+version = "0.0"
+api     = 1
+
+[start]
+map      = "town"
+position = [0, 0]
+
+[plugins]
+enabled = ["loop-a", "loop-b", "ghost", "bad-manifest"]

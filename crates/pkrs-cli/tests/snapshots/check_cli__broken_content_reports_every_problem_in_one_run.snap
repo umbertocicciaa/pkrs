@@ -1,0 +1,286 @@
+---
+source: crates/pkrs-cli/tests/check_cli.rs
+expression: "transcript(&broken(\"broken-content\"), &[])"
+---
+exit code: 1
+--- stdout
+plugins: none enabled
+--- stderr
+data::duplicate-id
+
+  × duplicate species `emberkit` in `data/species/leafkit.ron` (already defined in `data/species/
+  │ emberkit.ron`)
+    ╭─[data/species/leafkit.ron:13:13]
+ 12 │     Species(
+ 13 │         id: "emberkit",
+    ·             ─────┬────
+    ·                  ╰── defined again here
+ 14 │         types: ["fire"],
+    ╰────
+  help: rename one of them, or add `override: true` to the later record
+
+data::parse
+
+  × Expected comma
+   ╭─[data/moves/broken.ron:3:5]
+ 2 │     id: "ember", type: "fire", category: Special
+ 3 │     power: 40, accuracy: 100, priority: 0, effects: [],
+   ·     ┬
+   ·     ╰── Expected comma
+ 4 │ )
+   ╰────
+
+script::syntax
+
+  × Lua syntax error: unexpected symbol near ')'
+   ╭─[scripts/main.lua:4:1]
+ 3 │     ui.say("text:intro.again")
+ 4 │ end)
+   · ──┬─
+   ·   ╰── unexpected symbol near ')'
+   ╰────
+
+script::unknown-text-key
+
+  ⚠ text key `intro.again` is not defined for the default language `en`
+   ╭─[scripts/main.lua:3:12]
+ 2 │   if game.flag("started") then
+ 3 │     ui.say("text:intro.again")
+   ·            ─────────┬────────
+   ·                     ╰── unknown text key
+ 4 │ end)
+   ╰────
+  help: add `"intro.again": "…"` to a file in data/text/en/
+
+script::tick-listener
+
+  ⚠ `events.on("tick")` runs Lua every tick
+   ╭─[scripts/maps/town.lua:6:11]
+ 5 │ 
+ 6 │ events.on("tick", function()
+   ·           ───┬──
+   ·              ╰── runs 60 times per second
+ 7 │   -- runs every tick
+   ╰────
+  help: prefer `step`, `map_enter` or `time.wait` in a task; tick listeners cost frame time (§9.8)
+
+data::unknown-type
+
+  × species `leafkit` references unknown type `grass`
+   ╭─[data/species/leafkit.ron:5:17]
+ 4 │         name: "text:species.leafkit",
+ 5 │         types: ["grass"],
+   ·                 ───┬───
+   ·                    ╰── no type with this id
+ 6 │         base_stats: (hp: 40, atk: 30, def: 31, spa: 30, spd: 31, spe: 32),
+   ╰────
+  help: types are defined in data/types.ron
+
+data::unknown-move
+
+  × species `leafkit` references unknown move `vine_whip`
+   ╭─[data/species/leafkit.ron:7:66]
+ 6 │         base_stats: (hp: 40, atk: 30, def: 31, spa: 30, spd: 31, spe: 32),
+ 7 │         learnset: [(level: 1, move: "scratch"), (level: 5, move: "vine_whip")],
+   ·                                                                  ─────┬─────
+   ·                                                                       ╰── no move with this id
+ 8 │         evolutions: [(into: "leafcat", trigger: Level(16))],
+   ╰────
+  help: define it in data/moves/
+
+data::unknown-species
+
+  × species `leafkit` references unknown species `leafcat`
+   ╭─[data/species/leafkit.ron:8:29]
+ 7 │         learnset: [(level: 1, move: "scratch"), (level: 5, move: "vine_whip")],
+ 8 │         evolutions: [(into: "leafcat", trigger: Level(16))],
+   ·                             ────┬────
+   ·                                 ╰── no species with this id
+ 9 │         sprites: (front: "sprites/creatures/leafkit.png"),
+   ╰────
+  help: define it in data/species/
+
+data::missing-sprite
+
+  × species `leafkit` uses sprite `sprites/creatures/leafkit.png`, which does not exist
+    ╭─[data/species/leafkit.ron:9:26]
+  8 │         evolutions: [(into: "leafcat", trigger: Level(16))],
+  9 │         sprites: (front: "sprites/creatures/leafkit.png"),
+    ·                          ───────────────┬───────────────
+    ·                                         ╰── file not found
+ 10 │     ),
+    ╰────
+  help: sprite paths are relative to the project (or its assets/ folder)
+
+data::schema
+
+  × move `splash` has 0 PP
+   ╭─[data/moves/moves.ron:8:34]
+ 7 │         id: "splash", type: "water", category: Status,
+ 8 │         power: 0, accuracy: 100, pp: 0, priority: 0, effects: [],
+   ·                                  ─┬
+   ·                                   ╰── must be at least 1
+ 9 │     ),
+   ╰────
+
+data::unknown-type
+
+  × move `splash` references unknown type `water`
+   ╭─[data/moves/moves.ron:7:29]
+ 6 │     Move(
+ 7 │         id: "splash", type: "water", category: Status,
+   ·                             ───┬───
+   ·                                ╰── no type with this id
+ 8 │         power: 0, accuracy: 100, pp: 0, priority: 0, effects: [],
+   ╰────
+  help: types are defined in data/types.ron
+
+data::unknown-species
+
+  × trainer `rival` references unknown species `ghostkit`
+   ╭─[data/trainers/rival.ron:3:23]
+ 2 │     id: "rival",
+ 3 │     party: [(species: "ghostkit", level: 5, moves: ["scratch", "shadow_ball"])],
+   ·                       ─────┬────
+   ·                            ╰── no species with this id
+ 4 │     ai_profile: "profiles/boss",
+   ╰────
+  help: define it in data/species/
+
+data::unknown-move
+
+  × trainer `rival` references unknown move `shadow_ball`
+   ╭─[data/trainers/rival.ron:3:64]
+ 2 │     id: "rival",
+ 3 │     party: [(species: "ghostkit", level: 5, moves: ["scratch", "shadow_ball"])],
+   ·                                                                ──────┬──────
+   ·                                                                      ╰── no move with this id
+ 4 │     ai_profile: "profiles/boss",
+   ╰────
+  help: define it in data/moves/
+
+data::unknown-ai-profile
+
+  × trainer `rival` references unknown ai-profile `profiles/boss`
+   ╭─[data/trainers/rival.ron:4:17]
+ 3 │     party: [(species: "ghostkit", level: 5, moves: ["scratch", "shadow_ball"])],
+ 4 │     ai_profile: "profiles/boss",
+   ·                 ───────┬───────
+   ·                        ╰── no ai-profile with this id
+ 5 │ )
+   ╰────
+  help: use `random`, `basic` or `smart`, or define a profile in data/trainers/profiles/
+
+text::missing-key
+
+  × text key `species.leafkit` is not defined for the default language `en`
+   ╭─[data/species/leafkit.ron:4:15]
+ 3 │         id: "leafkit",
+ 4 │         name: "text:species.leafkit",
+   ·               ───────────┬──────────
+   ·                          ╰── unknown text key
+ 5 │         types: ["grass"],
+   ╰────
+  help: add `"species.leafkit": "…"` to a file in data/text/en/
+
+text::missing-translation
+
+  ⚠ text key `moves.scratch` has no translation for `it`
+   ╭─[data/moves/moves.ron:3:30]
+ 2 │     Move(
+ 3 │         id: "scratch", name: "text:moves.scratch", type: "normal", category: Physical,
+   ·                              ──────────┬─────────
+   ·                                        ╰── untranslated
+ 4 │         power: 40, accuracy: 100, priority: 0, effects: [(effect: "damage")],
+   ╰────
+  help: players of those languages see the `en` text
+
+map::convention
+
+  × layer `floor`: unknown tile layer (expected one of: ground, ground2…, overhead, collision,
+  │ terrain, objects, encounters)
+   ╭─[maps/cellar.tmx:4:16]
+ 3 │  <tileset firstgid="1" source="../tilesets/overworld.tsx"/>
+ 4 │  <layer id="1" name="floor" width="2" height="2">
+   ·                ──────┬─────
+   ·                      ╰── unknown tile layer (expected one of: ground, ground2…, overhead, collision, terrain, objects, encounters)
+ 5 │   <data encoding="csv">
+   ╰────
+  help: layers are ground, ground2…, overhead, collision, terrain, objects and encounters (§6.2)
+
+map::convention
+
+  × map: required layer `ground` is missing
+   ╭─[maps/cellar.tmx:2:1]
+ 1 │ <?xml version="1.0" encoding="UTF-8"?>
+ 2 │ <map version="1.10" tiledversion="1.10.2" orientation="orthogonal" renderorder="right-down" width="2" height="2" tilewidth="16" tileheight="16" infinite="0" nextlayerid="2" nextobjectid="1">
+   · ──┬─
+   ·   ╰── required layer `ground` is missing
+ 3 │  <tileset firstgid="1" source="../tilesets/overworld.tsx"/>
+   ╰────
+  help: layers are ground, ground2…, overhead, collision, terrain, objects and encounters (§6.2)
+
+map::unknown-map
+
+  × warp #1 leads to unknown map `cave`
+    ╭─[maps/town.tmx:15:36]
+ 14 │    <properties>
+ 15 │     <property name="to_map" value="cave"/>
+    ·                                    ──┬─
+    ·                                      ╰── no such map
+ 16 │     <property name="to_x" type="int" value="1"/>
+    ╰────
+  help: maps are the files in maps/ (`maps/<id>.tmx`)
+
+map::unknown-script-function
+
+  × npc `keeper` references `maps/town.lua:keeper`, but `scripts/maps/town.lua` defines no global
+  │ function `keeper`
+    ╭─[maps/town.tmx:22:36]
+ 21 │    <properties>
+ 22 │     <property name="script" value="maps/town.lua:keeper"/>
+    ·                                    ──────────┬─────────
+    ·                                              ╰── function not found
+ 23 │    </properties>
+    ╰────
+  help: define `function keeper(…)` in scripts/maps/town.lua
+
+map::once-trigger-without-state
+
+  ⚠ trigger `intro` is `once`, but `intro` in `scripts/maps/town.lua` never sets a flag or
+  │ variable
+    ╭─[maps/town.tmx:28:46]
+ 27 │     <property name="on_enter" value="intro"/>
+ 28 │     <property name="once" type="bool" value="true"/>
+    ·                                              ──┬─
+    ·                                                ╰── fires once per save
+ 29 │    </properties>
+    ╰────
+  help: record the story progress with `game.set_flag`, `game.set_var` or `map.set_var` (§6.5)
+
+text::missing-key
+
+  × text key `sign.missing` is not defined for the default language `en`
+    ╭─[maps/town.tmx:33:34]
+ 32 │    <properties>
+ 33 │     <property name="text" value="text:sign.missing"/>
+    ·                                  ────────┬────────
+    ·                                          ╰── unknown text key
+ 34 │    </properties>
+    ╰────
+  help: add `"sign.missing": "…"` to a file in data/text/en/
+
+map::unknown-item
+
+  × item #5 gives unknown item `potion`
+    ╭─[maps/town.tmx:38:34]
+ 37 │    <properties>
+ 38 │     <property name="item" value="potion"/>
+    ·                                  ───┬──
+    ·                                     ╰── no item with this id
+ 39 │    </properties>
+    ╰────
+  help: define it in data/items/
+
+19 errors, 4 warnings
+check failed: errors found

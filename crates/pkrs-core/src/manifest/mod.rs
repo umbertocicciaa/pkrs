@@ -13,6 +13,7 @@
 //! needs just `[game]` (`name`, `id`), `[engine]` (`version`, `api`) and `[start]` (`map`,
 //! `position`); everything else has defaults.
 
+pub mod diagnostic;
 mod error;
 mod plugin;
 mod raw;

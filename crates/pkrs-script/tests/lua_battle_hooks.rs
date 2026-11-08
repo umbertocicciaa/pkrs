@@ -12,6 +12,7 @@ use pkrs_battle::{
     NullBattleHooks, RngPolicy, SideId, SideInput, SlotRef, battle_testkit,
 };
 use pkrs_core::Pcg64Rng;
+use pkrs_data::TextArgs;
 use pkrs_script::{
     BattleRequest, LuaScriptHost, MemoryScripts, ScriptHost, ScriptLimits, ScriptOwner,
     ScriptValue, TaskStatus, WaitRequest, battle_result_value,
@@ -99,9 +100,7 @@ fn fixture_modifies_damage_and_cancels_a_move() {
         move_id: "tackle".into(),
         reason: Some("text:fixture.flinch".into()),
     }));
-    assert!(events.contains(&BattleEvent::Message {
-        key: "text:fixture.turn_1".into()
-    }));
+    assert!(events.contains(&BattleEvent::message("text:fixture.turn_1")));
     assert_eq!(result.money, 77);
     assert_eq!(result.outcome, BattleOutcome::PlayerWin);
 
@@ -394,6 +393,7 @@ fn resonance_plugin_runs_on_the_battle_api() {
         },
         BattleEvent::Message {
             key: "text:resonance.start".into(),
+            args: TextArgs::new().with("name", "hero"),
         },
         BattleEvent::Fx {
             side: SideId::Player,

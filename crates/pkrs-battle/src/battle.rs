@@ -433,7 +433,7 @@ impl Battle {
                         value,
                     });
                 }
-                HookCommand::Message(key) => out.push(BattleEvent::Message { key }),
+                HookCommand::Message(key, args) => out.push(BattleEvent::Message { key, args }),
                 HookCommand::Fx(slot, id) => {
                     if self.side(slot.side).creature(slot.slot).is_none() {
                         continue;
@@ -665,9 +665,7 @@ impl Battle {
                 self.perform_switch(action.side, action.slot, to_party, false, hooks, out)?;
             }
             BattleAction::Item { item_id, .. } => {
-                out.push(BattleEvent::Message {
-                    key: format!("item_used:{item_id}"),
-                });
+                out.push(BattleEvent::message(format!("item_used:{item_id}")));
             }
             BattleAction::Custom { id, payload } => {
                 let mut custom = CustomAction {

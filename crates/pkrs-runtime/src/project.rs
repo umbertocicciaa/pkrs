@@ -25,6 +25,7 @@ use pkrs_world::{
 };
 
 use crate::battle::{BattleContent, BattleScreen, PostBattle};
+use crate::encounters::{Encounters, wild_battle_request};
 use crate::main_loop::SimulationHost;
 use crate::overworld::{EntityKind, OverworldScripts, ScreenFade, ScriptOverlay};
 use crate::party::PlayerParty;
@@ -346,8 +347,9 @@ pub struct ProjectHost {
     crossing: Option<CrossingContext>,
     neighbors: Vec<NeighborCache>,
     active_textures: Vec<TextureHandle>,
-    /// The running battle and the script task waiting on it (§7.2).
-    battle: Option<(TaskId, BattleScreen)>,
+    /// The running battle and the script task waiting on it (§7.2); no task for a wild
+    /// encounter started by a step.
+    battle: Option<(Option<TaskId>, BattleScreen)>,
     /// Battle data, loaded on the first battle.
     battle_content: Option<BattleContent>,
     /// Stream battle RNG policies derive from (`RngPolicy::Local`, §7.2).
@@ -360,6 +362,8 @@ pub struct ProjectHost {
     /// After a won battle: exp, level ups, moves and evolutions, with the battle's result
     /// (the finished screen stays in `battle` behind it).
     post_battle: Option<(BattleResult, PostBattle)>,
+    /// Wild encounter tables and roll stream (§6.3).
+    encounters: Encounters,
 }
 
 /// Seed of the stream battles derive their RNG from until the save owns the game RNG (§12).
@@ -452,6 +456,7 @@ impl ProjectHost {
             battle_texts: 0,
             party: None,
             post_battle: None,
+            encounters: Encounters::default(),
         };
         host.bootstrap_world_layout()?;
         if let Some(scripts) = host.scripts.as_mut() {
@@ -503,6 +508,11 @@ impl ProjectHost {
     /// Reseeds the stream battle RNGs derive from (scenario runs pin it, §15.2).
     pub fn set_battle_seed(&mut self, seed: u64) {
         self.battle_rng = Pcg64Rng::from_seed(seed);
+    }
+
+    /// Reseeds the stream wild encounter rolls draw from (scenario runs pin it, §15.2).
+    pub fn set_encounter_seed(&mut self, seed: u64) {
+        self.encounters.set_seed(seed);
     }
 
     /// `true` while a warp fade is running (for integration tests).
@@ -988,7 +998,7 @@ impl ProjectHost {
         match self.open_battle(&request) {
             Ok(screen) => {
                 tracing::info!(target: "battle", ?request, task, "battle started");
-                self.battle = Some((task, screen));
+                self.battle = Some((Some(task), screen));
             }
             Err(err) => {
                 tracing::error!(target: "battle", ?request, "battle cannot start: {err}");
@@ -1000,6 +1010,7 @@ impl ProjectHost {
     }
 
     fn open_battle(&mut self, request: &BattleRequest) -> Result<BattleScreen, String> {
+        self.ensure_battle_content()?;
         let theme = self
             .ui_theme
             .clone()
@@ -1008,14 +1019,6 @@ impl ProjectHost {
             .scripts
             .as_ref()
             .ok_or_else(|| "scripting is disabled".to_owned())?;
-        if self.battle_content.is_none() {
-            let mut content = BattleContent::load(&self.project.vfs).map_err(|e| e.to_string())?;
-            scripts.host().with_content(|db| content.merge_moves(db));
-            for err in content.check_species() {
-                tracing::warn!(target: "battle", "species data: {err}");
-            }
-            self.battle_content = Some(content);
-        }
         let content = self
             .battle_content
             .as_ref()
@@ -1043,6 +1046,61 @@ impl ProjectHost {
             scripts.host(),
         )
         .map_err(|e| e.to_string())
+    }
+
+    /// The project's battle content, loaded (and merged with the plugins' moves) on first use.
+    fn ensure_battle_content(&mut self) -> Result<(), String> {
+        if self.battle_content.is_none() {
+            let mut content = BattleContent::load(&self.project.vfs).map_err(|e| e.to_string())?;
+            if let Some(scripts) = self.scripts.as_ref() {
+                scripts.host().with_content(|db| content.merge_moves(db));
+            }
+            for err in content.check_species() {
+                tracing::warn!(target: "battle", "species data: {err}");
+            }
+            self.battle_content = Some(content);
+        }
+        Ok(())
+    }
+
+    /// Rolls for a wild encounter after the player completed a step onto `pos` (§6.3) and
+    /// starts the wild battle on a hit, through the same path as `battle.start_wild`.
+    /// Returns `true` when a battle started. Needs scripting (the battle UI and hooks live in
+    /// the script host); no roll while a script holds the player or a dialogue is open.
+    fn roll_wild_encounter(&mut self, pos: GridPos) -> bool {
+        let Some(scripts) = self.scripts.as_ref() else {
+            return false;
+        };
+        if self.battle.is_some() || self.overlay.is_some() || scripts.player_locked() {
+            return false;
+        }
+        if self.encounters.needs_tables(self.scene.map(), pos) {
+            if let Err(err) = self.ensure_battle_content() {
+                tracing::error!(target: "encounter", "encounters disabled: no battle content: {err}");
+                self.encounters.disable();
+                return false;
+            }
+            if let Some(content) = self.battle_content.as_ref() {
+                let species = &content.pack().species;
+                self.encounters
+                    .ensure_loaded(&self.project.vfs, |id| species.contains_key(id));
+            }
+        }
+        let Some(encounter) = self.encounters.on_step(self.scene.map(), pos) else {
+            return false;
+        };
+        let request = wild_battle_request(&encounter);
+        match self.open_battle(&request) {
+            Ok(screen) => {
+                tracing::info!(target: "encounter", ?encounter, "wild encounter");
+                self.battle = Some((None, screen));
+                true
+            }
+            Err(err) => {
+                tracing::error!(target: "encounter", ?encounter, "wild battle cannot start: {err}");
+                false
+            }
+        }
     }
 
     /// Runs the battle for one tick; `true` while a battle is running (the overworld does
@@ -1109,7 +1167,8 @@ impl ProjectHost {
             return;
         };
         self.battle_texts = self.battle_texts.saturating_add(screen.texts_shown());
-        if let Some(scripts) = self.scripts.as_mut() {
+        // Only a script-started battle has a task waiting on it; step encounters have none.
+        if let (Some(task), Some(scripts)) = (task, self.scripts.as_mut()) {
             scripts.finish_battle(task, battle_result_value(result));
         }
     }
@@ -1218,6 +1277,12 @@ impl ProjectHost {
                     let warp = self.scene.map().warp_at(pos).cloned();
                     if let Some(warp) = warp {
                         self.begin_warp(&warp);
+                        return;
+                    }
+                    if self.roll_wild_encounter(pos) {
+                        if let Some(scripts) = self.scripts.as_mut() {
+                            scripts.sync_player(pos, facing);
+                        }
                         return;
                     }
                 }

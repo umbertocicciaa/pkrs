@@ -261,6 +261,61 @@ fn tick_limit_and_load_errors_fail() {
     assert!(matches!(&report.outcome, ScenarioOutcome::Failed(f) if f.check == "load"));
 }
 
+fn grass_route() -> PathBuf {
+    fixture_root().join("grass-route")
+}
+
+#[test]
+fn acceptance_wild_encounter_flee_and_back_to_overworld() {
+    let dir = grass_route();
+    let run = || {
+        run_scenario(
+            &open(&dir),
+            &dir.join("tests/wild_encounter.lua"),
+            "tests/wild_encounter.lua",
+            &ScenarioOptions::default(),
+        )
+        .unwrap()
+    };
+    let (a, b) = (run(), run());
+    assert!(a.passed(), "{a}");
+    assert_eq!(a, b, "encounter scenarios replay identically");
+}
+
+#[test]
+fn the_step_that_starts_an_encounter_depends_only_on_the_seed() {
+    // Pace in the grass until a battle starts, then fail on purpose: the failure reports
+    // the tick, which pins the step the encounter happened on.
+    let source = r#"
+        walk("up", 3)
+        local dir = "left"
+        while state() ~= "Battle" do
+          walk(dir)
+          local x = player()
+          if x <= 3 then dir = "right" elseif x >= 8 then dir = "left" end
+        end
+        local x = player()
+        fail("encounter at x = " .. x)
+    "#;
+    let ticks = |seed| {
+        let options = ScenarioOptions {
+            seed,
+            ..ScenarioOptions::default()
+        };
+        let report =
+            run_scenario_source(&open(&grass_route()), "tests/x.lua", source, &options).unwrap();
+        let failure = report.failure().expect("the scenario fails on purpose");
+        assert_eq!(failure.check, "fail", "{report}");
+        (failure.tick, failure.to_string())
+    };
+    assert_eq!(ticks(1), ticks(1));
+    let seeds: Vec<_> = (1..=4).map(ticks).collect();
+    assert!(
+        seeds.iter().any(|t| t.0 != seeds[0].0),
+        "different seeds should meet the first creature on different steps: {seeds:?}"
+    );
+}
+
 #[test]
 fn walking_into_a_wall_fails_walk_with_positions() {
     // The guide stands at (5, 4): walking up three tiles stops at (5, 5).

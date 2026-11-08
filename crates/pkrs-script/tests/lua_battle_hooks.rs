@@ -7,9 +7,9 @@
 use std::path::Path;
 
 use pkrs_battle::{
-    Battle, BattleAction, BattleConfig, BattleEvent, BattleHooks, BattleInput, BattleOutcome,
-    BattlePhase, BattleResult, BattleValue, NullBattleHooks, RngPolicy, SideId, SideInput, SlotRef,
-    battle_testkit,
+    Battle, BattleAction, BattleConfig, BattleCreature, BattleEvent, BattleHooks, BattleInput,
+    BattleOutcome, BattlePhase, BattleResult, BattleSetup, BattleSideSetup, BattleValue,
+    NullBattleHooks, RngPolicy, SideId, SideInput, SlotRef, battle_testkit,
 };
 use pkrs_core::Pcg64Rng;
 use pkrs_script::{
@@ -395,8 +395,10 @@ fn resonance_plugin_runs_on_the_battle_api() {
         BattleEvent::Message {
             key: "text:resonance.start".into(),
         },
-        BattleEvent::Message {
-            key: "fx:resonance:aura".into(),
+        BattleEvent::Fx {
+            side: SideId::Player,
+            slot: 0,
+            id: Some("resonance:aura".into()),
         },
         BattleEvent::CustomActionUsed {
             side: SideId::Player,
@@ -439,4 +441,234 @@ fn resonance_plugin_runs_on_the_battle_api() {
             ..
         }
     )));
+}
+
+#[test]
+fn resonance_plugin_clears_its_aura_when_the_volatile_ends() {
+    let h = {
+        let mut h = host();
+        h.run_source(
+            &ScriptOwner::plugin("resonance"),
+            "plugins/resonance/init.lua",
+            RESONANCE,
+        )
+        .unwrap();
+        h
+    };
+    // Sturdy creatures so the volatile runs out before the battle ends.
+    let mut setup = battle_testkit::wild_1v1();
+    setup.opponent.party[0].stats.max_hp = 500;
+    setup.player.party[0].stats.max_hp = 500;
+    let resources = battle_testkit::default_resources();
+    let mut hooks = h.battle_hooks().with_moves(&resources.pack);
+    let mut battle = Battle::new(
+        setup,
+        config(),
+        battle_testkit::default_resources(),
+        RngPolicy::Fixed { seed: 11 },
+        &mut hooks,
+    )
+    .unwrap();
+    let mut events = battle.step(BattleInput::default(), &mut hooks).unwrap();
+    let resonate = BattleAction::Custom {
+        id: "resonance:resonate".into(),
+        payload: vec![],
+    };
+    events.extend(battle.step(turn_with(resonate), &mut hooks).unwrap());
+    for _ in 0..3 {
+        events.extend(battle.step(tackle_turn(), &mut hooks).unwrap());
+    }
+    let fx: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, BattleEvent::Fx { .. }))
+        .cloned()
+        .collect();
+    assert_eq!(
+        fx,
+        [
+            BattleEvent::Fx {
+                side: SideId::Player,
+                slot: 0,
+                id: Some("resonance:aura".into()),
+            },
+            BattleEvent::Fx {
+                side: SideId::Player,
+                slot: 0,
+                id: None,
+            },
+        ]
+    );
+    // The clear follows the volatile removal and the end text, in the same hook.
+    let cleared = events
+        .iter()
+        .position(|e| {
+            matches!(e, BattleEvent::VolatileChanged { key, value: None, .. } if key == "resonating")
+        })
+        .expect("resonating cleared");
+    assert!(
+        matches!(
+            &events[cleared + 1..],
+            [
+                BattleEvent::Message { .. },
+                BattleEvent::Fx { id: None, .. },
+                ..
+            ]
+        ),
+        "{:#?}",
+        &events[cleared..]
+    );
+}
+
+fn doubles_creature(name: &str) -> BattleCreature {
+    let mut c = battle_testkit::wild_1v1().player.party[0].clone();
+    c.nickname = name.into();
+    c.stats.max_hp = 500;
+    c
+}
+
+fn doubles_setup() -> BattleSetup {
+    BattleSetup {
+        player: BattleSideSetup {
+            name: "P".into(),
+            party: vec![doubles_creature("pa"), doubles_creature("pb")],
+            leading: vec![Some(0), Some(1)],
+        },
+        opponent: BattleSideSetup {
+            name: "O".into(),
+            party: vec![doubles_creature("oa"), doubles_creature("ob")],
+            leading: vec![Some(0), Some(1)],
+        },
+    }
+}
+
+#[test]
+fn play_fx_and_clear_fx_target_the_creatures_side_and_slot() {
+    let h = host_with(
+        "battle.on('on_pre_turn', function(ctx)
+           ctx.play_fx('test:glow', ctx.creature('opponent', 1))
+           ctx:play_fx('test:spark', ctx.creature('player', 0))
+         end)
+         battle.on('on_end_of_turn', function(ctx)
+           ctx:clear_fx(ctx.creature('opponent', 1))
+         end)",
+    );
+    let resources = battle_testkit::default_resources();
+    let mut hooks = h.battle_hooks().with_moves(&resources.pack);
+    let mut battle = Battle::new(
+        doubles_setup(),
+        BattleConfig {
+            trace_hooks: false,
+            ..BattleConfig::with_side_size(2)
+        },
+        battle_testkit::default_resources(),
+        RngPolicy::Fixed { seed: 11 },
+        &mut hooks,
+    )
+    .unwrap();
+    battle.step(BattleInput::default(), &mut hooks).unwrap();
+    let side = |target_side| SideInput {
+        slots: vec![
+            BattleAction::Fight {
+                move_slot: 0,
+                target_side,
+                target_slot: 0,
+            };
+            2
+        ],
+    };
+    let events = battle
+        .step(
+            BattleInput::both(side(SideId::Opponent), side(SideId::Player)),
+            &mut hooks,
+        )
+        .unwrap();
+    let fx: Vec<_> = events
+        .iter()
+        .take_while(|e| !matches!(e, BattleEvent::TurnEnded { .. }))
+        .filter(|e| matches!(e, BattleEvent::Fx { .. }))
+        .cloned()
+        .collect();
+    assert_eq!(
+        fx,
+        [
+            BattleEvent::Fx {
+                side: SideId::Opponent,
+                slot: 1,
+                id: Some("test:glow".into()),
+            },
+            BattleEvent::Fx {
+                side: SideId::Player,
+                slot: 0,
+                id: Some("test:spark".into()),
+            },
+            BattleEvent::Fx {
+                side: SideId::Opponent,
+                slot: 1,
+                id: None,
+            },
+        ]
+    );
+}
+
+#[test]
+fn play_fx_and_clear_fx_reject_bad_arguments() {
+    let mut h = host_with(
+        "errs = {}
+         local function err(f, ...)
+           local ok, e = pcall(f, ...)
+           if ok then return 'no error' end
+           return tostring(e)
+         end
+         battle.on('on_battle_start', function(ctx)
+           local foe = ctx.creature('opponent', 0)
+           errs.no_id = err(ctx.play_fx, nil, foe)
+           errs.empty_id = err(ctx.play_fx, '', foe)
+           errs.no_creature = err(ctx.play_fx, 'test:glow')
+           errs.bad_creature = err(ctx.play_fx, 'test:glow', { side = 'left', slot = 0 })
+           errs.clear_number = err(ctx.clear_fx, 42)
+           errs.clear_bad_slot = err(ctx.clear_fx, { side = 'opponent', slot = -1 })
+         end)",
+    );
+    let events = {
+        let mut hooks = h.battle_hooks();
+        run_battle(&mut hooks).0
+    };
+    assert!(
+        !events.iter().any(|e| matches!(e, BattleEvent::Fx { .. })),
+        "failed calls emit nothing"
+    );
+    let ScriptValue::Map(errs) = h.global(&ScriptOwner::Game, "errs").unwrap() else {
+        panic!("errs is not a table");
+    };
+    for (key, needle) in [
+        (
+            "no_id",
+            "ctx.play_fx(id, creature) needs a non-empty string id",
+        ),
+        (
+            "empty_id",
+            "ctx.play_fx(id, creature) needs a non-empty string id",
+        ),
+        (
+            "no_creature",
+            "ctx.play_fx(id, creature): expected a creature table, got nil",
+        ),
+        (
+            "bad_creature",
+            "ctx.play_fx(id, creature): unknown side 'left'",
+        ),
+        (
+            "clear_number",
+            "ctx.clear_fx(creature): expected a creature table, got integer",
+        ),
+        (
+            "clear_bad_slot",
+            "ctx.clear_fx(creature): slot out of range",
+        ),
+    ] {
+        let Some(ScriptValue::String(value)) = errs.get(key) else {
+            panic!("{key}: {:?}", errs.get(key));
+        };
+        assert!(value.contains(needle), "{key}: {value}");
+    }
 }

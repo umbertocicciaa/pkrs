@@ -305,6 +305,12 @@ impl BattleScreen {
         }
     }
 
+    /// FX asset id currently shown on `slot` of `side` (`BattleEvent::Fx`, §9.5).
+    #[must_use]
+    pub fn slot_fx(&self, side: SideId, slot: SlotIndex) -> Option<&str> {
+        self.slot_fx[side_index(side)][usize::from(slot.min(1))].as_deref()
+    }
+
     /// Battle messages shown so far.
     #[must_use]
     pub fn texts_shown(&self) -> u64 {
@@ -836,6 +842,8 @@ impl BattleScreen {
         match *cue {
             Cue::Faint { side, slot } | Cue::SwitchOut { side, slot } => {
                 self.sprites[side_index(side)][usize::from(slot.min(1))].visible = false;
+                // An FX belongs to the creature, not the slot: it leaves with it.
+                self.set_slot_fx(side, slot, None);
             }
             _ => {}
         }

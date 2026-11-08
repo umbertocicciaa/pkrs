@@ -29,10 +29,16 @@ enabled = ["resonance"]
    text, and calls `ctx.play_fx("resonance:aura", mon)`.
 3. **`on_damage_calc`** (priority 10) — multiplies damage by 1.5× when the user is resonating
    and the move matches their primary type.
-4. **`on_end_of_turn`** — counts down `resonating` and clears it with end text.
+4. **`on_end_of_turn`** — counts down `resonating`; when it runs out, clears the volatile,
+   shows end text and calls `ctx.clear_fx(mon)` to remove the aura.
 
-The battle UI turns `ctx.play_fx` into a `Message { key: "fx:…" }` event, which the runtime
-maps to an instant **`Cue::Fx`** (a visible aura on the lead sprite until the volatile ends).
+`ctx.play_fx(id, creature)` logs a **`BattleEvent::Fx { side, slot, id: Some(id) }`** for that
+creature's own side and slot, and `ctx.clear_fx(creature)` logs the same event with `id: None`.
+The battle UI maps each one to an instant **`Cue::Fx`**: the aura stays on that creature's
+sprite until the plugin clears it (or the creature faints or is withdrawn). The engine does not
+know which status an effect belongs to, so a plugin that shows an FX for a timed state clears
+it itself when that state ends, as Resonance does in `on_end_of_turn`. Both calls raise a Lua
+error for a missing or empty id or an argument that is not a creature table.
 
 ## Try it headless
 
@@ -47,6 +53,7 @@ cargo run -p pkrs-cli -- run --headless \
 | Layer | Test |
 |-------|------|
 | Lua API | `pkrs-script` `resonance_plugin_runs_on_the_battle_api` |
+| Aura cleared by the plugin | `pkrs-script` `resonance_plugin_clears_its_aura_when_the_volatile_ends` |
 | Event log snapshot | `pkrs-script` `resonance_battle_replay_snapshot` |
 | Headless scenario | `resonance-town/tests/resonance_battle.lua` via `scenarios.rs` |
 

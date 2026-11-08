@@ -783,3 +783,49 @@ fn hook_errors_abort_the_step() {
     let mut b = start(&mut h);
     assert!(b.step(tackle_turn(), &mut h).is_err());
 }
+
+/// Shows an FX on the opponent before the turn's actions and clears it at end of turn; also targets an
+/// empty slot, which must be ignored.
+struct OpponentFx;
+
+impl BattleHooks for OpponentFx {
+    fn on_pre_turn(&mut self, ctx: &mut BattleHookCtx<'_>) -> Result<()> {
+        ctx.play_fx(O, "test:glow");
+        ctx.play_fx(SlotRef::new(SideId::Opponent, 1), "test:nobody");
+        Ok(())
+    }
+
+    fn on_end_of_turn(&mut self, ctx: &mut BattleHookCtx<'_>) -> Result<()> {
+        ctx.clear_fx(O);
+        Ok(())
+    }
+}
+
+#[test]
+fn hook_fx_commands_become_fx_events_for_active_slots_only() {
+    let mut h = OpponentFx;
+    let mut b = start(&mut h);
+    let events = b.step(tackle_turn(), &mut h).unwrap();
+    // The step also starts the next turn; look at the first turn only.
+    let fx: Vec<_> = events
+        .iter()
+        .take_while(|e| !matches!(e, BattleEvent::TurnEnded { .. }))
+        .filter(|e| matches!(e, BattleEvent::Fx { .. }))
+        .cloned()
+        .collect();
+    assert_eq!(
+        fx,
+        [
+            BattleEvent::Fx {
+                side: SideId::Opponent,
+                slot: 0,
+                id: Some("test:glow".into()),
+            },
+            BattleEvent::Fx {
+                side: SideId::Opponent,
+                slot: 0,
+                id: None,
+            },
+        ]
+    );
+}

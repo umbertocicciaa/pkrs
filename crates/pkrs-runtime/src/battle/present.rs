@@ -51,13 +51,14 @@ pub enum Cue {
         /// Party member sent out.
         party: PartyIndex,
     },
-    /// Show or clear a battle FX on a creature (`ctx.play_fx`, §9.5).
+    /// Show or clear a battle FX on a creature (`BattleEvent::Fx` from `ctx.play_fx` /
+    /// `ctx.clear_fx`, §9.5).
     Fx {
         /// Side.
         side: SideId,
         /// Active slot.
         slot: SlotIndex,
-        /// Asset id (`resonance:aura`, …); `None` clears the effect on this slot.
+        /// FX asset id (`plugin:asset`); `None` clears the effect on this slot.
         id: Option<String>,
     },
 }
@@ -269,22 +270,11 @@ impl Presenter {
                 target_side,
                 target_slot,
                 volatile,
-            } => {
-                let mut cues = Vec::new();
-                if volatile == "resonating" {
-                    cues.push(Cue::Fx {
-                        side: *target_side,
-                        slot: *target_slot,
-                        id: None,
-                    });
-                }
-                cues.push(Cue::Text(format!(
-                    "{}'s {} ended.",
-                    self.name(*target_side, *target_slot),
-                    display_name(volatile).to_lowercase()
-                )));
-                cues
-            }
+            } => vec![Cue::Text(format!(
+                "{}'s {} ended.",
+                self.name(*target_side, *target_slot),
+                display_name(volatile).to_lowercase()
+            ))],
             BattleEvent::WeatherSet { weather } => vec![Cue::Text(format!(
                 "The weather turned to {}.",
                 display_name(weather).to_lowercase()
@@ -312,17 +302,12 @@ impl Presenter {
                     self.name(SideId::Opponent, 0)
                 ))],
             },
-            BattleEvent::Message { key } => {
-                if let Some(id) = key.strip_prefix("fx:") {
-                    vec![Cue::Fx {
-                        side: SideId::Player,
-                        slot: 0,
-                        id: Some(id.to_owned()),
-                    }]
-                } else {
-                    vec![Cue::Text(message_text(key))]
-                }
-            }
+            BattleEvent::Message { key } => vec![Cue::Text(message_text(key))],
+            BattleEvent::Fx { side, slot, id } => vec![Cue::Fx {
+                side: *side,
+                slot: *slot,
+                id: id.clone(),
+            }],
             BattleEvent::BattleEnded { outcome } => self.ended(*outcome),
             BattleEvent::MoveCancelled {
                 user_side,
@@ -725,18 +710,49 @@ mod tests {
     }
 
     #[test]
-    fn fx_message_maps_to_fx_cue() {
-        let cues = trainer().present(&BattleEvent::Message {
-            key: "fx:resonance:aura".into(),
+    fn fx_events_map_to_fx_cues_on_their_own_slot() {
+        let mut p = trainer();
+        let show = p.present(&BattleEvent::Fx {
+            side: SideId::Opponent,
+            slot: 1,
+            id: Some("test:glow".into()),
         });
         assert_eq!(
-            cues,
+            show,
             vec![Cue::Fx {
-                side: SideId::Player,
-                slot: 0,
-                id: Some("resonance:aura".into()),
+                side: SideId::Opponent,
+                slot: 1,
+                id: Some("test:glow".into()),
             }]
         );
+        let clear = p.present(&BattleEvent::Fx {
+            side: SideId::Opponent,
+            slot: 1,
+            id: None,
+        });
+        assert_eq!(
+            clear,
+            vec![Cue::Fx {
+                side: SideId::Opponent,
+                slot: 1,
+                id: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn fx_like_messages_and_ended_volatiles_are_plain_text() {
+        let mut p = trainer();
+        let cues = p.present(&BattleEvent::Message {
+            key: "fx:test:glow".into(),
+        });
+        assert!(matches!(cues.as_slice(), [Cue::Text(_)]), "{cues:?}");
+        let cues = p.present(&BattleEvent::VolatileEnded {
+            target_side: SideId::Player,
+            target_slot: 0,
+            volatile: "glowing".into(),
+        });
+        assert!(matches!(cues.as_slice(), [Cue::Text(_)]), "{cues:?}");
     }
 
     #[test]

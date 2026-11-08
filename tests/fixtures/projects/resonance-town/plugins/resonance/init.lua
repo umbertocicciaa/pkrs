@@ -16,7 +16,7 @@ battle.on("on_custom_action", function(ctx, id, payload)
   ctx.set_side_state(mon.side, "resonance_used", true)
   ctx.set_volatile(mon, "resonating", { turns = DURATION })
   ctx.message("text:resonance.start", { name = mon.name })
-  ctx.play_fx("resonance:aura", mon)
+  ctx.play_fx("resonance:aura", mon)            -- shown on this creature until cleared
 end)
 
 battle.on("on_damage_calc", function(ctx, user, move, target, dmg)
@@ -35,6 +35,7 @@ battle.on("on_end_of_turn", function(ctx)
       if r.turns <= 0 then
         ctx.clear_volatile(mon, "resonating")
         ctx.message("text:resonance.end", { name = mon.name })
+        ctx.clear_fx(mon)
       else
         ctx.set_volatile(mon, "resonating", r)
       end

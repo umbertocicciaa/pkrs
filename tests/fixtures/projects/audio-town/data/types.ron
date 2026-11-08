@@ -1,0 +1,7 @@
+(
+    types: ["normal", "fire", "grass"],
+    chart: {
+        ("fire", "grass"): 2.0,
+        ("grass", "fire"): 0.5,
+    },
+)

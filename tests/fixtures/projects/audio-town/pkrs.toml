@@ -1,0 +1,26 @@
+# Fixture for the audio facade (design §11, §15.2): a town, a house with other music and a
+# yard with the same music, joined by warps, and a rival who starts a trainer battle.
+# `audio/bgm/index.ron` is the audio manifest; there are no sound files, since headless runs
+# play through NullAudio, which only records the commands (`audio_log()` in scenarios).
+[game]
+name    = "Audio Town"
+id      = "com.example.audio-town"
+version = "0.1.0"
+
+[engine]
+version = "0.0"
+api     = 1
+
+[display]
+width  = 240
+height = 160
+scale  = 3
+
+[start]
+map      = "town"
+position = [5, 7]
+facing   = "up"
+
+[features]
+battles = true
+party   = true

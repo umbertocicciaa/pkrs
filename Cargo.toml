@@ -40,12 +40,15 @@ ron = "0.8"
 
 # Wrapped vendor crates (§4.5): each may only be used by its owning crate
 # (enforced by deny.toml [bans] wrappers).
-macroquad = "0.4"
+# `audio` (quad-snd) stays off: audio goes through pkrs-audio (kira adapter, §11).
+macroquad = { version = "0.4", default-features = false }
 directories = "6"
 # Lua 5.4 compiled from vendored C sources (no system Lua, §0.4). 0.11 keeps MSRV 1.85.
 mlua = { version = "0.11.6", features = ["lua54", "vendored"] }
 # `zstd` (default) compiles C code; v1 maps use CSV/base64(+zlib/gzip) layer data only.
 tiled = { version = "0.16", default-features = false }
+# OGG/Vorbis + WAV (PCM) through symphonia, output through cpal (no realtime/D-Bus extras).
+kira = { version = "0.12", default-features = false, features = ["cpal", "ogg", "vorbis", "wav", "pcm"] }
 
 # Binaries only (not wrapped, §4.5): CLI parsing and embedded templates.
 clap = { version = "4", features = ["derive"] }

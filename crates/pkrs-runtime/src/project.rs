@@ -35,6 +35,7 @@ use crate::party::PlayerParty;
 use crate::scene::{MapScene, NeighborBackdrop, PLAYER_ENTITY, tile_sheet};
 use crate::ui_theme::UiTheme;
 
+mod audio;
 mod save;
 mod session;
 
@@ -392,6 +393,8 @@ pub struct ProjectHost {
     /// scripting is on ([`localizer`](Self::localizer)).
     localizer: Localizer,
     game_started: bool,
+    /// Music and sounds (§11).
+    audio: audio::ProjectAudio,
 }
 
 /// Seed of the stream battles derive their RNG from until the save owns the game RNG (§12).
@@ -529,7 +532,9 @@ impl ProjectHost {
                 &text_plugins(project),
             ),
             game_started: false,
+            audio: audio::ProjectAudio::for_project(project),
         };
+        host.audio.enter_map(host.scene.map());
         if let Some(scripts) = host.scripts.as_ref() {
             scripts.world().get_mut().localizer = host.localizer.clone();
         }
@@ -738,6 +743,7 @@ impl ProjectHost {
         self.walker = GridStepper::new(to, facing);
         self.player_tile = to;
         tracing::info!(map = %self.scene.map().id, pos = %to, "map_enter (warp)");
+        self.audio.enter_map(self.scene.map());
         if let Some(scripts) = self.scripts.as_mut() {
             scripts.enter_map(self.scene.map(), to, facing);
         }
@@ -905,6 +911,7 @@ impl ProjectHost {
         self.walker.relocate(entry);
         self.player_tile = entry;
         tracing::info!(map = %self.scene.map().id, pos = %entry, "map_enter (seamless)");
+        self.audio.enter_map(self.scene.map());
         if let Some(scripts) = self.scripts.as_mut() {
             scripts.enter_map(self.scene.map(), entry, facing);
         }
@@ -1079,6 +1086,9 @@ impl ProjectHost {
                 }
             }
         }
+        for request in scripts.take_audio_requests() {
+            self.audio.request(request);
+        }
         if let Some(dir) = scripts.take_player_face() {
             self.walker.face(dir);
         }
@@ -1129,6 +1139,7 @@ impl ProjectHost {
         match self.open_battle(&request) {
             Ok(screen) => {
                 tracing::info!(target: "battle", ?request, task, "battle started");
+                self.audio.start_battle(&request);
                 self.battle = Some((Some(task), screen));
             }
             Err(err) => {
@@ -1279,6 +1290,7 @@ impl ProjectHost {
         match self.open_battle(&request) {
             Ok(screen) => {
                 tracing::info!(target: "encounter", ?encounter, "wild encounter");
+                self.audio.start_battle(&request);
                 self.battle = Some((None, screen));
                 true
             }
@@ -1306,6 +1318,7 @@ impl ProjectHost {
         };
         if let Some(result) = result {
             tracing::info!(target: "battle", ?result, "battle ended");
+            self.audio.end_battle(&result);
             match self.begin_post_battle(&result) {
                 Some(flow) => self.post_battle = Some((result, flow)),
                 None => self.end_battle(&result),
@@ -1619,6 +1632,7 @@ fn marker_sprite(
 impl SimulationHost for ProjectHost {
     fn poll_input(&mut self, platform: &Platform) {
         self.input.poll(platform);
+        self.audio.set_focus(platform.is_focused());
     }
 
     fn begin_tick(&mut self) {
@@ -1661,6 +1675,9 @@ impl SimulationHost for ProjectHost {
         self.sync_npc_sprites();
         self.fade.tick();
         self.scene.tick();
+
+        // §3.3 step 6: audio commands to the backend.
+        self.audio.flush();
     }
 
     fn render(&mut self, platform: &Platform, alpha: f32) {

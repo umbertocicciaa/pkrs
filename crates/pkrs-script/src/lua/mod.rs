@@ -4,6 +4,7 @@
 //! (`mlua` features `lua54` + `vendored`), so no system Lua is needed on any OS (§0.4).
 
 mod ai;
+mod audio;
 pub(crate) mod battle;
 mod camera;
 mod convert;

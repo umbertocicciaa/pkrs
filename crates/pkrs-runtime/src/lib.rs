@@ -41,4 +41,4 @@ pub use state::{
 pub use tick::{NullTickHooks, TickHooks, TickPhase, run_tick};
 pub use ui_assets::build_test_ui_theme;
 pub use ui_theme::UiTheme;
-pub use wiring::{AdapterSet, PlatformAdapter, RenderAdapter, RunMode};
+pub use wiring::{AdapterSet, AudioAdapter, PlatformAdapter, RenderAdapter, RunMode};

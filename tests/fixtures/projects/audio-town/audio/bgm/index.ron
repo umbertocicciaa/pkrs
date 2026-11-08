@@ -1,0 +1,15 @@
+// Audio manifest (design §11). Files resolve under audio/bgm/; loop points are in samples.
+(
+    bgm: {
+        "town": (loop_start: 44100),
+        "house": (loop_start: 22050, loop_end: 882000),
+        "battle_trainer": (intro: "battle_trainer_intro.ogg"),
+    },
+    jingles: {
+        "victory": (mode: Pause),
+    },
+    sfx: {
+        "exclaim": (max_instances: 1),
+    },
+    battle: (wild: "battle_wild", trainer: "battle_trainer", victory: "victory"),
+)

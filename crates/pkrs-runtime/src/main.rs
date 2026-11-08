@@ -14,7 +14,7 @@ use pkrs_runtime::test_harness::{
     DEFAULT_SCENARIO_TICKS, ScenarioOptions, resolve_script, run_scenario,
 };
 use pkrs_runtime::validation::startup_check;
-use pkrs_runtime::wiring::{headless_platform, headless_renderer, window_config};
+use pkrs_runtime::wiring::{audio_backend, headless_platform, headless_renderer, window_config};
 use pkrs_runtime::{
     AdapterSet, AnimationDemoHost, LoopExit, PlatformAdapter, RenderAdapter, RunMode,
     RuntimeLoopConfig, block_on_loop, run_loop,
@@ -146,6 +146,10 @@ fn run_project_windowed(opts: &ProjectOptions, config: RuntimeLoopConfig) -> any
                 return;
             }
         };
+        host.set_audio_backend(audio_backend(
+            AdapterSet::for_mode(RunMode::Windowed).audio,
+            Box::new(project.vfs.clone()),
+        ));
         let exit = run_loop(&mut platform, &mut host, &config).await;
         tracing::info!(?exit, "project run finished");
     });

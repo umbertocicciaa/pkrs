@@ -1,5 +1,6 @@
 //! Title and save UI before the overworld (§4.1, §12).
 
+use pkrs_audio::AudioBackend;
 use pkrs_platform::{Input, InputFacadeConfig, Platform};
 use pkrs_render::{NullRenderer, Renderer, RendererConfig};
 use pkrs_script::LuaScriptHost;
@@ -21,6 +22,7 @@ pub struct ProjectSessionHost {
     ctx: RuntimeCtx,
     stack: StateStack,
     overworld: Option<ProjectHost>,
+    pending_audio: Option<Box<dyn AudioBackend>>,
     quit: bool,
 }
 
@@ -46,6 +48,7 @@ impl ProjectSessionHost {
             },
             stack: StateStack::new(),
             overworld: None,
+            pending_audio: None,
             quit: false,
         };
         if skip_title {
@@ -73,14 +76,23 @@ impl ProjectSessionHost {
             )));
         };
         let renderer = std::mem::replace(&mut self.ui_renderer, fresh_renderer(&self.project));
-        self.overworld = Some(ProjectHost::with_scripts_boot(
-            &self.project,
-            renderer,
-            scripts,
-            boot,
-        )?);
+        let mut host =
+            ProjectHost::with_scripts_boot(&self.project, renderer, scripts, boot)?;
+        if let Some(backend) = self.pending_audio.take() {
+            host.set_audio_backend(backend);
+        }
+        self.overworld = Some(host);
         self.stack = StateStack::new();
         Ok(())
+    }
+
+    /// Forwards to the overworld when it exists; otherwise applies on first boot (windowed run).
+    pub fn set_audio_backend(&mut self, backend: Box<dyn AudioBackend>) {
+        if let Some(host) = self.overworld.as_mut() {
+            host.set_audio_backend(backend);
+        } else {
+            self.pending_audio = Some(backend);
+        }
     }
 
     fn drain_boot(&mut self) -> Result<(), ProjectError> {

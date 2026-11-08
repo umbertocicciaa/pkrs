@@ -1,0 +1,10 @@
+(
+    id: "puddlefin",
+    types: ["water"],
+    hp: 44,
+    attack: 30,
+    defense: 35,
+    speed: 25,
+    exp_yield: 63,
+    learnset: [(level: 1, move: "tackle"), (level: 7, move: "water_gun")],
+)

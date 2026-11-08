@@ -1,0 +1,15 @@
+// Type list and effectiveness chart; pairs that are not listed deal normal damage.
+(
+    types: ["normal", "fire", "water", "grass"],
+    chart: {
+        ("fire", "grass"): 2.0,
+        ("fire", "water"): 0.5,
+        ("fire", "fire"): 0.5,
+        ("water", "fire"): 2.0,
+        ("water", "grass"): 0.5,
+        ("water", "water"): 0.5,
+        ("grass", "water"): 2.0,
+        ("grass", "fire"): 0.5,
+        ("grass", "grass"): 0.5,
+    },
+)

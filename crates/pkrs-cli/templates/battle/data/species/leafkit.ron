@@ -1,0 +1,10 @@
+(
+    id: "leafkit",
+    types: ["grass"],
+    hp: 40,
+    attack: 30,
+    defense: 30,
+    speed: 30,
+    exp_yield: 60,
+    learnset: [(level: 1, move: "tackle"), (level: 7, move: "vine_whip")],
+)

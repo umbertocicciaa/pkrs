@@ -1,6 +1,6 @@
 //! The `pkrs` command-line tool (§2.3).
 //!
-//! Implemented: `pkrs new` (one-shot template), `pkrs run`, `pkrs plugin new` and a first
+//! Implemented: `pkrs new` (one-shot and battle templates), `pkrs run`, `pkrs plugin new` and a first
 //! `pkrs check` (manifest and plugin set; `--plugins` prints the resolved load order and hook
 //! table, §9.4). `build` and `upgrade` arrive with their milestones (M6–M7).
 
@@ -29,6 +29,8 @@ struct Cli {
 enum TemplateArg {
     /// One small map and the player; no battles.
     OneShot,
+    /// Starts straight in a trainer battle; edit `data/` to try creatures and moves.
+    Battle,
     /// Two maps, battles and a plugin (not available yet).
     FullGame,
 }
@@ -37,6 +39,7 @@ impl From<TemplateArg> for Template {
     fn from(t: TemplateArg) -> Self {
         match t {
             TemplateArg::OneShot => Template::OneShot,
+            TemplateArg::Battle => Template::Battle,
             TemplateArg::FullGame => Template::FullGame,
         }
     }
@@ -260,6 +263,14 @@ mod tests {
         assert_eq!(name, "demo");
         assert_eq!(template, TemplateArg::OneShot);
         assert!(path.is_none());
+        let cli = Cli::try_parse_from(["pkrs", "new", "x", "--template", "battle"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::New {
+                template: TemplateArg::Battle,
+                ..
+            }
+        ));
         let cli = Cli::try_parse_from(["pkrs", "new", "x", "--template", "full-game"]).unwrap();
         assert!(matches!(
             cli.command,

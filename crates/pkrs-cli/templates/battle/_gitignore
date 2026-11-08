@@ -1,0 +1,4 @@
+# Dev saves written by `pkrs run` (docs/design.md §12).
+saves/
+# Build output of `pkrs build`.
+dist/

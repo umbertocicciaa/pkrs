@@ -70,6 +70,7 @@ fn scaffolded_plugin_loads_headless() {
     let out = Command::new(env!("CARGO_BIN_EXE_pkrs-runtime"))
         .args(["--headless", "--ticks", "60", "--project"])
         .arg(&dir)
+        .args(["--map", "start"])
         // `script=debug` shows the scaffold's `map_enter` handler running.
         .env("RUST_LOG", "info,script=debug")
         .output()

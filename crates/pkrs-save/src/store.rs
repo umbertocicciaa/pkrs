@@ -333,6 +333,41 @@ fn file_label(path: &Path) -> String {
         .unwrap_or_else(|| path.display().to_string())
 }
 
+/// Choice row text for one save slot on the title or save screen.
+#[must_use]
+pub fn slot_screen_label(slot: SaveSlot, info: &SlotInfo) -> String {
+    let p = match slot {
+        SaveSlot::Slot(1) => "Slot 1",
+        SaveSlot::Slot(2) => "Slot 2",
+        SaveSlot::Slot(3) => "Slot 3",
+        SaveSlot::Autosave => "Autosave",
+        SaveSlot::Slot(_) => "Slot",
+    };
+    match info {
+        SlotInfo::Empty => format!("{p} — Empty"),
+        SlotInfo::Saved { header, .. } => format!("{p} — {}", header.summary.headline()),
+        SlotInfo::Corrupt(e) => format!("{p} — Corrupt ({e})"),
+    }
+}
+
+/// Detail line shown under the highlighted slot (empty when the slot is not loadable).
+#[must_use]
+pub fn slot_screen_detail(info: &SlotInfo) -> String {
+    match info {
+        SlotInfo::Saved {
+            header,
+            from_backup,
+        } => {
+            let mut l = header.summary.detail();
+            if *from_backup {
+                l.push_str(" · backup");
+            }
+            l
+        }
+        _ => String::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;

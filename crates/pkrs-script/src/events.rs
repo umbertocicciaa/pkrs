@@ -35,6 +35,8 @@ pub const ENGINE_EVENTS: &[&str] = &[
     "step",
     "interact",
     "trigger_enter",
+    "save_before",
+    "load_after",
 ];
 
 /// Events flushed per [`Scheduler::dispatch_events`] call before the rest is deferred to the
@@ -171,6 +173,24 @@ impl ScriptEvent {
         Self::new(
             "trigger_enter",
             payload([("id", ScriptValue::from(id)), x, y]),
+        )
+    }
+
+    /// `save_before { slot }`: the engine is about to write a save file.
+    #[must_use]
+    pub fn save_before(slot: &str) -> Self {
+        Self::new("save_before", payload([("slot", ScriptValue::from(slot))]))
+    }
+
+    /// `load_after { slot, from_backup }`: a save was applied to the running game.
+    #[must_use]
+    pub fn load_after(slot: &str, from_backup: bool) -> Self {
+        Self::new(
+            "load_after",
+            payload([
+                ("slot", ScriptValue::from(slot)),
+                ("from_backup", ScriptValue::Bool(from_backup)),
+            ]),
         )
     }
 

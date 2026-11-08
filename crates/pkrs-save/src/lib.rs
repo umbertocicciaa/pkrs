@@ -31,7 +31,10 @@ pub use model::{
     SaveHeader, SaveSummary, SavedCreature, sanitize_plugin_value,
 };
 pub use serde_value::{ValueError, from_value, to_value};
-pub use store::{DEFAULT_SLOTS, Loaded, SAVE_EXTENSION, SaveSlot, SaveStore, SlotInfo};
+pub use store::{
+    DEFAULT_SLOTS, Loaded, SAVE_EXTENSION, SaveSlot, SaveStore, SlotInfo, slot_screen_detail,
+    slot_screen_label,
+};
 pub use value::Value;
 pub use world::{MapState, ObjectState, WorldState};
 

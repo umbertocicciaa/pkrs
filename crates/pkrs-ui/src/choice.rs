@@ -42,6 +42,12 @@ impl ChoiceSession {
         self.cursor
     }
 
+    /// Moves the highlight to `cursor` (clamped to the list).
+    pub fn set_cursor(&mut self, cursor: usize) {
+        let last = self.options.len().saturating_sub(1);
+        self.cursor = cursor.min(last);
+    }
+
     /// All selectable options (order matches display).
     #[must_use]
     pub fn options(&self) -> &[ChoiceOption] {

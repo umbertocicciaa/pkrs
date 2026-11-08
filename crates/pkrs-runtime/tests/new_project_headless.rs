@@ -44,14 +44,14 @@ fn new_project_runs_headless_for_60_ticks() {
     let out = runtime(&dir, &[]);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stderr}");
-    assert!(stderr.contains("map_enter"), "{stderr}");
     assert!(stderr.contains("TickLimit"), "{stderr}");
 
     let warped = runtime(&dir, &["--map", "start", "--warp", "3,3"]);
+    let warped_stderr = String::from_utf8_lossy(&warped.stderr);
+    assert!(warped.status.success(), "{warped_stderr}");
     assert!(
-        warped.status.success(),
-        "{}",
-        String::from_utf8_lossy(&warped.stderr)
+        warped_stderr.contains("map_enter"),
+        "skipping the title (--map/--warp) must enter the map"
     );
 
     let outside = runtime(&dir, &["--warp", "500,500"]);

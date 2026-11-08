@@ -118,6 +118,30 @@ pub struct SaveSummary {
     pub party_size: u32,
 }
 
+impl SaveSummary {
+    /// Single-line slot list label: player name and location.
+    pub fn headline(&self) -> String {
+        format!(
+            "{} — {}",
+            if self.player_name.is_empty() {
+                "Player"
+            } else {
+                &self.player_name
+            },
+            if self.location.is_empty() {
+                "?"
+            } else {
+                &self.location
+            }
+        )
+    }
+
+    /// Secondary line under a slot: progress and party size.
+    pub fn detail(&self) -> String {
+        format!("Progress {} · party {}", self.progress, self.party_size)
+    }
+}
+
 /// Where the player stands in a save.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlayerPlacement {

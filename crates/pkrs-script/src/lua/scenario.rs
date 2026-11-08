@@ -17,14 +17,17 @@
 //!
 //! Waiting: `wait_until(fn [, max_ticks [, what]])`, `wait_for_state(name [, max_ticks])`.
 //!
-//! Helpers: `advance_dialogue([max_ticks])`, `choose(index)` (choice lists and battle menus),
-//! `answer(yes)`, `walk(direction [, tiles])`, `face(direction)`, `advance_battle([max_ticks])`
-//! (confirms battle messages until a battle menu opens or the battle ends).
+//! Helpers: `advance_dialogue([max_ticks])`, `choose(index)` (choice lists, battle menus and
+//! the move-forget menu after a battle or an evolution), `answer(yes)`,
+//! `walk(direction [, tiles])`, `face(direction)`, `advance_battle([max_ticks])` (confirms
+//! battle messages until a battle menu opens or the battle ends).
 //!
 //! Queries: `tick()`, `state()`, `map()`, `player()` (x, y, facing), `idle()`, `locked()`,
 //! `npc(id)` (x, y, facing or nil), `flag(name)`, `var(name)`, `item(id)`, `dialogue()`,
 //! `dialogues_opened()`, `choices()`, `cursor()` (1-based), `battle()` (`nil` outside a battle,
-//! else `{ menu, turn, player = { name, level, hp, max_hp }, opponent = { … } }`).
+//! else `{ menu, turn, player = { name, level, hp, max_hp }, opponent = { … } }`), `party()`
+//! (the player's party, 1-based: `{ species, name, level, exp, moves = { ids }, max_hp,
+//! attack, defense, speed }`; empty before the first battle).
 //!
 //! Expectations: `expect(cond [, message])`, `expect_eq(actual, expected [, message])`,
 //! `expect_state(name)`, `expect_map(id)`, `expect_player_at(x, y [, facing])`,
@@ -50,8 +53,8 @@ use super::{convert, map_error, sandbox};
 use crate::error::{Result, ScriptError};
 use crate::host::{ScriptLimits, ScriptValue};
 use crate::scenario::{
-    BattleSnapshot, BattlerSnapshot, DEFAULT_WAIT_TICKS, ScenarioFailure, ScenarioSnapshot,
-    ScenarioStep, SourceLocation, format_placement, format_value, values_equal,
+    BattleSnapshot, BattlerSnapshot, DEFAULT_WAIT_TICKS, PartyMemberSnapshot, ScenarioFailure,
+    ScenarioSnapshot, ScenarioStep, SourceLocation, format_placement, format_value, values_equal,
 };
 
 /// Every global the test API adds to a scenario's environment.
@@ -86,6 +89,7 @@ pub const SCENARIO_API: &[&str] = &[
     "choices",
     "cursor",
     "battle",
+    "party",
     "expect",
     "expect_eq",
     "expect_state",
@@ -184,7 +188,7 @@ end
 
 function choose(index)
   local st = state()
-  if st ~= "Choice" and not (st == "Battle" and choices() ~= nil) then
+  if st ~= "Choice" and not ((st == "Battle" or st == "Evolution") and choices() ~= nil) then
     __fail("choose", "Choice", st)
   end
   local options = choices()
@@ -784,7 +788,39 @@ fn install_queries(lua: &Lua, env: &Table) -> mlua::Result<()> {
             to_lua(lua, &battle.map_or(ScriptValue::Nil, |b| battle_value(&b)))
         })?,
     )?;
+    env.raw_set(
+        "party",
+        lua.create_function(|lua, ()| {
+            let party = snapshot(lua, |s| s.party.clone())?;
+            to_lua(
+                lua,
+                &ScriptValue::List(party.iter().map(party_member_value).collect()),
+            )
+        })?,
+    )?;
     Ok(())
+}
+
+/// One `party()` entry: `{ species, name, level, exp, moves, max_hp, attack, defense, speed }`.
+fn party_member_value(m: &PartyMemberSnapshot) -> ScriptValue {
+    let mut map = std::collections::BTreeMap::new();
+    map.insert("species".into(), ScriptValue::String(m.species.clone()));
+    map.insert("name".into(), ScriptValue::String(m.name.clone()));
+    map.insert("level".into(), ScriptValue::Int(i64::from(m.level)));
+    map.insert("exp".into(), ScriptValue::Int(i64::from(m.exp)));
+    map.insert(
+        "moves".into(),
+        ScriptValue::List(m.moves.iter().cloned().map(ScriptValue::String).collect()),
+    );
+    for (key, value) in [
+        ("max_hp", m.max_hp),
+        ("attack", m.attack),
+        ("defense", m.defense),
+        ("speed", m.speed),
+    ] {
+        map.insert(key.into(), ScriptValue::Int(i64::from(value)));
+    }
+    ScriptValue::Map(map)
 }
 
 /// `battle()`: `{ menu, turn, player = { name, level, hp, max_hp }, opponent = { … } }`.
@@ -1140,6 +1176,47 @@ mod tests {
         assert_eq!(f.expected.as_deref(), Some("Battle"));
         let none = run("expect(battle() == nil)");
         assert_eq!(none, ScenarioStep::Finished);
+    }
+
+    #[test]
+    fn party_query_and_choose_in_the_evolution_scene() {
+        let mut sc = scenario(
+            r#"
+            expect_eq(#party(), 1)
+            local m = party()[1]
+            expect(m.species == "bloomling" and m.name == "Bloomling")
+            expect(m.level == 6 and m.exp == 229 and m.max_hp == 24)
+            expect(m.attack == 9 and m.defense == 8 and m.speed == 7)
+            expect_eq(m.moves, { "tackle", "vine_whip" })
+            expect_state("Evolution")
+            choose(2)
+        "#,
+        );
+        let snap = ScenarioSnapshot {
+            state: "Evolution".into(),
+            choices: vec!["Tackle".into(), "Don't learn".into()],
+            cursor: Some(1),
+            party: vec![PartyMemberSnapshot {
+                species: "bloomling".into(),
+                name: "Bloomling".into(),
+                level: 6,
+                exp: 229,
+                moves: vec!["tackle".into(), "vine_whip".into()],
+                max_hp: 24,
+                attack: 9,
+                defense: 8,
+                speed: 7,
+            }],
+            ..snap(4)
+        };
+        assert_eq!(
+            sc.resume(snap),
+            ScenarioStep::Advance {
+                ticks: 1,
+                held: vec!["confirm".into()]
+            }
+        );
+        assert_eq!(run("expect_eq(#party(), 0)"), ScenarioStep::Finished);
     }
 
     #[test]

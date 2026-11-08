@@ -133,6 +133,69 @@ fn battle_state_and_queries_are_visible_to_scenarios() {
     assert!(report.passed(), "{report}");
 }
 
+fn training_grounds() -> PathBuf {
+    fixture_root().join("training-grounds")
+}
+
+/// Issue #41 acceptance: a won battle gives exp (modded by `on_battle_end`), the creature
+/// levels up, replaces a move through the prompt, evolves at the configured level in the
+/// evolution scene, play returns to the overworld, and the next battle uses the result.
+#[test]
+fn acceptance_battle_win_levels_up_and_evolves() {
+    let dir = training_grounds();
+    let run = || {
+        run_scenario(
+            &open(&dir),
+            &dir.join("tests/level_up_and_evolve.lua"),
+            "tests/level_up_and_evolve.lua",
+            &ScenarioOptions::default(),
+        )
+        .unwrap()
+    };
+    let (a, b) = (run(), run());
+    assert!(a.passed(), "{a}");
+    assert_eq!(a, b, "the post-battle flow replays identically");
+}
+
+#[test]
+fn declining_the_move_keeps_the_old_moves_and_still_evolves() {
+    let source = r#"
+        walk("up", 2)
+        press("confirm")
+        advance_dialogue()
+        wait_for_state("Battle")
+        advance_battle()
+        while battle().menu == "action" do
+          choose(1)
+          choose(4)
+          advance_battle() -- reads the reward texts up to the move prompt
+        end
+        expect_state("Battle")
+        expect_dialogue("Which move should Sproutling forget?")
+        press("cancel")
+        wait_until(function() return dialogue() == "Sproutling did not learn Vine whip." end, 60)
+        expect_eq(party()[1].moves, { "tackle", "scratch", "pound", "leafage" })
+        while state() == "Battle" do
+          if dialogue() ~= nil then press("confirm") else wait_ticks(1) end
+        end
+        expect_state("Evolution")
+        while state() == "Evolution" do
+          if dialogue() ~= nil then press("confirm") else wait_ticks(1) end
+        end
+        expect_eq(party()[1].species, "bloomling")
+        expect_state("Dialogue")
+        expect_dialogue("Well fought!")
+    "#;
+    let report = run_scenario_source(
+        &open(&training_grounds()),
+        "tests/x.lua",
+        source,
+        &ScenarioOptions::default(),
+    )
+    .unwrap();
+    assert!(report.passed(), "{report}");
+}
+
 #[test]
 fn scenario_runs_are_deterministic() {
     let dir = town();

@@ -1,0 +1,27 @@
+# Fixture for battle rewards (design §7.3, §7.4, §8.1, §15.2): a coach starts trainer battles
+# from a script; winning gives exp (doubled by an `on_battle_end` hook in scripts/main.lua),
+# the player's creature levels up, learns a move through the replace prompt and evolves.
+# `data/trainers/player.ron` is the player's party at the first battle; the session keeps
+# the result for later battles (§12 saves land in M6).
+[game]
+name    = "Training Grounds"
+id      = "com.example.training-grounds"
+version = "0.1.0"
+
+[engine]
+version = "0.0"
+api     = 1
+
+[display]
+width  = 240
+height = 160
+scale  = 3
+
+[start]
+map      = "grounds"
+position = [5, 7]
+facing   = "up"
+
+[features]
+battles = true
+party   = true

@@ -1,0 +1,9 @@
+// The moves of the training grounds (one file, a list of moves, design §8.1).
+[
+    (id: "tackle", type: "normal", category: physical, power: 35, accuracy: 100, priority: 0, effects: [(effect: "damage")]),
+    (id: "scratch", type: "normal", category: physical, power: 40, accuracy: 100, priority: 0, effects: [(effect: "damage")]),
+    (id: "pound", type: "normal", category: physical, power: 40, accuracy: 100, priority: 0, effects: [(effect: "damage")]),
+    (id: "leafage", type: "grass", category: physical, power: 40, accuracy: 100, priority: 0, effects: [(effect: "damage")]),
+    (id: "vine_whip", type: "grass", category: physical, power: 45, accuracy: 100, priority: 0, effects: [(effect: "damage")]),
+    (id: "razor_leaf", type: "grass", category: physical, power: 55, accuracy: 100, priority: 0, effects: [(effect: "damage")]),
+]

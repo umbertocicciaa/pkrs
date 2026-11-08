@@ -8,6 +8,7 @@ use crate::damage::{DamageCalc, DamageInputs, effective_defense, effective_offen
 use crate::effects::apply_effects;
 use crate::error::{BattleError, Result};
 use crate::event::BattleEvent;
+use crate::exp::BattleRewards;
 use crate::hooks::{
     ActionMenu, ActionOrder, BattleHookCtx, BattleHooks, BattleValue, BattleView, CreatureView,
     CurrentMove, CustomAction, DamageTaken, FaintEvent, HookCommand, HookResult, MoveRequest,
@@ -198,6 +199,8 @@ pub struct Battle {
     deferred: Vec<BattleEvent>,
     /// Move being executed (exposed to hooks through [`BattleView::current_move`]).
     current_move: Option<CurrentMove>,
+    /// Default rewards of a player win, before `on_battle_end`.
+    rewards: BattleRewards,
 }
 
 impl Battle {
@@ -230,7 +233,20 @@ impl Battle {
             weather: None,
             deferred: Vec::new(),
             current_move: None,
+            rewards: BattleRewards::default(),
         })
+    }
+
+    /// Sets the default rewards of a player win (none by default). [`BattleResult`] starts
+    /// with them when the player wins, before `on_battle_end` hooks run (§7.4); other
+    /// outcomes start with no rewards.
+    pub fn set_rewards(&mut self, rewards: BattleRewards) {
+        self.rewards = rewards;
+    }
+
+    /// The default rewards of a player win.
+    pub fn rewards(&self) -> BattleRewards {
+        self.rewards
     }
 
     /// Current phase.
@@ -1169,11 +1185,15 @@ impl Battle {
         hooks: &mut dyn BattleHooks,
         out: &mut Vec<BattleEvent>,
     ) -> Result<()> {
+        let rewards = match outcome {
+            BattleOutcome::PlayerWin => self.rewards,
+            _ => BattleRewards::default(),
+        };
         let mut result = BattleResult {
             outcome,
             turns: self.turn,
-            exp: 0,
-            money: 0,
+            exp: rewards.exp,
+            money: rewards.money,
         };
         self.run_hook(out, "on_battle_end", |ctx| {
             hooks.on_battle_end(ctx, &mut result)

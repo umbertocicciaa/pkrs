@@ -7,13 +7,13 @@
 //! plays them one per tick onwards (text boxes wait for Confirm, HP bars and sprites animate)
 //! and opens the next menu only when the queue is empty.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::rc::Rc;
 
 use pkrs_battle::{
-    ActionMenu, Battle, BattleAction, BattleError, BattleHooks, BattleInput, BattleOutcome,
-    BattlePhase, BattleResult, PartyIndex, RngPolicy, SideId, SideInput, SlotRef, TrainerAi,
-    ai_side_input,
+    ActionMenu, Battle, BattleAction, BattleError, BattleEvent, BattleHooks, BattleInput,
+    BattleOutcome, BattlePhase, BattleResult, PartyIndex, RngPolicy, SideId, SideInput, SlotRef,
+    TrainerAi, ai_side_input,
 };
 use pkrs_data::BattlePack;
 use pkrs_platform::{Action, BuiltinAction, Input};
@@ -155,6 +155,8 @@ pub struct BattleScreen {
     view: (u32, u32),
     texts_shown: u64,
     finished: bool,
+    /// Player party indices sent out so far (they earn exp, §7.3).
+    participants: BTreeSet<PartyIndex>,
 }
 
 impl BattleScreen {
@@ -177,13 +179,16 @@ impl BattleScreen {
         let presenter = Presenter::new(kind.clone(), &setup);
         let display = presenter.roster().clone();
         let pack = Rc::new(resources.pack.clone());
-        let battle = Battle::new(
+        let rewards = super::rewards::battle_rewards(&kind, &setup, &pack);
+        let participants = setup.player.leading.iter().flatten().copied().collect();
+        let mut battle = Battle::new(
             setup,
             pkrs_battle::BattleConfig::default(),
             resources,
             policy,
             hooks,
         )?;
+        battle.set_rewards(rewards);
         let mut screen = Self {
             battle,
             pack,
@@ -202,6 +207,7 @@ impl BattleScreen {
             view,
             texts_shown: 0,
             finished: false,
+            participants,
         };
         screen.run_logic(BattleInput::default(), hooks);
         Ok(screen)
@@ -317,6 +323,19 @@ impl BattleScreen {
         self.menu.as_ref().map(|m| m.session.cursor())
     }
 
+    /// The player's creatures that earn exp: sent out during the battle and not fainted,
+    /// in party order (§7.3).
+    #[must_use]
+    pub fn exp_earners(&self) -> Vec<PartyIndex> {
+        let view = self.battle.view();
+        let party = &view.side(SideId::Player).party;
+        self.participants
+            .iter()
+            .copied()
+            .filter(|&i| party.get(usize::from(i)).is_some_and(|c| c.hp > 0))
+            .collect()
+    }
+
     /// Cues still waiting to be played (not counting the one playing).
     #[must_use]
     pub fn queued(&self) -> &VecDeque<Cue> {
@@ -332,6 +351,16 @@ impl BattleScreen {
         for _ in 0..MAX_AUTO_STEPS {
             match self.battle.step(input, hooks) {
                 Ok(events) => {
+                    for event in &events {
+                        if let BattleEvent::Switched {
+                            side: SideId::Player,
+                            to_party,
+                            ..
+                        } = event
+                        {
+                            self.participants.insert(*to_party);
+                        }
+                    }
                     let cues = self.presenter.present_all(&events);
                     self.queue.extend(cues);
                 }
@@ -934,7 +963,7 @@ fn hp_color(frac: f32) -> Color {
 }
 
 /// A stable placeholder colour per creature name.
-fn creature_color(name: &str) -> Color {
+pub(crate) fn creature_color(name: &str) -> Color {
     let h = name.bytes().fold(0x811c_9dc5_u32, |h, b| {
         (h ^ u32::from(b)).wrapping_mul(0x0100_0193)
     });

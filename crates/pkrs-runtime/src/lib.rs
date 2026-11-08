@@ -1,5 +1,6 @@
 //! The pkrs game player library: fixed-step loop and tick pipeline (§3).
 
+pub mod battle;
 mod ctx;
 mod demo;
 mod fixed_step;
@@ -26,8 +27,8 @@ pub use main_loop::{
 };
 pub use scene::{MapScene, PLAYER_ENTITY, SceneEntity, SceneError, WorldTileGrid};
 pub use state::{
-    ChoiceState, DialogueState, FadeTransition, GameState, LuaUiState, StateStack, TitleState,
-    Transition,
+    BattleState, ChoiceState, DialogueState, FadeTransition, GameState, LuaUiState, StateStack,
+    TitleState, Transition,
 };
 pub use tick::{NullTickHooks, TickHooks, TickPhase, run_tick};
 pub use ui_assets::build_test_ui_theme;

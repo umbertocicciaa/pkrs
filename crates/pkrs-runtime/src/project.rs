@@ -8,18 +8,23 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use pkrs_assets::{FolderVfs, Vfs, VfsPath};
-use pkrs_core::{Direction, GridPos, ProjectManifest, Version};
+use pkrs_battle::{NullBattleHooks, RngPolicy};
+use pkrs_core::{Direction, GridPos, Pcg64Rng, ProjectManifest, Version};
 use pkrs_platform::{
     Action, BuiltinAction, DisplaySettings, Input, InputFacadeConfig, Key, Platform, UserPaths,
 };
 use pkrs_render::{CameraTarget, Rect, Renderer, TextureHandle};
-use pkrs_script::{CameraCommand, CameraTarget as ScriptCameraTarget, LuaScriptHost};
+use pkrs_script::{
+    BattleRequest, CameraCommand, CameraTarget as ScriptCameraTarget, LuaScriptHost, ScriptValue,
+    TaskId, battle_result_value,
+};
 use pkrs_world::{
     GridStepper, LinkCrossing, Map, MapImporter, MovementConfig, StepEvent, TerrainQuery,
     TerrainRuleRegistry, TerrainRules, TerrainStepVerdict, TiledImporter,
     Transition as WarpTransition, WORLD_RON, Warp, WorldLayout, neighbor_pixel_offset,
 };
 
+use crate::battle::{BattleContent, BattleScreen};
 use crate::main_loop::SimulationHost;
 use crate::overworld::{EntityKind, OverworldScripts, ScreenFade, ScriptOverlay};
 use crate::scene::{MapScene, NeighborBackdrop, PLAYER_ENTITY, tile_sheet};
@@ -340,7 +345,18 @@ pub struct ProjectHost {
     crossing: Option<CrossingContext>,
     neighbors: Vec<NeighborCache>,
     active_textures: Vec<TextureHandle>,
+    /// The running battle and the script task waiting on it (§7.2).
+    battle: Option<(TaskId, BattleScreen)>,
+    /// Battle data, loaded on the first battle.
+    battle_content: Option<BattleContent>,
+    /// Stream battle RNG policies derive from (`RngPolicy::Local`, §7.2).
+    battle_rng: Pcg64Rng,
+    /// Battle messages shown by finished battles.
+    battle_texts: u64,
 }
+
+/// Seed of the stream battles derive their RNG from until the save owns the game RNG (§12).
+pub const DEFAULT_BATTLE_SEED: u64 = 0x0062_6174_746c_6573;
 
 impl ProjectHost {
     /// Loads the start map of `project` and uploads its textures through `renderer`. No
@@ -423,6 +439,10 @@ impl ProjectHost {
             crossing: None,
             neighbors: Vec::new(),
             active_textures: textures,
+            battle: None,
+            battle_content: None,
+            battle_rng: Pcg64Rng::from_seed(DEFAULT_BATTLE_SEED),
+            battle_texts: 0,
         };
         host.bootstrap_world_layout()?;
         if let Some(scripts) = host.scripts.as_mut() {
@@ -434,6 +454,24 @@ impl ProjectHost {
         }
         host.apply_script_requests();
         Ok(host)
+    }
+
+    /// The running battle, if any.
+    #[must_use]
+    pub fn battle(&self) -> Option<&BattleScreen> {
+        self.battle.as_ref().map(|(_, screen)| screen)
+    }
+
+    /// Battle messages shown so far, over all battles.
+    #[must_use]
+    pub fn battle_texts_shown(&self) -> u64 {
+        self.battle_texts
+            .saturating_add(self.battle().map_or(0, BattleScreen::texts_shown))
+    }
+
+    /// Reseeds the stream battle RNGs derive from (scenario runs pin it, §15.2).
+    pub fn set_battle_seed(&mut self, seed: u64) {
+        self.battle_rng = Pcg64Rng::from_seed(seed);
     }
 
     /// `true` while a warp fade is running (for integration tests).
@@ -872,7 +910,7 @@ impl ProjectHost {
         if let Some(dir) = scripts.take_player_face() {
             self.walker.face(dir);
         }
-        if self.overlay.is_none() {
+        if self.overlay.is_none() && self.battle.is_none() {
             if let Some(request) = scripts.take_ui_request() {
                 match &self.ui_theme {
                     Some(theme) => {
@@ -900,6 +938,92 @@ impl ProjectHost {
                 tracing::warn!(target: "script", map = %warp.map, "map.warp ignored: a warp is already running");
             }
         }
+        self.start_requested_battle();
+    }
+
+    /// Starts the battle a script task asked for (`battle.start_wild` / `start_trainer`),
+    /// once no dialogue or warp is running. A battle that cannot be set up is logged and its
+    /// task resumes with `nil`.
+    fn start_requested_battle(&mut self) {
+        if self.battle.is_some() || self.overlay.is_some() || self.is_warping() {
+            return;
+        }
+        let Some(scripts) = self.scripts.as_mut() else {
+            return;
+        };
+        let Some((task, request)) = scripts.take_battle_request() else {
+            return;
+        };
+        match self.open_battle(&request) {
+            Ok(screen) => {
+                tracing::info!(target: "battle", ?request, task, "battle started");
+                self.battle = Some((task, screen));
+            }
+            Err(err) => {
+                tracing::error!(target: "battle", ?request, "battle cannot start: {err}");
+                if let Some(scripts) = self.scripts.as_mut() {
+                    scripts.finish_battle(task, ScriptValue::Nil);
+                }
+            }
+        }
+    }
+
+    fn open_battle(&mut self, request: &BattleRequest) -> Result<BattleScreen, String> {
+        let theme = self
+            .ui_theme
+            .clone()
+            .ok_or_else(|| "no UI theme to draw the battle with".to_owned())?;
+        let scripts = self
+            .scripts
+            .as_ref()
+            .ok_or_else(|| "scripting is disabled".to_owned())?;
+        if self.battle_content.is_none() {
+            let mut content = BattleContent::load(&self.project.vfs).map_err(|e| e.to_string())?;
+            scripts.host().with_content(|db| content.merge_moves(db));
+            self.battle_content = Some(content);
+        }
+        let content = self
+            .battle_content
+            .as_ref()
+            .ok_or_else(|| "battle content missing".to_owned())?;
+        let policy = RngPolicy::local_from_game_rng(&mut self.battle_rng);
+        let prepared = content
+            .prepare(request, &policy)
+            .map_err(|e| e.to_string())?;
+        let bag = scripts.world().get().state.bag().clone();
+        BattleScreen::with_scripts(
+            prepared,
+            policy,
+            theme,
+            self.renderer.view_size(),
+            bag,
+            scripts.host(),
+        )
+        .map_err(|e| e.to_string())
+    }
+
+    /// Runs the battle for one tick; `true` while a battle is running (the overworld does
+    /// not update). When it ends, the waiting task resumes next tick with
+    /// [`battle_result_value`] and play returns to the overworld.
+    fn tick_battle(&mut self) -> bool {
+        let Some((task, screen)) = self.battle.as_mut() else {
+            return false;
+        };
+        let result = match self.scripts.as_ref() {
+            Some(scripts) => screen.update_with_scripts(&mut self.input, scripts.host()),
+            None => screen.update(&mut self.input, &mut NullBattleHooks),
+        };
+        if let Some(result) = result {
+            let task = *task;
+            if let Some((_, screen)) = self.battle.take() {
+                self.battle_texts = self.battle_texts.saturating_add(screen.texts_shown());
+            }
+            tracing::info!(target: "battle", ?result, "battle ended");
+            if let Some(scripts) = self.scripts.as_mut() {
+                scripts.finish_battle(task, battle_result_value(&result));
+            }
+        }
+        true
     }
 
     fn apply_camera(&mut self, command: CameraCommand) {
@@ -1152,8 +1276,8 @@ impl SimulationHost for ProjectHost {
             }
         }
 
-        // §3.3 step 3: warp transition or overworld update.
-        if !self.tick_warp_phase() {
+        // §3.3 step 3: the battle, a warp transition or the overworld.
+        if !self.tick_battle() && !self.tick_warp_phase() {
             self.tick_overworld();
         }
         if let Some(scripts) = self.scripts.as_mut() {
@@ -1175,6 +1299,11 @@ impl SimulationHost for ProjectHost {
     fn render(&mut self, platform: &Platform, alpha: f32) {
         let (w, h) = platform.window_size();
         self.renderer.begin_frame(w, h);
+        if let Some((_, screen)) = &self.battle {
+            screen.render(&mut self.renderer);
+            self.renderer.end_frame();
+            return;
+        }
         let backdrops: Vec<&NeighborBackdrop> =
             self.neighbors.iter().map(|n| &n.backdrop).collect();
         self.scene.render(&mut self.renderer, alpha, &backdrops);

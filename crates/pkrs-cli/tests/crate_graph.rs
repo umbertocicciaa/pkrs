@@ -47,6 +47,8 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "pkrs-ui",
             "pkrs-save",
             "pkrs-world",
+            "pkrs-battle",
+            "pkrs-data",
         ],
     ),
     (

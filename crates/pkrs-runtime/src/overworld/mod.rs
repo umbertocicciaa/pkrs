@@ -32,8 +32,9 @@ use std::collections::BTreeSet;
 
 use pkrs_core::{Direction, GridPos};
 use pkrs_script::{
-    CameraCommand, DispatchReport, FieldActionInfo, FieldActionSource, FieldContext, LuaScriptHost,
-    Scheduler, ScriptEvent, ScriptHost, ScriptOwner, ScriptValue, TaskKind, WakeSignal,
+    BattleRequest, CameraCommand, DispatchReport, FieldActionInfo, FieldActionSource, FieldContext,
+    LuaScriptHost, Scheduler, ScriptEvent, ScriptHost, ScriptOwner, ScriptValue, TaskId, TaskKind,
+    WaitCondition, WakeSignal,
 };
 use pkrs_world::{Map, TerrainRules};
 
@@ -54,6 +55,8 @@ pub struct OverworldScripts {
     wakes: Vec<WakeSignal>,
     game_files: BTreeSet<String>,
     map_owner: Option<ScriptOwner>,
+    /// Tasks waiting on a battle the engine already started.
+    battles_started: BTreeSet<TaskId>,
 }
 
 impl OverworldScripts {
@@ -69,6 +72,7 @@ impl OverworldScripts {
             wakes: Vec::new(),
             game_files: BTreeSet::new(),
             map_owner: None,
+            battles_started: BTreeSet::new(),
         }
     }
 
@@ -155,7 +159,12 @@ impl OverworldScripts {
         for signal in self.wakes.drain(..) {
             self.scheduler.signal(signal);
         }
-        self.scheduler.step(&mut self.host);
+        let report = self.scheduler.step(&mut self.host);
+        // A resumed task no longer waits on the battle it was started for; a new
+        // `battle.start_*` from it is a new request.
+        for (task, _) in &report.outcomes {
+            self.battles_started.remove(task);
+        }
     }
 
     /// §3.3 step 5: starts the listeners of every queued event, in emission order.
@@ -329,6 +338,31 @@ impl OverworldScripts {
     /// Next dialogue to show.
     pub fn take_ui_request(&mut self) -> Option<UiRequest> {
         self.world.get_mut().ui_requests.pop_front()
+    }
+
+    /// The next battle a task asked for with `battle.start_wild` / `battle.start_trainer`
+    /// that has not been started yet (§7.2), with the waiting task. Each request is handed
+    /// out once; answer it with [`finish_battle`](Self::finish_battle).
+    pub fn take_battle_request(&mut self) -> Option<(TaskId, BattleRequest)> {
+        let found = self.scheduler.task_ids().into_iter().find_map(|task| {
+            match self.scheduler.wait_of(task)? {
+                WaitCondition::BattleEnded(request) if !self.battles_started.contains(&task) => {
+                    Some((task, request.clone()))
+                }
+                _ => None,
+            }
+        })?;
+        self.battles_started.insert(found.0);
+        Some(found)
+    }
+
+    /// The battle `task` waited on ended: it resumes next tick with `result` (the
+    /// [`battle_result_value`](pkrs_script::battle_result_value) of the battle, or `nil` when
+    /// the battle could not start).
+    pub fn finish_battle(&mut self, task: TaskId, result: ScriptValue) {
+        if !self.scheduler.wake(task, result) {
+            tracing::warn!(target: "script", task, "battle ended but its task is gone");
+        }
     }
 
     /// Pending `map.warp`.

@@ -1,5 +1,6 @@
 //! Game state stack (§4.1): modal screens, deferred transitions, opaque rendering.
 
+mod battle;
 mod choice_state;
 mod dialogue;
 mod fade;
@@ -7,6 +8,7 @@ mod lua_ui;
 mod stack;
 mod title;
 
+pub use battle::BattleState;
 pub use choice_state::ChoiceState;
 pub use dialogue::DialogueState;
 pub use fade::FadeTransition;

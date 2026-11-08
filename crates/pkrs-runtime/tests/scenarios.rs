@@ -79,6 +79,60 @@ fn acceptance_talk_to_npc_dialogue_choice_back_to_overworld() {
     assert!(report.passed(), "{report}");
 }
 
+fn battle_town() -> PathBuf {
+    fixture_root().join("battle-town")
+}
+
+#[test]
+fn acceptance_trainer_battle_win_and_back_to_overworld() {
+    let dir = battle_town();
+    let run = || {
+        run_scenario(
+            &open(&dir),
+            &dir.join("tests/trainer_battle.lua"),
+            "tests/trainer_battle.lua",
+            &ScenarioOptions::default(),
+        )
+        .unwrap()
+    };
+    let (a, b) = (run(), run());
+    assert!(a.passed(), "{a}");
+    assert_eq!(a, b, "battle scenarios replay identically");
+}
+
+#[test]
+fn battle_state_and_queries_are_visible_to_scenarios() {
+    let source = r#"
+        walk("up", 2)
+        press("confirm")
+        advance_dialogue()
+        wait_for_state("Battle")
+        expect_state("Battle")
+        expect(battle().menu == nil, "events play back before the first menu")
+        advance_battle()
+        expect_eq(battle().opponent.hp, battle().opponent.max_hp)
+        choose(1)
+        choose(1)
+        expect_dialogue("Emberkit used Ember!")
+        local full = battle().opponent.max_hp
+        repeat
+          if dialogue() ~= nil then press("confirm") else wait_ticks(1) end
+        until battle().opponent.hp < full
+        expect(dialogue() == nil, "the HP bar animates without a text box")
+        local first = battle().opponent.hp
+        wait_ticks(1)
+        expect(battle().opponent.hp < first, "the bar keeps moving tick by tick")
+    "#;
+    let report = run_scenario_source(
+        &open(&battle_town()),
+        "tests/x.lua",
+        source,
+        &ScenarioOptions::default(),
+    )
+    .unwrap();
+    assert!(report.passed(), "{report}");
+}
+
 #[test]
 fn scenario_runs_are_deterministic() {
     let dir = town();

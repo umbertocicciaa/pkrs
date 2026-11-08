@@ -1,0 +1,10 @@
+// Wild creatures of the route's tall grass (design §6.2, §8.1). Only tall-grass tiles of
+// the `encounters` rect roll on this table.
+EncounterTable(
+    id: "route_grass",
+    terrains: ["tall_grass"],
+    slots: [
+        (species: "sproutling", min_level: 2, max_level: 4, weight: 3),
+        (species: "leafkit", min_level: 3, max_level: 5, weight: 1),
+    ],
+)

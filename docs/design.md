@@ -219,7 +219,7 @@ cancel      = ["x", "backspace"]
 
 | Command | Purpose |
 |---|---|
-| `pkrs new <name> [--template one-shot\|full-game]` | Scaffold a project from an embedded template. Pins `engine.version` to the CLI's version. |
+| `pkrs new <name> [--template one-shot\|battle\|full-game]` | Scaffold a project from an embedded template. Pins `engine.version` to the CLI's version. |
 | `pkrs run [--release] [--map <id>] [--warp x,y]` | Run the project from loose files with dev features: script hot-reload, debug overlay (F3), verbose logs. |
 | `pkrs check [--plugins]` | Validate `pkrs.toml`, all RON data (schema + cross-references), Tiled maps (required layers/properties), Lua syntax, plugin manifests and dependency graph. `--plugins` also loads the plugins and prints the resolved hook table (§9.4). Non-zero exit on errors, so it's CI-friendly. |
 | `pkrs build --target <linux\|windows\|macos\|all> [--out dist/]` | Run `check`, pack the project into `game.pak`, then fetch the matching **prebuilt runtime** and assemble a distributable (§14). Works from any host OS. |
@@ -228,6 +228,7 @@ cancel      = ["x", "backspace"]
 
 ### 2.4 Templates
 - **one-shot**: one small map, the player, two NPCs, a cutscene with dialogue and choices, an ending screen. `features.battles = false`. Shows that no battle data is required.
+- **battle**: a battle playground. One arena map whose `scripts/main.lua` starts a trainer battle on `game_start`, so `pkrs run` opens straight into the battle; afterwards the player can ask for a rematch or talk to the rival. Ships editable battle data (`data/types.ron`, moves, three species, the player's party and the rival) and a `tests/battle.lua` scenario.
 - **full-game**: two connected maps plus an interior, a starter-selection script, three original species, eight moves, a type chart, items, one trainer battle, wild encounters, a party/bag/save menu and one example plugin.
 
 Templates are embedded in the CLI binary with `include_dir`, so `pkrs new` works offline.

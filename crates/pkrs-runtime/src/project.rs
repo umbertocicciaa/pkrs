@@ -25,12 +25,12 @@ use pkrs_world::{
 };
 
 use crate::battle::{BattleContent, BattleScreen, PostBattle};
+use crate::default_theme::build_default_ui_theme;
 use crate::encounters::{Encounters, wild_battle_request};
 use crate::main_loop::SimulationHost;
 use crate::overworld::{EntityKind, OverworldScripts, ScreenFade, ScriptOverlay};
 use crate::party::PlayerParty;
 use crate::scene::{MapScene, NeighborBackdrop, PLAYER_ENTITY, tile_sheet};
-use crate::ui_assets::build_test_ui_theme;
 use crate::ui_theme::UiTheme;
 
 /// Scripting API levels this runtime supports (§9.7).
@@ -420,7 +420,7 @@ impl ProjectHost {
         let npc_sprite = marker_sprite(&mut renderer, tw, th, [60, 90, 230, 255])?;
         let item_sprite = marker_sprite(&mut renderer, tw, th, [240, 200, 40, 255])?;
         let ui_theme = match &scripts {
-            Some(_) => match build_test_ui_theme(&mut renderer) {
+            Some(_) => match build_default_ui_theme(&mut renderer) {
                 Ok(theme) => Some(theme),
                 Err(err) => {
                     tracing::warn!(%err, "no UI theme: script dialogue closes immediately");

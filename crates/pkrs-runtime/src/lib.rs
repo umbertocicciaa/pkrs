@@ -2,6 +2,7 @@
 
 pub mod battle;
 mod ctx;
+mod default_theme;
 mod demo;
 pub mod encounters;
 pub mod evolution;
@@ -22,6 +23,7 @@ mod ui_theme;
 pub mod wiring;
 
 pub use ctx::RuntimeCtx;
+pub use default_theme::build_default_ui_theme;
 pub use demo::AnimationDemoHost;
 pub use fixed_step::{FixedStepClock, InterpolatedPosition, TICK_DT, lerp_f32};
 pub use game_host::RuntimeHost;

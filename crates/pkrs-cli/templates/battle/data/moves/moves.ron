@@ -1,0 +1,6 @@
+[
+    (id: "tackle", type: "normal", category: physical, power: 35, accuracy: 100, priority: 0, effects: [(effect: "damage")]),
+    (id: "ember", type: "fire", category: special, power: 40, accuracy: 100, priority: 0, effects: [(effect: "damage")]),
+    (id: "water_gun", type: "water", category: special, power: 40, accuracy: 100, priority: 0, effects: [(effect: "damage")]),
+    (id: "vine_whip", type: "grass", category: physical, power: 45, accuracy: 100, priority: 0, effects: [(effect: "damage")]),
+]

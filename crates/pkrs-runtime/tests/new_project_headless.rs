@@ -13,6 +13,7 @@ use pkrs_platform::{
 };
 use pkrs_render::{NullRenderer, Renderer, RendererConfig};
 use pkrs_runtime::project::{Project, ProjectHost, ProjectOptions};
+use pkrs_runtime::test_harness::{ScenarioOptions, run_project_scenarios, run_scenario_source};
 use pkrs_runtime::{RuntimeLoopConfig, block_on_loop};
 use pkrs_world::MovementConfig;
 
@@ -203,6 +204,38 @@ fn stepping_onto_warp_changes_map_after_fade() {
     assert_eq!(host.walker().pos(), GridPos::new(5, 7));
     assert_eq!(walk_ticks, 40, "sanity: held walk tick count for 3 steps");
 
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn battle_template_opens_in_a_battle_and_its_scenario_passes() {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("pkrs-battle-{}-{nanos}", std::process::id()));
+    scaffold(
+        Template::Battle,
+        &dir,
+        &TemplateVars::for_project("arena").unwrap(),
+    )
+    .unwrap();
+    let project = Project::open(&ProjectOptions {
+        dir: dir.clone(),
+        ..ProjectOptions::default()
+    })
+    .unwrap();
+    let opens_in_battle = run_scenario_source(
+        &project,
+        "tests/x.lua",
+        "wait_for_state('Battle', 10)\nadvance_battle()\nexpect_eq(battle().opponent.name, 'Leafkit')",
+        &ScenarioOptions::default(),
+    )
+    .unwrap();
+    assert!(opens_in_battle.passed(), "{opens_in_battle}");
+    let reports = run_project_scenarios(&project, &dir, &ScenarioOptions::default()).unwrap();
+    assert_eq!(reports.len(), 1);
+    assert!(reports[0].passed(), "{}", reports[0]);
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

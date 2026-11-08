@@ -36,7 +36,25 @@ pub struct Renderer {
     backend: Box<dyn RenderBackend>,
     display: DisplaySettings,
     config: RendererConfig,
-    pending: Vec<SpriteDraw>,
+    pending: Vec<Queued>,
+}
+
+enum Queued {
+    Sprite(SpriteDraw),
+    Rect {
+        dst: Rect,
+        color: Color,
+        layer: Layer,
+    },
+}
+
+impl Queued {
+    fn layer(&self) -> Layer {
+        match self {
+            Self::Sprite(draw) => draw.layer,
+            Self::Rect { layer, .. } => *layer,
+        }
+    }
 }
 
 impl Renderer {
@@ -92,12 +110,13 @@ impl Renderer {
 
     /// Queues a sprite draw (flushed in layer order in [`end_frame`](Self::end_frame)).
     pub fn draw_sprite(&mut self, draw: SpriteDraw) {
-        self.pending.push(draw);
+        self.pending.push(Queued::Sprite(draw));
     }
 
-    /// Queues a solid rectangle on `layer` (e.g. UI window chrome).
+    /// Queues a solid rectangle on `layer` (e.g. UI window chrome), ordered with the
+    /// sprites like any other draw.
     pub fn draw_filled_rect(&mut self, dst: Rect, color: Color, layer: Layer) {
-        self.backend.draw_filled_rect(dst, color, layer);
+        self.pending.push(Queued::Rect { dst, color, layer });
     }
 
     /// Queues the visible tiles of `grid` on `layer`; `origin` is the camera's
@@ -112,16 +131,18 @@ impl Renderer {
     ) -> usize {
         let draws = tile_layer_draws(grid, sheets, tile_size, layer, origin, self.view_size());
         let count = draws.len();
-        self.pending.extend(draws);
+        self.pending.extend(draws.into_iter().map(Queued::Sprite));
         count
     }
 
     /// Y-sorts `entities` (feet Y, then stable id) and queues them on [`Layer::Entities`].
     pub fn draw_entities(&mut self, entities: &mut [EntitySprite]) {
         y_sort(entities);
-        self.pending.extend(entities.iter().map(|e| SpriteDraw {
-            layer: Layer::Entities,
-            ..e.draw
+        self.pending.extend(entities.iter().map(|e| {
+            Queued::Sprite(SpriteDraw {
+                layer: Layer::Entities,
+                ..e.draw
+            })
         }));
     }
 
@@ -130,9 +151,14 @@ impl Renderer {
     /// The sort by layer is stable, so draws within one layer keep their submission order
     /// (file order for tile layers, y-sort order for entities).
     pub fn end_frame(&mut self) {
-        self.pending.sort_by_key(|d| d.layer);
-        for draw in &self.pending {
-            self.backend.draw_sprite(draw);
+        self.pending.sort_by_key(Queued::layer);
+        for queued in &self.pending {
+            match queued {
+                Queued::Sprite(draw) => self.backend.draw_sprite(draw),
+                Queued::Rect { dst, color, layer } => {
+                    self.backend.draw_filled_rect(*dst, *color, *layer);
+                }
+            }
         }
         self.pending.clear();
         self.backend.end_frame();
@@ -194,5 +220,43 @@ mod tests {
         renderer.end_frame();
         let layers: Vec<_> = log.draws().iter().map(|d| d.layer).collect();
         assert_eq!(layers, vec![Layer::Ground, Layer::Ui]);
+    }
+
+    #[test]
+    fn filled_rects_keep_submission_order_with_sprites() {
+        let null = NullRenderer::new();
+        let log = null.draw_log();
+        let mut renderer = Renderer::new(
+            Box::new(null),
+            DisplaySettings::default(),
+            RendererConfig::default(),
+        );
+        renderer.begin_frame(720, 480);
+        let panel = SpriteDraw {
+            texture: TextureHandle(1),
+            src: Rect::new(0.0, 0.0, 8.0, 8.0),
+            dst: Rect::new(0.0, 0.0, 64.0, 16.0),
+            flip_x: false,
+            tint: Color::WHITE,
+            layer: Layer::Ui,
+        };
+        renderer.draw_sprite(panel);
+        renderer.draw_filled_rect(Rect::new(4.0, 4.0, 32.0, 4.0), Color::BLACK, Layer::Ui);
+        renderer.draw_filled_rect(Rect::new(0.0, 0.0, 8.0, 8.0), Color::BLACK, Layer::Ground);
+        assert!(
+            log.draws().is_empty(),
+            "nothing reaches the backend before end_frame"
+        );
+        renderer.end_frame();
+        let order: Vec<_> = log
+            .draws()
+            .iter()
+            .map(|d| (d.layer, d.is_filled_rect))
+            .collect();
+        assert_eq!(
+            order,
+            vec![(Layer::Ground, true), (Layer::Ui, false), (Layer::Ui, true),],
+            "a bar drawn after its panel stays on top of it"
+        );
     }
 }

@@ -75,6 +75,37 @@ fn new_scaffolds_a_pinned_one_shot_project() {
 }
 
 #[test]
+fn new_scaffolds_the_battle_template() {
+    let root = temp_dir("new-battle");
+    let dest = root.join("arena");
+    let out = pkrs()
+        .args(["new", "Arena", "--template", "battle", "--path"])
+        .arg(&dest)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    for file in [
+        "pkrs.toml",
+        ".gitignore",
+        "maps/arena.tmx",
+        "scripts/main.lua",
+        "data/trainers/player.ron",
+        "data/trainers/rival.ron",
+        "tests/battle.lua",
+    ] {
+        assert!(dest.join(file).is_file(), "missing {file}");
+    }
+    let manifest = std::fs::read_to_string(dest.join("pkrs.toml")).unwrap();
+    assert!(manifest.contains("battles = true"), "{manifest}");
+    assert!(!manifest.contains("{{"), "every placeholder is rendered");
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
 fn new_rejects_bad_names_and_unavailable_templates() {
     let root = temp_dir("new-bad");
     let bad = pkrs()

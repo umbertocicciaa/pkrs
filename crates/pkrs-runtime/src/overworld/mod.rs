@@ -377,6 +377,11 @@ impl OverworldScripts {
         std::mem::take(&mut self.world.get_mut().global_uniforms)
     }
 
+    /// `audio.*` requests issued since the last call (§11).
+    pub fn take_audio_requests(&mut self) -> Vec<pkrs_audio::AudioRequest> {
+        std::mem::take(&mut self.world.get_mut().audio)
+    }
+
     /// Facing requested with `player.face`.
     pub fn take_player_face(&mut self) -> Option<Direction> {
         self.world.get_mut().player_face_request.take()

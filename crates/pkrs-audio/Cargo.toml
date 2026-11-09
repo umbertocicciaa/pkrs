@@ -7,9 +7,18 @@ rust-version.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+default = ["kira"]
+# `KiraAudio` adapter (OGG streaming BGM, SFX, jingles through cpal) — §4.5, §11.
+kira = ["dep:kira"]
+
 [dependencies]
 pkrs-assets.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+ron.workspace = true
+kira = { workspace = true, optional = true }
 
 [lints]
 workspace = true

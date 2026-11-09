@@ -28,7 +28,8 @@
 //! `dialogues_opened()`, `choices()`, `cursor()` (1-based), `battle()` (`nil` outside a battle,
 //! else `{ menu, turn, player = { name, level, hp, max_hp }, opponent = { … } }`), `party()`
 //! (the player's party, 1-based: `{ species, name, level, exp, moves = { ids }, max_hp,
-//! attack, defense, speed }`; empty before the first battle).
+//! attack, defense, speed }`; empty before the first battle), `audio_log()` (the audio
+//! commands sent so far, oldest first, e.g. `{ "play #1 bgm:town fade=0", "stop #1 fade=30" }`).
 //!
 //! Expectations: `expect(cond [, message])`, `expect_eq(actual, expected [, message])`,
 //! `expect_state(name)`, `expect_map(id)`, `expect_player_at(x, y [, facing])`,
@@ -92,6 +93,7 @@ pub const SCENARIO_API: &[&str] = &[
     "cursor",
     "battle",
     "party",
+    "audio_log",
     "expect",
     "expect_eq",
     "expect_state",
@@ -801,6 +803,16 @@ fn install_queries(lua: &Lua, env: &Table) -> mlua::Result<()> {
             to_lua(
                 lua,
                 &ScriptValue::List(party.iter().map(party_member_value).collect()),
+            )
+        })?,
+    )?;
+    env.raw_set(
+        "audio_log",
+        lua.create_function(|lua, ()| {
+            let audio = snapshot(lua, |s| s.audio.clone())?;
+            to_lua(
+                lua,
+                &ScriptValue::List(audio.into_iter().map(ScriptValue::String).collect()),
             )
         })?,
     )?;

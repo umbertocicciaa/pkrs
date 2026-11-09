@@ -15,6 +15,7 @@ use std::cell::{Ref, RefCell, RefMut};
 use std::collections::{BTreeMap, VecDeque};
 use std::rc::Rc;
 
+use pkrs_audio::AudioRequest;
 use pkrs_core::is_action_name;
 use pkrs_core::{Direction, GridPos};
 use pkrs_data::{Localizer, TextArgs};
@@ -182,6 +183,8 @@ pub struct WorldModel {
     pub camera: Vec<CameraCommand>,
     /// `render.set_global_uniform` calls not yet applied to the renderer, in call order.
     pub global_uniforms: Vec<(String, UniformValue)>,
+    /// `audio.*` requests, in call order (§11).
+    pub audio: Vec<AudioRequest>,
     /// Active language and text tables (§5.5): dialogue, choices and notifications are
     /// localized with it when they are queued.
     pub localizer: Localizer,
@@ -206,6 +209,7 @@ impl Default for WorldModel {
             warp_request: None,
             camera: Vec::new(),
             global_uniforms: Vec::new(),
+            audio: Vec::new(),
             localizer: crate::locale::engine_localizer(),
         }
     }
@@ -746,6 +750,11 @@ impl ScriptWorld for SharedWorld {
         self.get_mut()
             .global_uniforms
             .push((name.to_owned(), value));
+        Ok(())
+    }
+
+    fn audio(&mut self, request: AudioRequest) -> ApiResult<()> {
+        self.get_mut().audio.push(request);
         Ok(())
     }
 }

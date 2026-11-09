@@ -94,6 +94,9 @@ pub struct ScenarioSnapshot {
     pub battle: Option<BattleSnapshot>,
     /// The player's party (empty before the first battle loaded it).
     pub party: Vec<PartyMemberSnapshot>,
+    /// Audio commands sent to the backend so far, in their compact form
+    /// (`play #1 bgm:town fade=0`, `stop #1 fade=30`, …; empty without a recording backend).
+    pub audio: Vec<String>,
 }
 
 /// One member of the player's party (`party()` in the test API).

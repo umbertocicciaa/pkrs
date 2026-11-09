@@ -67,6 +67,7 @@ pub fn snapshot(host: &ProjectHost, dialogues_opened: u64) -> ScenarioSnapshot {
         ..ScenarioSnapshot::default()
     };
     snap.party = party_snapshot(host);
+    snap.audio = host.audio_log().map(|log| log.lines()).unwrap_or_default();
     if let Some(flow) = host.post_battle() {
         snap.dialogue = flow.text().map(str::to_owned);
         snap.choices = flow.menu_labels();

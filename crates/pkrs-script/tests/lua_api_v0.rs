@@ -7,6 +7,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use pkrs_audio::{AudioRequest, VolumeGroup};
 use pkrs_core::{Direction, GridPos, Pcg64Rng};
 use pkrs_data::{TextArgs, format_text};
 use pkrs_render::UniformValue;
@@ -30,6 +31,7 @@ struct State {
     player: (GridPos, Direction),
     locked: bool,
     camera: Vec<CameraCommand>,
+    audio: Vec<AudioRequest>,
     language: String,
 }
 
@@ -48,6 +50,7 @@ impl Fake {
             player: (GridPos::new(5, 6), Direction::Up),
             locked: false,
             camera: Vec::new(),
+            audio: Vec::new(),
             language: "en".to_owned(),
         })))
     }
@@ -220,6 +223,10 @@ impl ScriptWorld for Fake {
         self.note(format!("uniform {name} = {value:?}"));
         Ok(())
     }
+    fn audio(&mut self, request: AudioRequest) -> ApiResult<()> {
+        self.0.borrow_mut().audio.push(request);
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -272,7 +279,7 @@ fn every_api_v0_namespace_is_a_global_table() {
     let fake = Fake::new();
     let mut h = host(&fake);
     for ns in [
-        "game", "map", "player", "ui", "camera", "time", "log", "events",
+        "game", "map", "player", "ui", "camera", "time", "log", "events", "audio",
     ] {
         assert_eq!(
             eval(&mut h, &format!("return type({ns})")),
@@ -742,6 +749,63 @@ fn ui_argument_errors_point_at_the_caller() {
 // ---------------------------------------------------------------------------------------------
 // camera
 // ---------------------------------------------------------------------------------------------
+
+#[test]
+fn audio_requests_reach_the_world() {
+    let fake = Fake::new();
+    let mut h = host(&fake);
+    eval(
+        &mut h,
+        "audio.play_bgm('town'); audio.play_bgm('route1', { fade = 12 }); audio.play_bgm('cave', 5); \
+         audio.stop_bgm(); audio.stop_bgm({ fade = 0 }); audio.play_sfx('bump'); \
+         audio.play_jingle('item_get'); audio.jingle('level_up'); audio.set_volume('bgm', 0.5)",
+    );
+    let bgm = |id: &str, fade| AudioRequest::PlayBgm {
+        id: id.into(),
+        fade,
+    };
+    assert_eq!(
+        fake.0.borrow().audio,
+        [
+            bgm("town", None),
+            bgm("route1", Some(12)),
+            bgm("cave", Some(5)),
+            AudioRequest::StopBgm { fade: None },
+            AudioRequest::StopBgm { fade: Some(0) },
+            AudioRequest::PlaySfx { id: "bump".into() },
+            AudioRequest::PlayJingle {
+                id: "item_get".into()
+            },
+            AudioRequest::PlayJingle {
+                id: "level_up".into()
+            },
+            AudioRequest::SetVolume {
+                group: VolumeGroup::Bgm,
+                volume: 0.5
+            },
+        ]
+    );
+    assert_eq!(
+        err(&mut h, "audio.play_bgm('')"),
+        "scripts/test.lua:1: audio.play_bgm: id must not be empty"
+    );
+    assert_eq!(
+        err(&mut h, "audio.play_sfx(3)"),
+        "scripts/test.lua:1: audio.play_sfx: id must be a string (got number)"
+    );
+    assert_eq!(
+        err(&mut h, "audio.set_volume('music', 1)"),
+        "scripts/test.lua:1: audio.set_volume: group must be \"master\", \"bgm\", \"sfx\" or \"jingle\" (got \"music\")"
+    );
+    assert_eq!(
+        err(&mut h, "audio.set_volume('sfx', 2)"),
+        "scripts/test.lua:1: audio.set_volume: volume must be between 0 and 1 (got 2)"
+    );
+    assert_eq!(
+        err(&mut h, "audio.stop_bgm('slow')"),
+        "scripts/test.lua:1: audio.stop_bgm: options must be nil, a tick count or { fade = ticks } (got string)"
+    );
+}
 
 #[test]
 fn camera_commands_reach_the_world() {

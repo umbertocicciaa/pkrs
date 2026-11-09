@@ -4,6 +4,8 @@
 //! ports/adapters surface on every OS. This module is the single place that decides which
 //! adapter backs each port for a given [`RunMode`], so the choice is unit-testable.
 
+use pkrs_assets::Vfs;
+use pkrs_audio::{AudioBackend, KiraAudio, NullAudio};
 use pkrs_platform::{
     DisplaySettings, FixedPaths, NullPlatform, Platform, PlatformConfig, WindowConfig,
 };
@@ -48,15 +50,24 @@ pub enum RenderAdapter {
     Null,
 }
 
+/// Adapter behind the `AudioBackend` port (§11).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AudioAdapter {
+    /// `KiraAudio`: real output; falls back to `NullAudio` (logged) without a sound device.
+    Kira,
+    /// `NullAudio`: records commands, no sound device needed.
+    Null,
+}
+
 /// Which adapter backs each port for one run.
-///
-/// `NullAudio` joins this set when the `AudioBackend` port lands (§11).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AdapterSet {
     /// Window, loop and input.
     pub platform: PlatformAdapter,
     /// Drawing.
     pub renderer: RenderAdapter,
+    /// Sound.
+    pub audio: AudioAdapter,
 }
 
 impl AdapterSet {
@@ -67,10 +78,12 @@ impl AdapterSet {
             RunMode::Windowed => Self {
                 platform: PlatformAdapter::Macroquad,
                 renderer: RenderAdapter::Macroquad,
+                audio: AudioAdapter::Kira,
             },
             RunMode::Headless => Self {
                 platform: PlatformAdapter::Null,
                 renderer: RenderAdapter::Null,
+                audio: AudioAdapter::Null,
             },
         }
     }
@@ -80,6 +93,7 @@ impl AdapterSet {
     pub const fn is_headless(&self) -> bool {
         matches!(self.platform, PlatformAdapter::Null)
             && matches!(self.renderer, RenderAdapter::Null)
+            && matches!(self.audio, AudioAdapter::Null)
     }
 }
 
@@ -102,6 +116,17 @@ pub fn headless_renderer(display: DisplaySettings) -> (Renderer, DrawLog) {
     (renderer, log)
 }
 
+/// The [`AudioBackend`] for `adapter`, reading sounds from `vfs`. `Kira` falls back to
+/// [`NullAudio`] (with a warning) when no output device can be opened, so machines and CI
+/// runners without sound still run the game.
+#[must_use]
+pub fn audio_backend(adapter: AudioAdapter, vfs: Box<dyn Vfs>) -> Box<dyn AudioBackend> {
+    match adapter {
+        AudioAdapter::Kira => KiraAudio::open_or_null(vfs),
+        AudioAdapter::Null => Box::new(NullAudio::new()),
+    }
+}
+
 /// Window settings for a windowed run titled `title`.
 #[must_use]
 pub fn window_config(title: &str, display: &DisplaySettings, vsync: bool) -> WindowConfig {
@@ -119,6 +144,7 @@ mod tests {
         let set = AdapterSet::for_mode(RunMode::from_headless_flag(true));
         assert_eq!(set.platform, PlatformAdapter::Null);
         assert_eq!(set.renderer, RenderAdapter::Null);
+        assert_eq!(set.audio, AudioAdapter::Null);
         assert!(set.is_headless());
     }
 
@@ -127,7 +153,14 @@ mod tests {
         let set = AdapterSet::for_mode(RunMode::from_headless_flag(false));
         assert_eq!(set.platform, PlatformAdapter::Macroquad);
         assert_eq!(set.renderer, RenderAdapter::Macroquad);
+        assert_eq!(set.audio, AudioAdapter::Kira);
         assert!(!set.is_headless());
+    }
+
+    #[test]
+    fn null_audio_adapter_needs_no_device() {
+        let backend = audio_backend(AudioAdapter::Null, Box::new(pkrs_assets::MemoryVfs::new()));
+        assert_eq!(backend.name(), "null");
     }
 
     #[test]

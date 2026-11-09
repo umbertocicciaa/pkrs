@@ -14,6 +14,12 @@ use crate::state::{StateStack, TitleState};
 use crate::tick::{TickHooks, run_tick};
 use crate::ui_theme::UiTheme;
 
+/// Dev watcher and plugin list, held until the overworld boots.
+struct PendingDev {
+    watcher: Option<Box<dyn FileWatcher>>,
+    plugins: Vec<String>,
+}
+
 /// Runs title / save UI, then the project overworld as one [`SimulationHost`].
 pub struct ProjectSessionHost {
     project: Project,
@@ -24,7 +30,7 @@ pub struct ProjectSessionHost {
     stack: StateStack,
     overworld: Option<ProjectHost>,
     pending_audio: Option<Box<dyn AudioBackend>>,
-    pending_dev: Option<(Option<Box<dyn FileWatcher>>, Vec<String>)>,
+    pending_dev: Option<PendingDev>,
     quit: bool,
 }
 
@@ -79,13 +85,12 @@ impl ProjectSessionHost {
             )));
         };
         let renderer = std::mem::replace(&mut self.ui_renderer, fresh_renderer(&self.project));
-        let mut host =
-            ProjectHost::with_scripts_boot(&self.project, renderer, scripts, boot)?;
+        let mut host = ProjectHost::with_scripts_boot(&self.project, renderer, scripts, boot)?;
         if let Some(backend) = self.pending_audio.take() {
             host.set_audio_backend(backend);
         }
-        if let Some((watcher, plugins)) = self.pending_dev.take() {
-            host.enable_dev(watcher, plugins);
+        if let Some(dev) = self.pending_dev.take() {
+            host.enable_dev(dev.watcher, dev.plugins);
         }
         self.overworld = Some(host);
         self.stack = StateStack::new();
@@ -106,7 +111,7 @@ impl ProjectSessionHost {
         if let Some(host) = self.overworld.as_mut() {
             host.enable_dev(watcher, plugins);
         } else {
-            self.pending_dev = Some((watcher, plugins));
+            self.pending_dev = Some(PendingDev { watcher, plugins });
         }
     }
 

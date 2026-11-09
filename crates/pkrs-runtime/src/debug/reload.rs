@@ -140,9 +140,7 @@ impl HotReload {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pkrs_assets::watcher::{
-        MemoryFileWatcher, ReloadKind, WatchChange, WatchEvent, WatchSink,
-    };
+    use pkrs_assets::watcher::{MemoryFileWatcher, ReloadKind, WatchChange, WatchEvent, WatchSink};
     use std::sync::{Arc, Mutex};
 
     #[test]

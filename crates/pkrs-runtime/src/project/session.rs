@@ -76,8 +76,7 @@ impl ProjectSessionHost {
             )));
         };
         let renderer = std::mem::replace(&mut self.ui_renderer, fresh_renderer(&self.project));
-        let mut host =
-            ProjectHost::with_scripts_boot(&self.project, renderer, scripts, boot)?;
+        let mut host = ProjectHost::with_scripts_boot(&self.project, renderer, scripts, boot)?;
         if let Some(backend) = self.pending_audio.take() {
             host.set_audio_backend(backend);
         }

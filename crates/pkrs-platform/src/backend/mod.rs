@@ -12,12 +12,16 @@ use crate::key::Key;
 
 #[cfg(feature = "directories")]
 mod directories;
+#[cfg(feature = "gilrs")]
+mod gilrs;
 #[cfg(feature = "macroquad")]
 mod macroquad;
 mod null;
 
 #[cfg(feature = "directories")]
 pub use self::directories::DirectoriesPaths;
+#[cfg(feature = "gilrs")]
+pub use self::gilrs::GilrsGamepad;
 #[cfg(feature = "macroquad")]
 pub use self::macroquad::MacroquadPlatform;
 pub use self::null::{NullFrame, NullPlatform, block_on};

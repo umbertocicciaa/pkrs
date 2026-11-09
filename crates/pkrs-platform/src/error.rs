@@ -31,9 +31,32 @@ pub enum InputError {
         /// Key string that could not be parsed.
         key: String,
     },
-    /// A binding lists no keys.
-    #[error("action `{0}` must list at least one key")]
+    /// A binding lists no keys and no buttons.
+    #[error("action `{0}` must list at least one key or button")]
     EmptyBinding(String),
+    /// A config button name is unknown.
+    #[error("unknown gamepad button `{button}` for action `{action}`")]
+    UnknownButtonName {
+        /// Action the binding belongs to.
+        action: String,
+        /// Button string that could not be parsed.
+        button: String,
+    },
+}
+
+/// Errors reading or writing the per-user config file (§14.3).
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum ConfigError {
+    /// `config.ron` is not in the config directory.
+    #[error("user config not found")]
+    NotFound,
+    /// The file is not valid config RON.
+    #[error("user config is invalid: {0}")]
+    Parse(String),
+    /// The config directory or file could not be read or written.
+    #[error("user config I/O failed: {0}")]
+    Io(String),
 }
 
 /// Errors produced by `pkrs-platform`.

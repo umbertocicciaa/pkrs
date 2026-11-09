@@ -43,6 +43,7 @@ ron = "0.8"
 # `audio` (quad-snd) stays off: audio goes through pkrs-audio (kira adapter, §11).
 macroquad = { version = "0.4", default-features = false }
 directories = "6"
+gilrs = "0.11"
 # Lua 5.4 compiled from vendored C sources (no system Lua, §0.4). 0.11 keeps MSRV 1.85.
 mlua = { version = "0.11.6", features = ["lua54", "vendored"] }
 # `zstd` (default) compiles C code; v1 maps use CSV/base64(+zlib/gzip) layer data only.

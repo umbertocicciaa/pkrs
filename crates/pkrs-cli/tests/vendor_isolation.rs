@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 const ROWS: &[(&str, &str, &str)] = &[
     ("pkrs-platform", "macroquad", "backend/macroquad.rs"),
     ("pkrs-platform", "directories", "backend/directories.rs"),
+    ("pkrs-platform", "gilrs", "backend/gilrs.rs"),
+    ("pkrs-platform", "ron", "config.rs"),
     ("pkrs-render", "macroquad", "backend/macroquad.rs"),
     ("pkrs-world", "tiled", "importer/tiled.rs"),
     ("pkrs-core", "rand_pcg", "rng/adapter.rs"),

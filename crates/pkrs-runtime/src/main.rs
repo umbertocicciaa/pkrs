@@ -6,7 +6,8 @@ use anyhow::Context as _;
 use pkrs_assets::watcher::{FileWatcher, NotifyWatcher};
 use pkrs_core::{GameRng, GridPos, Pcg64Rng};
 use pkrs_platform::{
-    DisplaySettings, FixedPaths, MacroquadPlatform, NullPlatform, Platform, PlatformConfig,
+    ConfigError, DisplaySettings, FixedPaths, MacroquadPlatform, NullPlatform, Platform,
+    PlatformConfig, UserConfig, UserPaths,
 };
 use pkrs_render::{MacroquadRenderer, Renderer, RendererConfig};
 use pkrs_runtime::plugins::start_project_scripts;
@@ -15,10 +16,12 @@ use pkrs_runtime::test_harness::{
     DEFAULT_SCENARIO_TICKS, ScenarioOptions, resolve_script, run_scenario,
 };
 use pkrs_runtime::validation::startup_check;
-use pkrs_runtime::wiring::{audio_backend, headless_platform, headless_renderer, window_config};
+use pkrs_runtime::wiring::{
+    audio_backend, gamepad_source, headless_platform, headless_renderer, window_config,
+};
 use pkrs_runtime::{
-    AdapterSet, AnimationDemoHost, LoopExit, PlatformAdapter, RenderAdapter, RunMode,
-    RuntimeLoopConfig, block_on_loop, run_loop,
+    AdapterSet, AnimationDemoHost, GamepadAdapter, LoopExit, PlatformAdapter, RenderAdapter,
+    RunMode, RuntimeLoopConfig, block_on_loop, run_loop,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -120,7 +123,8 @@ fn run_project_windowed(opts: &ProjectOptions, config: RuntimeLoopConfig) -> any
     let project = Project::open(opts)
         .with_context(|| format!("cannot open project `{}`", opts.dir.display()))?;
     startup_check(&project)?;
-    let display = project.display();
+    let mut display = project.display();
+    apply_saved_window_scale(&mut display, project.paths.config_dir());
     let window = window_config(&project.manifest.game.name, &display, config.vsync);
     let skip_title = opts.map.is_some() || opts.warp.is_some();
     let project_dir = opts.dir.clone();
@@ -154,6 +158,7 @@ fn run_project_windowed(opts: &ProjectOptions, config: RuntimeLoopConfig) -> any
             AdapterSet::for_mode(RunMode::Windowed).audio,
             Box::new(project.vfs.clone()),
         ));
+        host.set_gamepad(gamepad_source(GamepadAdapter::Gilrs));
         let watcher = NotifyWatcher::new(&project_dir)
             .ok()
             .map(|w| Box::new(w) as Box<dyn FileWatcher>);
@@ -162,6 +167,14 @@ fn run_project_windowed(opts: &ProjectOptions, config: RuntimeLoopConfig) -> any
         tracing::info!(?exit, "project run finished");
     });
     Ok(())
+}
+
+fn apply_saved_window_scale(display: &mut DisplaySettings, config_dir: &std::path::Path) {
+    match UserConfig::read(config_dir) {
+        Ok(config) if config.window_scale >= 1 => display.scale = config.window_scale,
+        Ok(_) | Err(ConfigError::NotFound) => {}
+        Err(err) => tracing::warn!(%err, "user config ignored"),
+    }
 }
 
 /// Engine RNG behind the scripts' `math.random`, seeded from the clock.

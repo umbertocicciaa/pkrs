@@ -9,11 +9,13 @@ use std::path::{Path, PathBuf};
 
 use pkrs_assets::watcher::{FileWatcher, ReloadAction};
 use pkrs_assets::{FolderVfs, Vfs, VfsPath};
+use pkrs_audio::VolumeGroup;
 use pkrs_battle::{BattleResult, NullBattleHooks, RngPolicy};
 use pkrs_core::{Direction, GridPos, Pcg64Rng, ProjectManifest, Version};
 use pkrs_data::{GameData, LoadOptions, Localizer, UnknownLanguage};
 use pkrs_platform::{
-    Action, BuiltinAction, DisplaySettings, Input, InputFacadeConfig, Key, Platform, UserPaths,
+    Action, BuiltinAction, ConfigError, DisplaySettings, GamepadButton, GamepadSource, Input,
+    InputFacadeConfig, Key, NullGamepad, Platform, UserConfig, UserPaths,
 };
 use pkrs_render::{CameraTarget, Rect, Renderer, TextureHandle};
 use pkrs_script::{
@@ -407,6 +409,11 @@ pub struct ProjectHost {
     dev: Option<DevRuntime>,
     /// Plugin ids used when scripts are reloaded (§8.3).
     dev_plugins: Vec<String>,
+    /// First-pad source merged into [`input`](Self::input) (§10). `NullGamepad` until a run
+    /// installs [`set_gamepad`](Self::set_gamepad).
+    gamepad: Box<dyn GamepadSource>,
+    /// Bindings, volumes and window scale loaded from the user config (§14.3).
+    user_config: UserConfig,
 }
 
 /// Seed of the stream battles derive their RNG from until the save owns the game RNG (§12).
@@ -495,8 +502,14 @@ impl ProjectHost {
             player_sprite.1,
             false,
         );
-        let input = Input::from_manifest(InputFacadeConfig::default(), &project.manifest.input)
+        let mut input = Input::from_manifest(InputFacadeConfig::default(), &project.manifest.input)
             .unwrap_or_else(|_| Input::new(InputFacadeConfig::default()));
+        let mut user_config = load_saved_config(project.paths.config_dir());
+        if let Err(err) = input.apply_user_config(&user_config) {
+            tracing::warn!(%err, "user bindings ignored");
+        } else {
+            user_config.bindings = input.export_bindings();
+        }
         let npc_sprite = marker_sprite(&mut renderer, tw, th, [60, 90, 230, 255])?;
         let item_sprite = marker_sprite(&mut renderer, tw, th, [240, 200, 40, 255])?;
         let ui_theme = match &scripts {
@@ -551,7 +564,10 @@ impl ProjectHost {
             audio: audio::ProjectAudio::for_project(project),
             dev: None,
             dev_plugins: Vec::new(),
+            gamepad: Box::new(NullGamepad::new()),
+            user_config,
         };
+        host.apply_saved_volumes();
         host.audio.enter_map(host.scene.map());
         if let Some(scripts) = host.scripts.as_ref() {
             scripts.world().get_mut().localizer = host.localizer.clone();
@@ -698,6 +714,53 @@ impl ProjectHost {
     #[must_use]
     pub fn scene(&self) -> &MapScene {
         &self.scene
+    }
+
+    /// Installs the pad polled with the keyboard (§10). Headless tests pass a [`NullGamepad`].
+    pub fn set_gamepad(&mut self, gamepad: Box<dyn GamepadSource>) {
+        self.gamepad = gamepad;
+    }
+
+    /// Polls keyboard and `buttons` into the action state without touching [`gamepad`](Self::set_gamepad).
+    ///
+    /// The session host owns the pad for a full run and calls this so the title screen and the
+    /// overworld share one poll.
+    pub fn poll_devices(&mut self, platform: &Platform, buttons: &[GamepadButton]) {
+        self.input.poll_with(platform, buttons);
+        self.audio.set_focus(platform.is_focused());
+        if let Some(mut dev) = self.dev.take() {
+            dev.poll(platform, self);
+            self.dev = Some(dev);
+        }
+    }
+
+    fn apply_saved_volumes(&mut self) {
+        let volumes = self.user_config.volumes;
+        self.apply_volume(VolumeGroup::Master, volumes.master);
+        self.apply_volume(VolumeGroup::Bgm, volumes.bgm);
+        self.apply_volume(VolumeGroup::Sfx, volumes.sfx);
+        self.apply_volume(VolumeGroup::Jingle, volumes.jingle);
+    }
+
+    /// Queues a group volume only when it differs from the live value, so a default config
+    /// does not prepend `group` commands to the audio log.
+    fn apply_volume(&mut self, group: VolumeGroup, volume: f32) {
+        let current = self.audio().volume(group);
+        if (current - volume).abs() < f32::EPSILON {
+            return;
+        }
+        self.audio_mut().set_volume(group, volume);
+    }
+
+    fn persist_user_config(&mut self, config: UserConfig) {
+        if let Err(err) = config.save(self.project.paths.config_dir()) {
+            tracing::warn!(%err, "could not write user config");
+        }
+        if let Err(err) = self.input.apply_user_config(&config) {
+            tracing::warn!(%err, "could not apply user bindings");
+        }
+        self.user_config = config;
+        self.apply_saved_volumes();
     }
 
     /// The player walker.
@@ -1676,6 +1739,17 @@ impl ProjectHost {
 
 /// Plugins whose `data/text/` tables load (load order; the enabled list when the plugin set
 /// cannot be resolved, which plugin loading reports itself).
+fn load_saved_config(dir: &Path) -> UserConfig {
+    match UserConfig::read(dir) {
+        Ok(config) => config,
+        Err(ConfigError::NotFound) => UserConfig::default(),
+        Err(err) => {
+            tracing::warn!(%err, "user config ignored");
+            UserConfig::default()
+        }
+    }
+}
+
 fn text_plugins(project: &Project) -> Vec<String> {
     match crate::plugins::plan_project_plugins(project) {
         Ok(plan) => plan.ids().into_iter().map(str::to_owned).collect(),
@@ -1838,12 +1912,9 @@ fn marker_sprite(
 
 impl SimulationHost for ProjectHost {
     fn poll_input(&mut self, platform: &Platform) {
-        self.input.poll(platform);
-        self.audio.set_focus(platform.is_focused());
-        if let Some(mut dev) = self.dev.take() {
-            dev.poll(platform, self);
-            self.dev = Some(dev);
-        }
+        self.gamepad.poll();
+        let buttons = self.gamepad.buttons_down();
+        self.poll_devices(platform, &buttons);
     }
 
     fn begin_tick(&mut self) {

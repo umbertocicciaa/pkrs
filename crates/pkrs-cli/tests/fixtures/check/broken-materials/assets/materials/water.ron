@@ -1,0 +1,8 @@
+(
+    shader: "pkrs/animated_tiles",
+    uniforms: {
+        "frames": Int(0),
+        "ticks_per_frame": Int(15),
+        "speed": Float(2.0),
+    },
+)

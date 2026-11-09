@@ -19,6 +19,7 @@ use pkrs_audio::AudioRequest;
 use pkrs_core::is_action_name;
 use pkrs_core::{Direction, GridPos};
 use pkrs_data::{Localizer, TextArgs};
+use pkrs_render::UniformValue;
 use pkrs_save::WorldState;
 use pkrs_script::{ApiError, ApiResult, CameraCommand, ScriptValue, ScriptWorld, TileInfo};
 use pkrs_world::{
@@ -180,6 +181,8 @@ pub struct WorldModel {
     pub warp_request: Option<WarpRequest>,
     /// Camera commands, in call order.
     pub camera: Vec<CameraCommand>,
+    /// `render.set_global_uniform` calls not yet applied to the renderer, in call order.
+    pub global_uniforms: Vec<(String, UniformValue)>,
     /// `audio.*` requests, in call order (§11).
     pub audio: Vec<AudioRequest>,
     /// Active language and text tables (§5.5): dialogue, choices and notifications are
@@ -205,6 +208,7 @@ impl Default for WorldModel {
             notifications: Vec::new(),
             warp_request: None,
             camera: Vec::new(),
+            global_uniforms: Vec::new(),
             audio: Vec::new(),
             localizer: crate::locale::engine_localizer(),
         }
@@ -739,6 +743,13 @@ impl ScriptWorld for SharedWorld {
 
     fn camera(&mut self, command: CameraCommand) -> ApiResult<()> {
         self.get_mut().camera.push(command);
+        Ok(())
+    }
+
+    fn set_global_uniform(&mut self, name: &str, value: UniformValue) -> ApiResult<()> {
+        self.get_mut()
+            .global_uniforms
+            .push((name.to_owned(), value));
         Ok(())
     }
 

@@ -415,6 +415,11 @@ impl OverworldScripts {
         std::mem::take(&mut self.world.get_mut().camera)
     }
 
+    /// `render.set_global_uniform` calls since the last call, in call order (§5.6).
+    pub fn take_global_uniforms(&mut self) -> Vec<(String, pkrs_render::UniformValue)> {
+        std::mem::take(&mut self.world.get_mut().global_uniforms)
+    }
+
     /// `audio.*` requests issued since the last call (§11).
     pub fn take_audio_requests(&mut self) -> Vec<pkrs_audio::AudioRequest> {
         std::mem::take(&mut self.world.get_mut().audio)

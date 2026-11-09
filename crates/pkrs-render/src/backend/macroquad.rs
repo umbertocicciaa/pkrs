@@ -4,14 +4,20 @@
 
 use std::collections::HashMap;
 
+use ::macroquad::miniquad::{
+    BlendFactor, BlendState, BlendValue, Equation, PipelineParams, ShaderSource, UniformDesc,
+    UniformType as MqUniformType,
+};
 use ::macroquad::prelude::{
-    Camera2D, DrawTextureParams, FilterMode, RenderTarget, Texture2D, draw_rectangle,
-    draw_texture_ex, render_target, set_camera, set_default_camera,
+    Camera2D, DrawTextureParams, FilterMode, Material as MqMaterial, MaterialParams, RenderTarget,
+    Texture2D, draw_rectangle, draw_texture_ex, gl_use_default_material, gl_use_material,
+    load_material, render_target, set_camera, set_default_camera,
 };
 
 use super::RenderBackend;
 use crate::color::Color;
 use crate::draw::SpriteDraw;
+use crate::material::{MaterialBind, MaterialHandle, ShaderProgram, UniformType, UniformValue};
 use crate::texture::TextureHandle;
 use crate::viewport::ViewportLayout;
 use crate::{RenderError, Result};
@@ -33,6 +39,46 @@ pub struct MacroquadRenderer {
     textures: HashMap<u32, Texture2D>,
     next_id: u32,
     viewport: ViewportLayout,
+    materials: HashMap<u32, MqMaterial>,
+    next_material_id: u32,
+}
+
+fn to_mq_uniform(ty: UniformType) -> Option<MqUniformType> {
+    Some(match ty {
+        UniformType::Float => MqUniformType::Float1,
+        UniformType::Int => MqUniformType::Int1,
+        UniformType::Vec2 => MqUniformType::Float2,
+        UniformType::Vec3 => MqUniformType::Float3,
+        UniformType::Vec4 => MqUniformType::Float4,
+        UniformType::Mat4 => return None,
+    })
+}
+
+fn set_uniform(material: &MqMaterial, name: &str, value: UniformValue) {
+    match value {
+        UniformValue::Float(v) => material.set_uniform(name, v),
+        UniformValue::Int(v) => material.set_uniform(name, v),
+        UniformValue::Vec2(v) => material.set_uniform(name, v),
+        UniformValue::Vec3(v) => material.set_uniform(name, v),
+        UniformValue::Vec4(v) => material.set_uniform(name, v),
+    }
+}
+
+/// Straight alpha blending, as macroquad's default sprite pipeline.
+fn alpha_blend() -> PipelineParams {
+    PipelineParams {
+        color_blend: Some(BlendState::new(
+            Equation::Add,
+            BlendFactor::Value(BlendValue::SourceAlpha),
+            BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
+        )),
+        alpha_blend: Some(BlendState::new(
+            Equation::Add,
+            BlendFactor::Zero,
+            BlendFactor::One,
+        )),
+        ..Default::default()
+    }
 }
 
 impl Default for MacroquadRenderer {
@@ -53,6 +99,8 @@ impl MacroquadRenderer {
                 scale: 1.0,
                 dest: crate::rect::Rect::new(0.0, 0.0, 0.0, 0.0),
             },
+            materials: HashMap::new(),
+            next_material_id: 1,
         }
     }
 
@@ -136,28 +184,57 @@ impl RenderBackend for MacroquadRenderer {
         let Some(texture) = self.textures.get(&draw.texture.0) else {
             return;
         };
-        draw_texture_ex(
-            texture,
-            draw.dst.x,
-            draw.dst.y,
-            ::macroquad::prelude::Color::new(
-                f32::from(draw.tint.r) / 255.0,
-                f32::from(draw.tint.g) / 255.0,
-                f32::from(draw.tint.b) / 255.0,
-                f32::from(draw.tint.a) / 255.0,
-            ),
-            DrawTextureParams {
-                source: Some(::macroquad::prelude::Rect::new(
-                    draw.src.x,
-                    draw.src.y,
-                    draw.src.width,
-                    draw.src.height,
-                )),
-                dest_size: Some(::macroquad::prelude::vec2(draw.dst.width, draw.dst.height)),
-                flip_x: draw.flip_x,
-                ..Default::default()
+        blit(texture, draw);
+    }
+
+    fn create_material(&mut self, program: &ShaderProgram<'_>) -> Result<MaterialHandle> {
+        let mut uniforms = Vec::with_capacity(program.uniforms.len());
+        for (name, ty) in program.uniforms {
+            let ty = to_mq_uniform(*ty).ok_or_else(|| {
+                RenderError::Backend(format!(
+                    "material `{}`: uniform `{name}` has a type the backend cannot bind",
+                    program.name
+                ))
+            })?;
+            uniforms.push(UniformDesc::new(name, ty));
+        }
+        let material = load_material(
+            ShaderSource::Glsl {
+                vertex: program.vertex,
+                fragment: program.fragment,
             },
-        );
+            MaterialParams {
+                pipeline_params: alpha_blend(),
+                uniforms,
+                textures: Vec::new(),
+            },
+        )
+        .map_err(|e| {
+            RenderError::Backend(format!("material `{}` does not compile: {e}", program.name))
+        })?;
+        let id = self.next_material_id;
+        self.next_material_id = self
+            .next_material_id
+            .checked_add(1)
+            .ok_or_else(|| RenderError::Backend("material handle id overflow".into()))?;
+        self.materials.insert(id, material);
+        Ok(MaterialHandle(id))
+    }
+
+    fn draw_sprite_with_material(&mut self, draw: &SpriteDraw, bind: &MaterialBind) {
+        let Some(texture) = self.textures.get(&draw.texture.0) else {
+            return;
+        };
+        let Some(material) = self.materials.get(&bind.material.0) else {
+            blit(texture, draw);
+            return;
+        };
+        for (name, value) in &bind.uniforms {
+            set_uniform(material, name, *value);
+        }
+        gl_use_material(material);
+        blit(texture, draw);
+        gl_use_default_material();
     }
 
     fn draw_filled_rect(
@@ -193,4 +270,30 @@ impl RenderBackend for MacroquadRenderer {
             },
         );
     }
+}
+
+/// Draws `draw` from `texture` with the current material.
+fn blit(texture: &Texture2D, draw: &SpriteDraw) {
+    draw_texture_ex(
+        texture,
+        draw.dst.x,
+        draw.dst.y,
+        ::macroquad::prelude::Color::new(
+            f32::from(draw.tint.r) / 255.0,
+            f32::from(draw.tint.g) / 255.0,
+            f32::from(draw.tint.b) / 255.0,
+            f32::from(draw.tint.a) / 255.0,
+        ),
+        DrawTextureParams {
+            source: Some(::macroquad::prelude::Rect::new(
+                draw.src.x,
+                draw.src.y,
+                draw.src.width,
+                draw.src.height,
+            )),
+            dest_size: Some(::macroquad::prelude::vec2(draw.dst.width, draw.dst.height)),
+            flip_x: draw.flip_x,
+            ..Default::default()
+        },
+    );
 }

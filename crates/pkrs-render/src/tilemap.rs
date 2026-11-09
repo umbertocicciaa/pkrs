@@ -110,6 +110,21 @@ pub fn tile_layer_draws(
     origin: (i32, i32),
     view: (u32, u32),
 ) -> Vec<SpriteDraw> {
+    tile_layer_draws_by_sheet(grid, sheets, tile, layer, origin, view)
+        .into_iter()
+        .map(|(_, draw)| draw)
+        .collect()
+}
+
+/// [`tile_layer_draws`] with the sheet index of every draw (for per-tileset materials).
+pub(crate) fn tile_layer_draws_by_sheet(
+    grid: &dyn TileGrid,
+    sheets: &[TileSheet],
+    tile: (u32, u32),
+    layer: Layer,
+    origin: (i32, i32),
+    view: (u32, u32),
+) -> Vec<(u16, SpriteDraw)> {
     let (cols, rows) = visible_tiles(origin, view, tile, grid.size());
     let mut draws = Vec::with_capacity(cols.len() * rows.len());
     for y in rows {
@@ -123,14 +138,17 @@ pub fn tile_layer_draws(
             let Some(src) = sheet.src(t.id) else { continue };
             let dst_x = i64::from(x) * i64::from(tile.0) - i64::from(origin.0);
             let dst_y = i64::from(y) * i64::from(tile.1) - i64::from(origin.1);
-            draws.push(SpriteDraw {
-                texture: sheet.texture,
-                src,
-                dst: Rect::new(dst_x as f32, dst_y as f32, src.width, src.height),
-                flip_x: t.flip_x,
-                tint: Color::WHITE,
-                layer,
-            });
+            draws.push((
+                t.sheet,
+                SpriteDraw {
+                    texture: sheet.texture,
+                    src,
+                    dst: Rect::new(dst_x as f32, dst_y as f32, src.width, src.height),
+                    flip_x: t.flip_x,
+                    tint: Color::WHITE,
+                    layer,
+                },
+            ));
         }
     }
     draws
@@ -149,10 +167,15 @@ pub struct EntitySprite {
 
 /// Orders entities back to front: by feet Y (tile row, then sub-pixel offset), then by id.
 pub fn y_sort(entities: &mut [EntitySprite]) {
-    entities.sort_by(|a, b| match a.feet_y.total_cmp(&b.feet_y) {
+    entities.sort_by(y_order);
+}
+
+/// The [`y_sort`] order of two entities.
+pub(crate) fn y_order(a: &EntitySprite, b: &EntitySprite) -> Ordering {
+    match a.feet_y.total_cmp(&b.feet_y) {
         Ordering::Equal => a.id.cmp(&b.id),
         other => other,
-    });
+    }
 }
 
 #[cfg(test)]

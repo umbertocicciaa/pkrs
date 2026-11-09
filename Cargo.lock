@@ -1479,6 +1479,7 @@ dependencies = [
  "pkrs-battle",
  "pkrs-core",
  "pkrs-data",
+ "pkrs-render",
  "pkrs-save",
  "pkrs-ui",
  "pkrs-world",

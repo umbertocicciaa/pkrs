@@ -1,0 +1,18 @@
+# Broken materials (§5.6): a project shader whose capability profile the engine cannot honour
+# and which exceeds its own profile, invalid built-in parameters, and a map that uses a
+# material that does not exist.
+[game]
+name = "Broken Materials"
+id   = "com.example.broken-materials"
+
+[engine]
+version = "0.0"
+api     = 1
+
+[start]
+map      = "town"
+position = [1, 1]
+
+[features]
+battles = false
+party   = false

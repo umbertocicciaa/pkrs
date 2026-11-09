@@ -153,6 +153,7 @@ fn to_raw_tileset(ts: &tiled::Tileset) -> Result<RawTileset, String> {
         margin: ts.margin,
         image,
         tile_properties,
+        properties: to_properties(&ts.properties),
     })
 }
 
@@ -185,6 +186,7 @@ fn to_raw_layer(layer: &tiled::Layer<'_>) -> Result<RawLayer, String> {
                 name,
                 visible,
                 tiles,
+                properties: to_properties(&layer.properties),
             }
         }
         tiled::LayerType::Tiles(tiled::TileLayer::Infinite(_)) => RawLayer::Unsupported {

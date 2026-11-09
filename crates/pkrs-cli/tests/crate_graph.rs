@@ -33,6 +33,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "pkrs-save",
             "pkrs-ui",
             "pkrs-audio",
+            "pkrs-render",
         ],
     ),
     (

@@ -1,0 +1,109 @@
+---
+source: crates/pkrs-cli/tests/check_cli.rs
+expression: "transcript(&broken(\"broken-materials\"), &[])"
+---
+exit code: 1
+--- stdout
+plugins: none enabled
+--- stderr
+material::unsupported-profile
+
+  × capability profile: GLSL version `330` is not supported (the engine runs GLSL ES 1.00,
+  │ `"100"`)
+   ╭─[assets/materials/glow.ron:3:15]
+ 2 │     shader: "shaders/glow.glsl",
+ 3 │     profile: (glsl: "330", max_uniforms: 1, texture_slots: 2, uniform_types: [Float, Mat4]),
+   ·               ──┬──
+   ·                 ╰── not supported by the engine
+ 4 │     uniforms: {
+   ╰────
+  help: the v1 engine supports glsl "100", up to 16 uniforms, 1 texture slot and the types float,
+        int, vec2, vec3, vec4
+
+material::unsupported-profile
+
+  × capability profile: texture_slots 2 exceeds the engine limit of 1 (the sprite texture)
+   ╭─[assets/materials/glow.ron:3:45]
+ 2 │     shader: "shaders/glow.glsl",
+ 3 │     profile: (glsl: "330", max_uniforms: 1, texture_slots: 2, uniform_types: [Float, Mat4]),
+   ·                                             ───────┬──────
+   ·                                                    ╰── not supported by the engine
+ 4 │     uniforms: {
+   ╰────
+  help: the v1 engine supports glsl "100", up to 16 uniforms, 1 texture slot and the types float,
+        int, vec2, vec3, vec4
+
+material::unsupported-profile
+
+  × capability profile: uniform type `mat4` is not supported
+   ╭─[assets/materials/glow.ron:3:63]
+ 2 │     shader: "shaders/glow.glsl",
+ 3 │     profile: (glsl: "330", max_uniforms: 1, texture_slots: 2, uniform_types: [Float, Mat4]),
+   ·                                                               ───────┬──────
+   ·                                                                      ╰── not supported by the engine
+ 4 │     uniforms: {
+   ╰────
+  help: the v1 engine supports glsl "100", up to 16 uniforms, 1 texture slot and the types float,
+        int, vec2, vec3, vec4
+
+material::uniform-type-not-allowed
+
+  × shader `assets/shaders/glow.glsl`: `color` has type `vec4`, which the capability profile does
+  │ not allow
+    ╭─[assets/shaders/glow.glsl:9:14]
+  8 │ uniform float strength;
+  9 │ uniform vec4 color;
+    ·              ──┬──
+    ·                ╰── type not allowed
+ 10 │ uniform float time_ticks;
+    ╰────
+  help: allowed types: float, mat4
+
+material::too-many-uniforms
+
+  × shader `assets/shaders/glow.glsl` declares 2 uniforms, but its profile allows 1
+    ╭─[assets/shaders/glow.glsl:10:15]
+  9 │ uniform vec4 color;
+ 10 │ uniform float time_ticks;
+    ·               ─────┬────
+    ·                    ╰── uniform over the limit
+ 11 │ 
+    ╰────
+
+material::unknown-uniform
+
+  × `pkrs/animated_tiles` has no uniform `speed`
+   ╭─[assets/materials/water.ron:6:9]
+ 5 │         "ticks_per_frame": Int(15),
+ 6 │         "speed": Float(2.0),
+   ·         ───┬───
+   ·            ╰── unknown uniform
+ 7 │     },
+   ╰────
+  help: `pkrs/animated_tiles` accepts: frames, ticks_per_frame, frame_offset, tint
+
+material::invalid-value
+
+  × uniform `frames` must be at least 1
+   ╭─[assets/materials/water.ron:4:9]
+ 3 │     uniforms: {
+ 4 │         "frames": Int(0),
+   ·         ────┬───
+   ·             ╰── must be at least 1
+ 5 │         "ticks_per_frame": Int(15),
+   ╰────
+
+material::unknown-material
+
+  × layer `ground` uses material `lava`, but `assets/materials/lava.ron` does not exist
+   ╭─[maps/town.tmx:6:30]
+ 5 │   <properties>
+ 6 │    <property name="material" value="lava"/>
+   ·                              ──────┬─────
+   ·                                    ╰── no such material
+ 7 │   </properties>
+   ╰────
+  help: materials are the descriptors in assets/materials/
+
+8 errors, 0 warnings
+check failed: errors found

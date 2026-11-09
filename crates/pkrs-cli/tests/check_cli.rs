@@ -44,6 +44,7 @@ fn every_fixture_project_passes() {
         "battle-town",
         "doubles-arena",
         "grass-route",
+        "materials-town",
         "minimal",
         "resonance-town",
         "scenario-town",
@@ -78,6 +79,11 @@ fn broken_plugins_report_the_plugin_graph() {
 #[test]
 fn broken_manifest_still_checks_the_rest() {
     insta::assert_snapshot!(transcript(&broken("broken-manifest"), &[]));
+}
+
+#[test]
+fn broken_materials_reject_invalid_profiles() {
+    insta::assert_snapshot!(transcript(&broken("broken-materials"), &[]));
 }
 
 #[test]

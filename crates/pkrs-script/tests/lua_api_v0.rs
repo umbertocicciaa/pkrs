@@ -10,6 +10,7 @@ use std::rc::Rc;
 use pkrs_audio::{AudioRequest, VolumeGroup};
 use pkrs_core::{Direction, GridPos, Pcg64Rng};
 use pkrs_data::{TextArgs, format_text};
+use pkrs_render::UniformValue;
 use pkrs_script::{
     ApiError, ApiResult, CameraCommand, CameraTarget, LuaScriptHost, MemoryScripts, Scheduler,
     ScriptEvent, ScriptHost, ScriptLimits, ScriptOwner, ScriptValue, ScriptWorld, TaskKind,
@@ -216,6 +217,10 @@ impl ScriptWorld for Fake {
     }
     fn camera(&mut self, command: CameraCommand) -> ApiResult<()> {
         self.0.borrow_mut().camera.push(command);
+        Ok(())
+    }
+    fn set_global_uniform(&mut self, name: &str, value: UniformValue) -> ApiResult<()> {
+        self.note(format!("uniform {name} = {value:?}"));
         Ok(())
     }
     fn audio(&mut self, request: AudioRequest) -> ApiResult<()> {
@@ -1080,4 +1085,51 @@ fn old_keeper_runs_unmodified() {
         .spawn(&mut h, &owner, "old_keeper", &npc, TaskKind::Interact)
         .unwrap();
     assert_eq!(fake.log().last().unwrap(), "say text:keeper.again");
+}
+
+// ---------------------------------------------------------------------------------------------
+// render (§5.6)
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn render_global_uniforms_reach_the_world() {
+    let fake = Fake::new();
+    let mut h = host(&fake);
+    eval(
+        &mut h,
+        "render.set_global_uniform('daynight:phase', 0.25); render.set_global_uniform('day_tint', { 1, 0.5, 0.25, 1 }); render.set_global_uniform('wind', { 2, 0 })",
+    );
+    assert_eq!(
+        fake.log(),
+        [
+            "uniform daynight:phase = Float(0.25)",
+            "uniform day_tint = Vec4([1.0, 0.5, 0.25, 1.0])",
+            "uniform wind = Vec2([2.0, 0.0])",
+        ]
+    );
+    assert_eq!(
+        err(&mut h, "render.set_global_uniform('time_ticks', 1)"),
+        "scripts/test.lua:1: render.set_global_uniform: `time_ticks` is an engine uniform and cannot be set"
+    );
+    assert_eq!(
+        err(&mut h, "render.set_global_uniform('x', { 1 })"),
+        "scripts/test.lua:1: render.set_global_uniform: value must be an array of 2-4 numbers (got 1 entries)"
+    );
+    assert_eq!(
+        err(&mut h, "render.set_global_uniform('x', { 1, 'a' })"),
+        "scripts/test.lua:1: render.set_global_uniform: value[2] must be a finite number (got string)"
+    );
+    assert_eq!(
+        err(&mut h, "render.set_global_uniform('', 1)"),
+        "scripts/test.lua:1: render.set_global_uniform: name must not be empty"
+    );
+    assert_eq!(
+        err(&mut h, "render.set_global_uniform('x', true)"),
+        "scripts/test.lua:1: render.set_global_uniform: value must be a number or an array of 2-4 numbers (got boolean)"
+    );
+    let mut bare = bare_host();
+    assert_eq!(
+        err(&mut bare, "render.set_global_uniform('x', 1)"),
+        "scripts/test.lua:1: render.set_global_uniform: no game world is attached to the script host"
+    );
 }

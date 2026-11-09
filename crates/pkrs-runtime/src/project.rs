@@ -32,6 +32,7 @@ use crate::debug::{DebugOverlaySnapshot, DevRuntime, script_overlay_fields};
 use crate::default_theme::build_default_ui_theme;
 use crate::encounters::{Encounters, wild_battle_request};
 use crate::main_loop::SimulationHost;
+use crate::materials::MaterialCache;
 use crate::menu::FieldMenu;
 use crate::overworld::{EntityKind, OverworldScripts, ScreenFade, ScriptOverlay};
 use crate::party::PlayerParty;
@@ -398,6 +399,8 @@ pub struct ProjectHost {
     /// scripting is on ([`localizer`](Self::localizer)).
     localizer: Localizer,
     game_started: bool,
+    /// Materials referenced by maps and NPCs, compiled once per id (§5.6).
+    materials: MaterialCache,
     /// Music and sounds (§11).
     audio: audio::ProjectAudio,
     /// Dev overlays, console and hot reload (`pkrs run`, §15.1).
@@ -483,6 +486,8 @@ impl ProjectHost {
         tracing::info!(map = %map.id, start = %start, "map_enter");
 
         let mut scene = MapScene::new(map, &textures)?;
+        let mut materials = MaterialCache::new();
+        scene.set_materials(materials.for_map(scene.map(), &project.vfs, &mut renderer));
         scene.place_entity(
             PLAYER_ENTITY,
             start,
@@ -542,6 +547,7 @@ impl ProjectHost {
                 &text_plugins(project),
             ),
             game_started: false,
+            materials,
             audio: audio::ProjectAudio::for_project(project),
             dev: None,
             dev_plugins: Vec::new(),
@@ -799,6 +805,10 @@ impl ProjectHost {
             });
         }
         let mut scene = MapScene::new(map, &textures)?;
+        let materials = self
+            .materials
+            .for_map(scene.map(), &self.project.vfs, &mut self.renderer);
+        scene.set_materials(materials);
         scene.place_entity(
             PLAYER_ENTITY,
             to,
@@ -967,6 +977,10 @@ impl ProjectHost {
         }
         let facing = self.walker.facing();
         let mut scene = MapScene::new(map, &textures)?;
+        let materials = self
+            .materials
+            .for_map(scene.map(), &self.project.vfs, &mut self.renderer);
+        scene.set_materials(materials);
         scene.place_entity(
             PLAYER_ENTITY,
             entry,
@@ -1060,11 +1074,32 @@ impl ProjectHost {
         for (id, pos, sprite) in npcs {
             let (texture, src) = self.npc_sprite_for(sprite.as_deref());
             self.scene.place_entity(id, pos, texture, src, false);
+            let material = self.object_material(id);
+            self.scene.set_entity_material(id, material);
         }
         let (texture, src) = self.item_sprite;
         for (id, pos) in items {
             self.scene.place_entity(id, pos, texture, src, false);
         }
+    }
+
+    /// The material of map object `id` (its `material` property, §5.6), loaded on first use.
+    fn object_material(&mut self, id: u32) -> Option<pkrs_render::MaterialHandle> {
+        let name = self
+            .scene
+            .map()
+            .objects
+            .iter()
+            .find(|o| o.id == id)
+            .and_then(|o| o.properties.string("material").ok().flatten())
+            .map(str::to_owned)?;
+        self.materials
+            .get(&name, &self.project.vfs, &mut self.renderer)
+    }
+
+    /// Sets a global material uniform (§5.6), as `render.set_global_uniform` does from Lua.
+    pub fn set_global_uniform(&mut self, name: &str, value: pkrs_render::UniformValue) {
+        self.renderer.set_global_uniform(name, value);
     }
 
     /// The sprite of an NPC: `sprites/<sprite>.png` when it names one that loads, else the
@@ -1122,6 +1157,8 @@ impl ProjectHost {
             if self.scene.entity_mut(id).is_none() {
                 let tile = GridPos::new(tx.round() as i32, ty.round() as i32);
                 self.scene.place_entity(id, tile, texture, src, false);
+                let material = self.object_material(id);
+                self.scene.set_entity_material(id, material);
             }
             if let Some(entity) = self.scene.entity_mut(id) {
                 entity.texture = texture;
@@ -1170,6 +1207,9 @@ impl ProjectHost {
                     None => scripts.close_dialogue(pkrs_script::ScriptValue::Nil),
                 }
             }
+        }
+        for (name, value) in scripts.take_global_uniforms() {
+            self.renderer.set_global_uniform(&name, value);
         }
         let commands = scripts.take_camera_commands();
         let warp = scripts.take_warp_request();
@@ -1857,6 +1897,7 @@ impl SimulationHost for ProjectHost {
 
     fn render(&mut self, platform: &Platform, alpha: f32) {
         let (w, h) = platform.window_size();
+        self.renderer.set_time_ticks(self.ticks);
         self.renderer.begin_frame(w, h);
         if let Some((_, screen)) = &self.battle {
             match self.post_battle.as_ref().map(|(_, flow)| flow) {

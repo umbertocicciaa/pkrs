@@ -12,6 +12,7 @@ mod fixed_step;
 mod game_host;
 pub mod locale;
 mod main_loop;
+pub mod materials;
 pub mod menu;
 pub mod overworld;
 pub mod party;

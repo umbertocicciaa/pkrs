@@ -15,6 +15,7 @@ mod error;
 mod handle;
 pub mod path;
 mod vfs;
+pub mod watcher;
 
 pub use assets::{AssetEntry, Assets};
 pub use cache::{Asset, AssetStore, RawBytes, Text};
@@ -22,6 +23,10 @@ pub use error::{AssetsError, Result};
 pub use handle::{Handle, SlotMap};
 pub use path::{AssetPath, VfsPath};
 pub use vfs::{EntryKind, FolderVfs, MemoryVfs, SubVfs, Vfs, VfsEntry};
+pub use watcher::{
+    FileWatcher, MemoryFileWatcher, NotifyWatcher, NullFileWatcher, ReloadAction, ReloadKind,
+    WatchChange, WatchError, WatchEvent, WatchSink,
+};
 
 #[cfg(test)]
 mod tests {

@@ -172,6 +172,13 @@ impl MapScene {
         (self.map, textures)
     }
 
+    /// Swaps tileset GPU handles after a dev texture reload (§8.3).
+    pub fn refresh_tile_textures(&mut self, textures: &[TextureHandle]) {
+        for (sheet, &tex) in self.sheets.iter_mut().zip(textures) {
+            sheet.texture = tex;
+        }
+    }
+
     /// Camera behaviour (`pan_to`, `follow`, `shake`).
     pub fn camera_mut(&mut self) -> &mut CameraController {
         &mut self.camera

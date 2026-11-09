@@ -10,6 +10,8 @@ publish.workspace = true
 [dependencies]
 pkrs-core.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
+notify.workspace = true
 
 [lints]
 workspace = true

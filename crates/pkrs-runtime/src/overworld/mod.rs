@@ -31,6 +31,7 @@ pub use world::{
 use std::collections::BTreeSet;
 
 use pkrs_core::{Direction, GridPos};
+use pkrs_script::plugin::init_path;
 use pkrs_script::{
     BattleRequest, CameraCommand, DispatchReport, FieldActionInfo, FieldActionSource, FieldContext,
     LuaScriptHost, Scheduler, ScriptEvent, ScriptHost, ScriptOwner, ScriptValue, TaskId, TaskKind,
@@ -360,6 +361,48 @@ impl OverworldScripts {
         if !self.scheduler.wake(task, result) {
             tracing::warn!(target: "script", task, "battle ended but its task is gone");
         }
+    }
+
+    /// Re-runs the active map's `scripts/maps/<id>.lua` without leaving the map (§9.8 hot reload).
+    pub fn reload_map_script(&mut self) {
+        let Some(map_id) = self.world.get().map_id.clone() else {
+            return;
+        };
+        let owner = ScriptOwner::Map(map_id.clone());
+        if self.host.is_loaded(&owner) {
+            self.host.unload_owner(&owner);
+        }
+        let path = map_script_path(&map_id);
+        if self.host.script_exists(&path) {
+            if let Err(err) = self.host.run_file(&owner, &path) {
+                tracing::error!(target: "script", map = %map_id, "map script reload failed: {err}");
+            }
+            self.map_owner = Some(owner);
+            tracing::info!(target: "dev", map = %map_id, "map script reloaded");
+        }
+    }
+
+    /// Re-runs `main.lua`, the active map script and each plugin `init.lua` (F5 / file watch).
+    pub fn reload_all_scripts(&mut self, plugin_ids: &[String]) {
+        self.reload_map_script();
+        if self.host.is_loaded(&ScriptOwner::Game) {
+            self.host.unload_owner(&ScriptOwner::Game);
+        }
+        self.game_files.clear();
+        self.load_game_file(MAIN_SCRIPT);
+        for id in plugin_ids {
+            let owner = ScriptOwner::plugin(id);
+            if self.host.is_loaded(&owner) {
+                self.host.unload_owner(&owner);
+            }
+            let path = init_path(id);
+            if self.host.script_exists(&path) {
+                if let Err(err) = self.host.run_file(&owner, &path) {
+                    tracing::error!(target: "script", plugin = %id, "plugin reload failed: {err}");
+                }
+            }
+        }
+        tracing::info!(target: "dev", plugins = plugin_ids.len(), "scripts reloaded");
     }
 
     /// Pending `map.warp`.

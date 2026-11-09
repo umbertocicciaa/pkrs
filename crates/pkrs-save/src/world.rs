@@ -265,6 +265,11 @@ impl WorldState {
         &self.bag
     }
 
+    /// Replaces the bag (field menu commit, save restore).
+    pub fn replace_bag(&mut self, bag: BTreeMap<String, u32>) {
+        self.bag = bag;
+    }
+
     /// State of map `map_id`, if it has any.
     #[must_use]
     pub fn map(&self, map_id: &str) -> Option<&MapState> {

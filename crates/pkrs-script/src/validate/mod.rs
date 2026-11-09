@@ -11,16 +11,20 @@
 //!    cross-references (stage 3) through [`pkrs_data::validate`].
 //! 4. **Lua** — every `.lua` file below `scripts/` and `plugins/` is compiled (never run);
 //!    `events.on("tick", …)` is a performance warning, `"text:…"` literals must be defined.
-//! 5. **Maps** — every `maps/*.tmx` is imported (§6.2 conventions); warps, NPC / trigger /
-//!    sign scripts, sprites, items, encounter tables and sign text are cross-checked, and a
-//!    `once` trigger whose script never sets a flag or variable is a warning (§6.5);
-//!    `maps/world.ron` names existing maps.
+//! 5. **Materials** — every `assets/materials/**/*.ron` descriptor: schema, shader
+//!    reference, built-in shader parameters, and project shaders against their capability
+//!    profile and the engine's (§5.6, [`pkrs_render::check_material`]).
+//! 6. **Maps** — every `maps/*.tmx` is imported (§6.2 conventions); warps, NPC / trigger /
+//!    sign scripts, sprites, items, encounter tables, sign text and `material` properties
+//!    are cross-checked, and a `once` trigger whose script never sets a flag or variable is
+//!    a warning (§6.5); `maps/world.ron` names existing maps.
 //!
 //! The rule codes (`data::unknown-move`, `map::once-trigger-without-state`, …) are stable so
 //! CI logs can be searched for them.
 
 mod lua_scan;
 mod maps;
+mod materials;
 mod plugins;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -154,12 +158,16 @@ pub fn validate_project(
     };
     out.diagnostics.extend(check_game_data(&data, &ctx));
 
-    // 5. Maps.
+    // 5. Materials (§5.6), before the maps that reference them.
+    let materials = materials::check_all(files, &mut out.diagnostics);
+
+    // 6. Maps.
     let maps = maps::MapCheck {
         files,
         data: &data,
         locale,
         lua: &lua,
+        materials: &materials,
     };
     let imported = maps::import_all(files, import_map, &mut out.diagnostics);
     for (path, map) in &imported {

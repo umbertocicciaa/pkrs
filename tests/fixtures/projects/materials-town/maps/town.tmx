@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<map version="1.10" tiledversion="1.10.2" orientation="orthogonal" renderorder="right-down" width="6" height="4" tilewidth="16" tileheight="16" infinite="0" nextlayerid="3" nextobjectid="2">
+ <tileset firstgid="1" source="../tilesets/overworld.tsx"/>
+ <layer id="1" name="ground" width="6" height="4">
+  <properties>
+   <property name="material" value="day_night"/>
+  </properties>
+  <data encoding="csv">
+1,1,1,1,1,1,
+1,1,1,1,5,5,
+1,1,1,1,5,5,
+1,1,1,1,1,1
+</data>
+ </layer>
+ <objectgroup id="2" name="objects">
+  <object id="1" name="ghost" type="npc" x="32" y="48" width="16" height="16">
+   <properties>
+    <property name="facing" value="down"/>
+    <property name="material" value="ghost"/>
+   </properties>
+  </object>
+ </objectgroup>
+</map>

@@ -9,6 +9,7 @@ mod color;
 mod draw;
 mod error;
 mod layer;
+mod material;
 mod rect;
 mod renderer;
 mod text;
@@ -22,14 +23,20 @@ pub use animation::{
 };
 #[cfg(feature = "macroquad")]
 pub use backend::MacroquadRenderer;
-pub use backend::{DrawLog, NullRenderer, RecordedDraw, RenderBackend};
+pub use backend::{DrawLog, NullRenderer, RecordedDraw, RecordedMaterial, RenderBackend};
 pub use camera::{Camera, CameraBounds, CameraController, CameraTarget, snap};
 pub use color::Color;
 pub use draw::SpriteDraw;
 pub use error::{RenderError, Result};
 pub use layer::Layer;
+pub use material::{
+    BUILTIN_PREFIX, BuiltinShader, CapabilityProfile, ENGINE_UNIFORMS, EngineUniforms,
+    GlobalUniforms, MATERIALS_DIR, Material, MaterialBind, MaterialHandle, SHADER_ROOT,
+    ShaderProgram, ShaderRef, UniformSource, UniformType, UniformValue, check_material,
+    is_engine_uniform, material_path,
+};
 pub use rect::Rect;
-pub use renderer::{Renderer, RendererConfig};
+pub use renderer::{Renderer, RendererConfig, TileMaterials};
 pub use text::{
     BitmapFont, TextMetrics, TextStyle, measure_text, parse_bmfont_text, parse_glyph_map_ron,
     wrap_text,

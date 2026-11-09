@@ -48,6 +48,15 @@ pub enum RenderError {
         /// Validation detail.
         detail: String,
     },
+    /// Invalid material descriptor (§5.6); `pkrs check` reports the same problems with spans.
+    #[error("invalid material: {detail}")]
+    MaterialInvalid {
+        /// Every error, joined with `; `.
+        detail: String,
+    },
+    /// Unknown material handle.
+    #[error("unknown material handle {0}")]
+    UnknownMaterial(u32),
     /// Glyph missing for a code point.
     #[error("font missing glyph for U+{codepoint:04X}")]
     FontMissingGlyph {

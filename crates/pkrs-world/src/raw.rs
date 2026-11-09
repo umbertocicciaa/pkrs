@@ -38,6 +38,8 @@ pub struct RawTileset {
     pub image: Option<TilesetImage>,
     /// Custom properties per local tile id (`solid`, `terrain`, `block_n`, …).
     pub tile_properties: BTreeMap<u32, Properties>,
+    /// Tileset-level custom properties (`material`, §5.6).
+    pub properties: Properties,
 }
 
 /// One object before convention checks (pixel coordinates).
@@ -72,6 +74,8 @@ pub enum RawLayer {
         visible: bool,
         /// Row-major tiles (`width * height`).
         tiles: Vec<Option<TileRef>>,
+        /// Layer custom properties (`material`, §5.6).
+        properties: Properties,
     },
     /// An object layer.
     Objects {

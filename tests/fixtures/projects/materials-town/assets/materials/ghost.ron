@@ -1,0 +1,9 @@
+// A project shader: a translucent, pulsing ghost. Project shaders declare what they need
+// from the GPU so `pkrs check` can reject what the engine cannot run.
+(
+    shader: "shaders/ghost.glsl",
+    profile: (glsl: "100", max_uniforms: 2, texture_slots: 1, uniform_types: [Float]),
+    uniforms: {
+        "opacity": Float(0.6),
+    },
+)

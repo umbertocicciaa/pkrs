@@ -1,0 +1,11 @@
+// Animated water: the second row of the tileset holds 4 frames, 15 ticks each. The
+// day/night tint applies on top of the animation.
+(
+    shader: "pkrs/animated_tiles",
+    uniforms: {
+        "frames": Int(4),
+        "ticks_per_frame": Int(15),
+        "tint": Global(name: "day_tint", default: Color(255, 255, 255, 255)),
+    },
+    atlas_region: (x: 0, y: 16, width: 64, height: 16),
+)

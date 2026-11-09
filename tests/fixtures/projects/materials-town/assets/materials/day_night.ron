@@ -1,0 +1,8 @@
+// Day/night colour cycling for the ground layer: `scripts/main.lua` sets `day_tint`.
+(
+    shader: "pkrs/tint",
+    uniforms: {
+        "tint": Global(name: "day_tint", default: Color(255, 255, 255, 255)),
+        "strength": Float(1.0),
+    },
+)

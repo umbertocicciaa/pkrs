@@ -55,6 +55,7 @@ fn map(id: &str, objects: &[TestObject<'_>]) -> Map {
                 name: "ground".into(),
                 visible: true,
                 tiles: vec![None; 16],
+                properties: Properties::new(),
             },
             RawLayer::Objects {
                 name: "objects".into(),
@@ -287,5 +288,52 @@ fn every_problem_of_a_broken_project_is_reported_in_one_run() {
         ],
         "{}",
         v.diagnostics
+    );
+}
+
+#[test]
+fn materials_are_checked_and_map_references_resolve() {
+    let files = MemoryScripts::new()
+        .with("pkrs.toml", MANIFEST)
+        .with("maps/town.tmx", "")
+        .with(
+            "assets/materials/water.ron",
+            "(shader: \"pkrs/animated_tiles\", uniforms: { \"frames\": Int(2), \"ticks_per_frame\": Int(8), \"frame_offset\": Vec2(16.0, 0.0) })",
+        )
+        .with(
+            "assets/materials/fx/glow.ron",
+            "(shader: \"shaders/glow.glsl\", profile: (glsl: \"100\", max_uniforms: 1, texture_slots: 4))",
+        )
+        .with(
+            "assets/shaders/glow.glsl",
+            "#version 100\nuniform sampler2D Texture;\nuniform vec4 glow;\nuniform float pulse;\nvoid main() {}\n",
+        );
+    let mut town = map("town", &[("npc", "ghost", &[("material", s("ghostly"))])]);
+    town.layers[0].material = Some("water".into());
+    let v = run(&files, vec![town]);
+    assert_eq!(
+        codes(&v),
+        [
+            "material::unsupported-profile",
+            "material::too-many-uniforms",
+            "material::unset-uniform",
+            "material::unset-uniform",
+            "material::unknown-material",
+        ],
+        "{}",
+        v.diagnostics
+    );
+    let profile = &v.diagnostics.items()[0];
+    assert_eq!(
+        profile.file.as_deref(),
+        Some("assets/materials/fx/glow.ron")
+    );
+    assert!(profile.span.is_some());
+    let unknown = &v.diagnostics.items()[4];
+    assert_eq!(unknown.file.as_deref(), Some("maps/town.tmx"));
+    assert!(
+        unknown.message.contains("assets/materials/ghostly.ron"),
+        "{}",
+        unknown.message
     );
 }

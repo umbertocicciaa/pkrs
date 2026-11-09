@@ -21,6 +21,7 @@ mod overworld;
 mod player;
 mod plugin;
 mod registry;
+mod render;
 mod sandbox;
 mod scenario;
 mod syntax;

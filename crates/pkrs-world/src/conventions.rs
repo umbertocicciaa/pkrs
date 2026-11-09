@@ -13,6 +13,10 @@
 //! Tile properties honoured on **any** tile layer: `solid` (bool), `block_n/s/e/w` (bool) and
 //! `terrain` (string). Later layers override the terrain of earlier ones.
 //!
+//! Tilesets and drawn tile layers may set `material` (string): the id of a material
+//! descriptor `assets/materials/<id>.ron` (§5.6), kept in [`MapTileset::material`] and
+//! [`TileLayer::material`].
+//!
 //! Violations are returned all at once (not fail-fast) so `pkrs check` can print them together.
 
 use core::fmt;
@@ -268,7 +272,11 @@ pub fn build_map(raw: RawMap) -> Result<Map, Vec<ConventionViolation>> {
     }
 
     let rules = tile_rules(&raw, &mut report);
-    let tilesets = raw.tilesets.iter().map(to_map_tileset).collect();
+    let tilesets = raw
+        .tilesets
+        .iter()
+        .map(|ts| to_map_tileset(ts, &mut report))
+        .collect();
 
     let mut grid = LogicalGrid::new(raw.width, raw.height);
     let mut layers = Vec::new();
@@ -289,7 +297,12 @@ pub fn build_map(raw: RawMap) -> Result<Map, Vec<ConventionViolation>> {
             RawLayer::Unsupported { kind, .. } => {
                 report.push(location(), ViolationKind::UnsupportedLayer(kind));
             }
-            RawLayer::Tiles { visible, tiles, .. } => {
+            RawLayer::Tiles {
+                visible,
+                tiles,
+                properties,
+                ..
+            } => {
                 if matches!(name.as_str(), "objects" | "encounters") {
                     report.push(
                         location(),
@@ -314,6 +327,8 @@ pub fn build_map(raw: RawMap) -> Result<Map, Vec<ConventionViolation>> {
                         TileLayer::new(name.clone(), kind, raw.width, raw.height, tiles)
                     {
                         tile_layer.visible = visible;
+                        tile_layer.material =
+                            material_property(&properties, location(), &mut report);
                         layers.push(tile_layer);
                     }
                 }
@@ -391,7 +406,7 @@ fn raw_dims(raw: &RawMap) -> Dims {
     }
 }
 
-fn to_map_tileset(ts: &RawTileset) -> MapTileset {
+fn to_map_tileset(ts: &RawTileset, report: &mut Report) -> MapTileset {
     MapTileset {
         name: ts.name.clone(),
         tile_width: ts.tile_width,
@@ -401,6 +416,27 @@ fn to_map_tileset(ts: &RawTileset) -> MapTileset {
         spacing: ts.spacing,
         margin: ts.margin,
         image: ts.image.clone(),
+        material: material_property(
+            &ts.properties,
+            ViolationLocation::Tileset(ts.name.clone()),
+            report,
+        ),
+    }
+}
+
+/// The `material` property (a non-empty material id, §5.6) of a tileset or layer.
+fn material_property(
+    props: &Properties,
+    location: ViolationLocation,
+    report: &mut Report,
+) -> Option<String> {
+    match props.string("material") {
+        Ok(Some(id)) if !id.trim().is_empty() => Some(id.to_owned()),
+        Ok(_) => None,
+        Err(found) => {
+            report.push(location, wrong_type("material", "string", found));
+            None
+        }
     }
 }
 
@@ -754,6 +790,7 @@ mod tests {
             margin: 0,
             image: None,
             tile_properties: props.iter().cloned().collect(),
+            properties: Properties::new(),
         }
     }
 
@@ -770,6 +807,7 @@ mod tests {
             name: name.into(),
             visible: true,
             tiles,
+            properties: Properties::new(),
         }
     }
 
@@ -847,6 +885,28 @@ mod tests {
             ],
             "collision and terrain are logical only"
         );
+    }
+
+    #[test]
+    fn material_properties_on_tilesets_and_layers() {
+        let mut raw_map = raw(vec![ground()], &[]);
+        raw_map.tilesets[0].properties =
+            Properties::new().with("material", PropertyValue::String("water".into()));
+        if let RawLayer::Tiles { properties, .. } = &mut raw_map.layers[0] {
+            *properties =
+                Properties::new().with("material", PropertyValue::String("day_night".into()));
+        }
+        let map = build_map(raw_map).unwrap();
+        assert_eq!(map.tilesets[0].material.as_deref(), Some("water"));
+        assert_eq!(map.layers[0].material.as_deref(), Some("day_night"));
+
+        let mut bad = raw(vec![ground()], &[]);
+        bad.tilesets[0].properties = Properties::new().with("material", PropertyValue::Int(3));
+        let err = build_map(bad).unwrap_err();
+        assert!(matches!(
+            kinds(&err)[..],
+            [ViolationKind::WrongPropertyType { key, .. }] if key == "material"
+        ));
     }
 
     #[test]

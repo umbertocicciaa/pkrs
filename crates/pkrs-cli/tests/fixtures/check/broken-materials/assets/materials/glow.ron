@@ -1,0 +1,8 @@
+(
+    shader: "shaders/glow.glsl",
+    profile: (glsl: "330", max_uniforms: 1, texture_slots: 2, uniform_types: [Float, Mat4]),
+    uniforms: {
+        "strength": Float(1.0),
+        "color": Vec4(1.0, 0.5, 0.0, 1.0),
+    },
+)

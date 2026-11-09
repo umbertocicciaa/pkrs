@@ -145,6 +145,7 @@ pub(super) fn build_env(
     super::ai::install(lua, &env, owner)?;
     super::time::install(lua, &env)?;
     super::ui::install(lua, &env, owner).map_err(mlua::Error::external)?;
+    super::render::install(lua, &env)?;
     super::install_api_v0(lua, &env, owner)?;
     Ok(env)
 }

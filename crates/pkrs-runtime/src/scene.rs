@@ -8,9 +8,11 @@
 
 use pkrs_core::GridPos;
 use pkrs_render::{
-    CameraBounds, CameraController, CameraTarget, Color, EntitySprite, Layer, Rect, Renderer,
-    SpriteDraw, TextureHandle, TileGrid, TileInstance, TileSheet, snap,
+    CameraBounds, CameraController, CameraTarget, Color, EntitySprite, Layer, MaterialHandle, Rect,
+    Renderer, SpriteDraw, TextureHandle, TileGrid, TileInstance, TileMaterials, TileSheet, snap,
 };
+
+use crate::materials::MapMaterials;
 use pkrs_world::{Map, MapTileset, TileLayer, VisualLayerKind};
 
 use crate::fixed_step::InterpolatedPosition;
@@ -72,6 +74,8 @@ pub struct SceneEntity {
     pub src: Rect,
     /// Mirror horizontally.
     pub flip_x: bool,
+    /// Material the sprite is drawn with (§5.6), e.g. from an NPC's `material` property.
+    pub material: Option<MaterialHandle>,
 }
 
 /// Error building a [`MapScene`].
@@ -105,6 +109,7 @@ pub struct MapScene {
     sheets: Vec<TileSheet>,
     entities: Vec<SceneEntity>,
     camera: CameraController,
+    materials: MapMaterials,
 }
 
 impl MapScene {
@@ -128,7 +133,31 @@ impl MapScene {
             sheets,
             entities: Vec::new(),
             camera: CameraController::new(),
+            materials: MapMaterials::default(),
         })
+    }
+
+    /// Sets the tileset and layer materials (§5.6), indexed like the map's tilesets and
+    /// layers.
+    pub fn set_materials(&mut self, materials: MapMaterials) {
+        self.materials = materials;
+    }
+
+    /// The tileset and layer materials.
+    #[must_use]
+    pub fn materials(&self) -> &MapMaterials {
+        &self.materials
+    }
+
+    /// Draws entity `id` with `material` (`None`: plain); returns whether it exists.
+    pub fn set_entity_material(&mut self, id: u32, material: Option<MaterialHandle>) -> bool {
+        match self.entities.iter_mut().find(|e| e.id == id) {
+            Some(entity) => {
+                entity.material = material;
+                true
+            }
+            None => false,
+        }
     }
 
     /// The map.
@@ -175,6 +204,7 @@ impl MapScene {
             texture,
             src,
             flip_x,
+            material: None,
         };
         match self.entities.iter_mut().find(|e| e.id == id) {
             Some(existing) => *existing = entity,
@@ -270,18 +300,28 @@ impl MapScene {
             );
         }
 
-        for layer in self.map.layers.iter().filter(|l| l.visible) {
-            renderer.draw_tile_layer(
+        for (index, layer) in self.map.layers.iter().enumerate() {
+            if !layer.visible {
+                continue;
+            }
+            renderer.draw_tile_layer_with(
                 &WorldTileGrid(layer),
                 &self.sheets,
                 tile,
                 layer_for(layer.kind),
                 origin,
+                TileMaterials {
+                    layer: self.materials.layers.get(index).copied().flatten(),
+                    sheets: &self.materials.tilesets,
+                },
             );
         }
 
+        renderer.set_map_origin((-(origin.0 as f32), -(origin.1 as f32)));
         let tile_h = self.map.tile_height as f32;
-        let mut sprites: Vec<EntitySprite> = self
+        let entity_materials: Vec<Option<MaterialHandle>> =
+            self.entities.iter().map(|e| e.material).collect();
+        let sprites: Vec<EntitySprite> = self
             .entities
             .iter()
             .map(|e| {
@@ -303,7 +343,7 @@ impl MapScene {
                 }
             })
             .collect();
-        renderer.draw_entities(&mut sprites);
+        renderer.draw_entities_with(&sprites, &entity_materials);
 
         for neighbor in neighbors {
             draw_map(
@@ -374,6 +414,7 @@ mod tests {
                 spacing: 0,
                 margin: 0,
                 image: None,
+                material: None,
             }],
             layers: vec![
                 TileLayer::new("ground", V::Ground, w, h, full(0)).unwrap(),

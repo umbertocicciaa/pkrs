@@ -1,4 +1,6 @@
-//! The `Renderer` facade (§4.5, §5.1).
+//! The `Renderer` facade (§4.5, §5.1, §5.6).
+
+use std::collections::HashMap;
 
 use pkrs_platform::DisplaySettings;
 
@@ -6,8 +8,14 @@ use crate::backend::RenderBackend;
 use crate::color::Color;
 use crate::draw::SpriteDraw;
 use crate::layer::Layer;
+use crate::material::{
+    EngineUniforms, GlobalUniforms, Material, MaterialBind, MaterialHandle, UniformValue,
+};
 use crate::rect::Rect;
-use crate::tilemap::{EntitySprite, TileGrid, TileSheet, tile_layer_draws, y_sort};
+use crate::texture::TextureHandle;
+use crate::tilemap::{
+    EntitySprite, TileGrid, TileSheet, tile_layer_draws_by_sheet, y_order, y_sort,
+};
 use crate::viewport::{ViewportLayout, ViewportMode, compute_viewport};
 
 /// Engine policy applied on top of [`RenderBackend`].
@@ -31,16 +39,35 @@ impl Default for RendererConfig {
     }
 }
 
-/// Game-facing renderer: internal target, viewport, layer ordering.
+/// Materials for one tile layer (§5.6): the layer's own (Tiled layer property `material`)
+/// and one per sheet (tileset property `material`), indexed like the `sheets` slice. A
+/// tile uses its sheet's material when that material applies to the tile (its
+/// `atlas_region`), else the layer's, else none.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TileMaterials<'a> {
+    /// Material of the whole layer.
+    pub layer: Option<MaterialHandle>,
+    /// Material per sheet.
+    pub sheets: &'a [Option<MaterialHandle>],
+}
+
+/// Game-facing renderer: internal target, viewport, layer ordering, materials.
 pub struct Renderer {
     backend: Box<dyn RenderBackend>,
     display: DisplaySettings,
     config: RendererConfig,
     pending: Vec<Queued>,
+    /// Material binds of this frame, referenced by index from `pending`.
+    binds: Vec<MaterialBind>,
+    materials: HashMap<MaterialHandle, Material>,
+    globals: GlobalUniforms,
+    time_ticks: u64,
+    map_origin: (f32, f32),
+    texture_sizes: HashMap<TextureHandle, (u32, u32)>,
 }
 
 enum Queued {
-    Sprite(SpriteDraw),
+    Sprite(SpriteDraw, Option<usize>),
     Rect {
         dst: Rect,
         color: Color,
@@ -51,7 +78,7 @@ enum Queued {
 impl Queued {
     fn layer(&self) -> Layer {
         match self {
-            Self::Sprite(draw) => draw.layer,
+            Self::Sprite(draw, _) => draw.layer,
             Self::Rect { layer, .. } => *layer,
         }
     }
@@ -69,6 +96,12 @@ impl Renderer {
             display,
             config,
             pending: Vec::new(),
+            binds: Vec::new(),
+            materials: HashMap::new(),
+            globals: GlobalUniforms::default(),
+            time_ticks: 0,
+            map_origin: (0.0, 0.0),
+            texture_sizes: HashMap::new(),
         }
     }
 
@@ -106,11 +139,25 @@ impl Renderer {
         self.backend.begin_frame(&viewport, self.config.letterbox);
         self.backend.clear_internal(self.config.clear);
         self.pending.clear();
+        self.binds.clear();
     }
 
     /// Queues a sprite draw (flushed in layer order in [`end_frame`](Self::end_frame)).
     pub fn draw_sprite(&mut self, draw: SpriteDraw) {
-        self.pending.push(Queued::Sprite(draw));
+        self.pending.push(Queued::Sprite(draw, None));
+    }
+
+    /// Queues a sprite drawn with `material` (when it applies to `draw.src`), its uniforms
+    /// resolved now: `time_ticks`, the current [`map_origin`](Self::set_map_origin), the
+    /// texture size and the global uniforms.
+    pub fn draw_sprite_with_material(
+        &mut self,
+        draw: SpriteDraw,
+        material: Option<MaterialHandle>,
+    ) {
+        let bind =
+            material.and_then(|m| self.bind_for(m, draw, self.map_origin, &mut HashMap::new()));
+        self.pending.push(Queued::Sprite(draw, bind));
     }
 
     /// Queues a solid rectangle on `layer` (e.g. UI window chrome), ordered with the
@@ -129,9 +176,41 @@ impl Renderer {
         layer: Layer,
         origin: (i32, i32),
     ) -> usize {
-        let draws = tile_layer_draws(grid, sheets, tile_size, layer, origin, self.view_size());
-        let count = draws.len();
-        self.pending.extend(draws.into_iter().map(Queued::Sprite));
+        self.draw_tile_layer_with(
+            grid,
+            sheets,
+            tile_size,
+            layer,
+            origin,
+            TileMaterials::default(),
+        )
+    }
+
+    /// Like [`draw_tile_layer`](Self::draw_tile_layer), with materials (§5.6). The layer's
+    /// `map_origin` uniform is `-origin`, the map's top-left on the internal target.
+    pub fn draw_tile_layer_with(
+        &mut self,
+        grid: &dyn TileGrid,
+        sheets: &[TileSheet],
+        tile_size: (u32, u32),
+        layer: Layer,
+        origin: (i32, i32),
+        materials: TileMaterials<'_>,
+    ) -> usize {
+        let view = self.view_size();
+        let map_origin = (-(origin.0 as f32), -(origin.1 as f32));
+        let mut cache = HashMap::new();
+        let mut count = 0;
+        for (sheet, draw) in tile_layer_draws_by_sheet(grid, sheets, tile_size, layer, origin, view)
+        {
+            let sheet = materials.sheets.get(usize::from(sheet)).copied().flatten();
+            let bind = [sheet, materials.layer]
+                .into_iter()
+                .flatten()
+                .find_map(|m| self.bind_for(m, draw, map_origin, &mut cache));
+            self.pending.push(Queued::Sprite(draw, bind));
+            count += 1;
+        }
         count
     }
 
@@ -139,11 +218,38 @@ impl Renderer {
     pub fn draw_entities(&mut self, entities: &mut [EntitySprite]) {
         y_sort(entities);
         self.pending.extend(entities.iter().map(|e| {
-            Queued::Sprite(SpriteDraw {
+            Queued::Sprite(
+                SpriteDraw {
+                    layer: Layer::Entities,
+                    ..e.draw
+                },
+                None,
+            )
+        }));
+    }
+
+    /// Like [`draw_entities`](Self::draw_entities), with a material per entity (§5.6);
+    /// `materials[i]` belongs to `entities[i]` before sorting.
+    pub fn draw_entities_with(
+        &mut self,
+        entities: &[EntitySprite],
+        materials: &[Option<MaterialHandle>],
+    ) {
+        let mut order: Vec<(EntitySprite, Option<MaterialHandle>)> = entities
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (*e, materials.get(i).copied().flatten()))
+            .collect();
+        order.sort_by(|(a, _), (b, _)| y_order(a, b));
+        let mut cache = HashMap::new();
+        for (e, material) in order {
+            let draw = SpriteDraw {
                 layer: Layer::Entities,
                 ..e.draw
-            })
-        }));
+            };
+            let bind = material.and_then(|m| self.bind_for(m, draw, self.map_origin, &mut cache));
+            self.pending.push(Queued::Sprite(draw, bind));
+        }
     }
 
     /// Submits queued draws and presents to the window.
@@ -154,22 +260,26 @@ impl Renderer {
         self.pending.sort_by_key(Queued::layer);
         for queued in &self.pending {
             match queued {
-                Queued::Sprite(draw) => self.backend.draw_sprite(draw),
+                Queued::Sprite(draw, None) => self.backend.draw_sprite(draw),
+                Queued::Sprite(draw, Some(bind)) => match self.binds.get(*bind) {
+                    Some(bind) => self.backend.draw_sprite_with_material(draw, bind),
+                    None => self.backend.draw_sprite(draw),
+                },
                 Queued::Rect { dst, color, layer } => {
                     self.backend.draw_filled_rect(*dst, *color, *layer);
                 }
             }
         }
         self.pending.clear();
+        self.binds.clear();
         self.backend.end_frame();
     }
 
     /// Decodes and uploads an encoded image (PNG); returns the handle and its size.
-    pub fn load_texture(
-        &mut self,
-        encoded: &[u8],
-    ) -> crate::Result<(crate::texture::TextureHandle, u32, u32)> {
-        self.backend.create_texture_from_image(encoded)
+    pub fn load_texture(&mut self, encoded: &[u8]) -> crate::Result<(TextureHandle, u32, u32)> {
+        let (handle, w, h) = self.backend.create_texture_from_image(encoded)?;
+        self.texture_sizes.insert(handle, (w, h));
+        Ok((handle, w, h))
     }
 
     /// Uploads an RGBA8 sprite sheet through the backend.
@@ -178,8 +288,93 @@ impl Renderer {
         width: u32,
         height: u32,
         rgba: &[u8],
-    ) -> crate::Result<crate::texture::TextureHandle> {
-        self.backend.create_texture(width, height, rgba)
+    ) -> crate::Result<TextureHandle> {
+        let handle = self.backend.create_texture(width, height, rgba)?;
+        self.texture_sizes.insert(handle, (width, height));
+        Ok(handle)
+    }
+
+    /// Compiles `material` through the backend (§5.6); `name` is its id for logs.
+    pub fn create_material(
+        &mut self,
+        name: &str,
+        material: Material,
+    ) -> crate::Result<MaterialHandle> {
+        let handle = self.backend.create_material(&material.program(name))?;
+        self.materials.insert(handle, material);
+        Ok(handle)
+    }
+
+    /// The material behind `handle`.
+    #[must_use]
+    pub fn material(&self, handle: MaterialHandle) -> Option<&Material> {
+        self.materials.get(&handle)
+    }
+
+    /// Sets a global uniform read by `Global(name: …)` material uniforms (plugin globals
+    /// such as a day/night tint, §5.6). It applies from the next queued draw on.
+    pub fn set_global_uniform(&mut self, name: &str, value: UniformValue) {
+        self.globals.set(name, value);
+    }
+
+    /// Clears a global uniform (materials fall back to their defaults).
+    pub fn clear_global_uniform(&mut self, name: &str) -> bool {
+        self.globals.remove(name)
+    }
+
+    /// The global uniforms.
+    #[must_use]
+    pub fn global_uniforms(&self) -> &GlobalUniforms {
+        &self.globals
+    }
+
+    /// Sets the `time_ticks` engine uniform (the simulation tick count, §3.1).
+    pub fn set_time_ticks(&mut self, ticks: u64) {
+        self.time_ticks = ticks;
+    }
+
+    /// The `time_ticks` engine uniform.
+    #[must_use]
+    pub fn time_ticks(&self) -> u64 {
+        self.time_ticks
+    }
+
+    /// Sets the `map_origin` engine uniform for sprites (the map's top-left on the internal
+    /// target, in pixels). Tile layers use their own origin.
+    pub fn set_map_origin(&mut self, origin: (f32, f32)) {
+        self.map_origin = origin;
+    }
+
+    /// Resolves `material` for `draw` and stores the bind; `None` when the material is
+    /// unknown or does not apply to `draw.src`. `cache` reuses binds per (material, texture).
+    fn bind_for(
+        &mut self,
+        material: MaterialHandle,
+        draw: SpriteDraw,
+        map_origin: (f32, f32),
+        cache: &mut HashMap<(MaterialHandle, TextureHandle), usize>,
+    ) -> Option<usize> {
+        let m = self.materials.get(&material)?;
+        if !m.applies_to(draw.src) {
+            return None;
+        }
+        if let Some(index) = cache.get(&(material, draw.texture)) {
+            return Some(*index);
+        }
+        let engine = EngineUniforms {
+            time_ticks: self.time_ticks,
+            map_origin,
+            texture_size: self
+                .texture_sizes
+                .get(&draw.texture)
+                .copied()
+                .unwrap_or((0, 0)),
+        };
+        let uniforms = m.resolve_uniforms(&engine, &self.globals);
+        self.binds.push(MaterialBind { material, uniforms });
+        let index = self.binds.len() - 1;
+        cache.insert((material, draw.texture), index);
+        Some(index)
     }
 }
 

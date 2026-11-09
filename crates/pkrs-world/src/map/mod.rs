@@ -64,6 +64,8 @@ pub struct TileLayer {
     pub kind: VisualLayerKind,
     /// Hidden in the editor: kept, but the renderer skips it.
     pub visible: bool,
+    /// Material id from the layer property `material` (`assets/materials/<id>.ron`, §5.6).
+    pub material: Option<String>,
     width: u32,
     height: u32,
     tiles: Vec<Option<TileRef>>,
@@ -83,6 +85,7 @@ impl TileLayer {
             name: name.into(),
             kind,
             visible: true,
+            material: None,
             width,
             height,
             tiles,
@@ -142,6 +145,8 @@ pub struct MapTileset {
     pub margin: u32,
     /// Sheet image (single-image tilesets only in v1).
     pub image: Option<TilesetImage>,
+    /// Material id from the tileset property `material` (`assets/materials/<id>.ron`, §5.6).
+    pub material: Option<String>,
 }
 
 impl MapTileset {
@@ -252,6 +257,7 @@ mod tests {
                 spacing: 0,
                 margin: 0,
                 image: None,
+                material: None,
             }],
             layers: vec![
                 TileLayer::new("ground", VisualLayerKind::Ground, w, h, full(0)).unwrap(),
@@ -309,6 +315,7 @@ mod tests {
             spacing: 1,
             margin: 2,
             image: None,
+            material: None,
         };
         assert_eq!(ts.tile_src(0), Some((2, 2, 16, 16)));
         assert_eq!(ts.tile_src(5), Some((2 + 17, 2 + 17, 16, 16)));

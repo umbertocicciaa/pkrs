@@ -8,6 +8,7 @@ use crate::Result;
 use crate::color::Color;
 use crate::draw::SpriteDraw;
 use crate::layer::Layer;
+use crate::material::{MaterialBind, MaterialHandle, ShaderProgram, UniformType};
 use crate::texture::TextureHandle;
 use crate::viewport::ViewportLayout;
 
@@ -28,31 +29,61 @@ pub struct RecordedDraw {
     pub flip_x: bool,
     /// Tint applied to the sprite.
     pub tint: Color,
+    /// The material bound for this draw and its uniform values (§5.6), if any.
+    pub material: Option<MaterialBind>,
+}
+
+/// One material created through the backend (for assertions).
+#[derive(Clone, Debug, PartialEq)]
+pub struct RecordedMaterial {
+    /// Handle returned to the engine.
+    pub handle: MaterialHandle,
+    /// Material id.
+    pub name: String,
+    /// Uniforms the program binds, in order.
+    pub uniforms: Vec<(String, UniformType)>,
+}
+
+#[derive(Debug, Default)]
+struct LogInner {
+    draws: Vec<RecordedDraw>,
+    materials: Vec<RecordedMaterial>,
 }
 
 /// Shared log of recorded draws (clone before moving the backend into a [`Renderer`](crate::Renderer)).
 #[derive(Clone, Debug, Default)]
-pub struct DrawLog(Rc<RefCell<Vec<RecordedDraw>>>);
+pub struct DrawLog(Rc<RefCell<LogInner>>);
 
 impl DrawLog {
     /// Returns the recorded draws in submission order.
     pub fn draws(&self) -> std::cell::Ref<'_, [RecordedDraw]> {
-        std::cell::Ref::map(self.0.borrow(), Vec::as_slice)
+        std::cell::Ref::map(self.0.borrow(), |log| log.draws.as_slice())
     }
 
-    /// Clears the log.
+    /// Materials created so far (kept by [`clear`](Self::clear)).
+    pub fn materials(&self) -> std::cell::Ref<'_, [RecordedMaterial]> {
+        std::cell::Ref::map(self.0.borrow(), |log| log.materials.as_slice())
+    }
+
+    /// Clears the recorded draws.
     pub fn clear(&self) {
-        self.0.borrow_mut().clear();
+        self.0.borrow_mut().draws.clear();
+    }
+
+    fn push(&self, draw: RecordedDraw) {
+        self.0.borrow_mut().draws.push(draw);
     }
 }
 
-/// Headless backend that records sprite draws and ignores GPU work.
+/// Headless backend that records sprite draws, material creation and material binds (with
+/// their resolved uniforms), and ignores GPU work.
 #[derive(Clone, Debug)]
 pub struct NullRenderer {
     log: DrawLog,
     internal: (u32, u32),
     last_viewport: ViewportLayout,
     next_texture_id: u32,
+    next_material_id: u32,
 }
 
 impl Default for NullRenderer {
@@ -72,6 +103,7 @@ impl NullRenderer {
                 dest: crate::rect::Rect::new(0.0, 0.0, 240.0, 160.0),
             },
             next_texture_id: 1,
+            next_material_id: 1,
         }
     }
 
@@ -105,19 +137,26 @@ impl RenderBackend for NullRenderer {
     }
 
     fn draw_sprite(&mut self, draw: &SpriteDraw) {
-        self.log.0.borrow_mut().push(RecordedDraw {
-            is_filled_rect: false,
-            layer: draw.layer,
-            texture: draw.texture,
-            src: draw.src,
-            dst: draw.dst,
-            flip_x: draw.flip_x,
-            tint: draw.tint,
+        self.log.push(recorded(draw, None));
+    }
+
+    fn create_material(&mut self, program: &ShaderProgram<'_>) -> Result<MaterialHandle> {
+        let handle = MaterialHandle(self.next_material_id);
+        self.next_material_id = self.next_material_id.saturating_add(1).max(1);
+        self.log.0.borrow_mut().materials.push(RecordedMaterial {
+            handle,
+            name: program.name.to_owned(),
+            uniforms: program.uniforms.to_vec(),
         });
+        Ok(handle)
+    }
+
+    fn draw_sprite_with_material(&mut self, draw: &SpriteDraw, bind: &MaterialBind) {
+        self.log.push(recorded(draw, Some(bind.clone())));
     }
 
     fn draw_filled_rect(&mut self, dst: crate::rect::Rect, color: Color, layer: Layer) {
-        self.log.0.borrow_mut().push(RecordedDraw {
+        self.log.push(RecordedDraw {
             is_filled_rect: true,
             layer,
             texture: TextureHandle(0),
@@ -125,10 +164,24 @@ impl RenderBackend for NullRenderer {
             dst,
             flip_x: false,
             tint: color,
+            material: None,
         });
     }
 
     fn end_frame(&mut self) {}
+}
+
+fn recorded(draw: &SpriteDraw, material: Option<MaterialBind>) -> RecordedDraw {
+    RecordedDraw {
+        is_filled_rect: false,
+        layer: draw.layer,
+        texture: draw.texture,
+        src: draw.src,
+        dst: draw.dst,
+        flip_x: draw.flip_x,
+        tint: draw.tint,
+        material,
+    }
 }
 
 /// Reads the width and height from a PNG header without decoding pixels.

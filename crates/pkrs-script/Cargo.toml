@@ -14,6 +14,7 @@ pkrs-battle.workspace = true
 pkrs-data.workspace = true
 pkrs-save.workspace = true
 pkrs-ui.workspace = true
+pkrs-render.workspace = true
 pkrs-audio.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

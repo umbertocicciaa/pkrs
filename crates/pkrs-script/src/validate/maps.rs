@@ -1,7 +1,7 @@
 //! Map cross-references (§6.2, §6.4, §6.5): warps, object scripts, sprites, items,
 //! encounter tables, sign text and the `once`-trigger heuristic.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use pkrs_core::{Diagnostic, Diagnostics, SourceSpan};
 use pkrs_data::GameData;
@@ -53,6 +53,8 @@ pub(super) struct MapCheck<'a> {
     pub data: &'a GameData,
     pub locale: TextLocale<'a>,
     pub lua: &'a BTreeMap<String, LuaFacts>,
+    /// Material ids under `assets/materials/` (§5.6).
+    pub materials: &'a BTreeSet<String>,
 }
 
 /// The checks of one map, with its source for spans.
@@ -104,8 +106,21 @@ impl MapCheck<'_> {
                 .with_label("image not found"),
             );
         }
+        for tileset in &map.tilesets {
+            if let Some(id) = &tileset.material {
+                c.material_ref(id, &format!("tileset `{}`", tileset.name), None);
+            }
+        }
+        for layer in &map.layers {
+            if let Some(id) = &layer.material {
+                c.material_ref(id, &format!("layer `{}`", layer.name), None);
+            }
+        }
         for object in &map.objects {
             c.object(object, all);
+            if let Ok(Some(id)) = object.properties.string("material") {
+                c.material_ref(id, &describe(object), Some(object.id));
+            }
         }
         if self.data.battles_enabled() {
             for zone in &map.encounters {
@@ -136,6 +151,37 @@ impl Checker<'_, '_> {
         self.source
             .as_deref()
             .and_then(|src| property_span(src, id, key))
+    }
+
+    /// A `material` property must name `assets/materials/<id>.ron` (§5.6).
+    fn material_ref(&mut self, id: &str, who: &str, object: Option<u32>) {
+        if self.ctx.materials.contains(id) {
+            return;
+        }
+        let span = match object {
+            Some(object) => self.property(object, "material"),
+            // Tileset properties may live in an external `.tsx`; then there is no span.
+            None => self
+                .source
+                .as_deref()
+                .and_then(|src| SourceSpan::find(src, &format!("value=\"{id}\""), 0)),
+        };
+        self.out.push(
+            Diagnostic::error(
+                "material::unknown-material",
+                format!(
+                    "{who} uses material `{id}`, but `{}` does not exist",
+                    pkrs_render::material_path(id)
+                ),
+            )
+            .in_file(self.path)
+            .at(span)
+            .with_label("no such material")
+            .with_help(format!(
+                "materials are the descriptors in {}/",
+                pkrs_render::MATERIALS_DIR
+            )),
+        );
     }
 
     fn report(&mut self, object: &MapObject, key: Option<&str>, diagnostic: Diagnostic) {

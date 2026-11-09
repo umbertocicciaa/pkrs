@@ -13,6 +13,7 @@ use core::fmt;
 use pkrs_audio::AudioRequest;
 use pkrs_core::{Direction, GridPos};
 use pkrs_data::{ENGINE_LANGUAGE, TextArgs, format_text};
+use pkrs_render::UniformValue;
 
 use crate::host::ScriptValue;
 
@@ -208,6 +209,17 @@ pub trait ScriptWorld {
 
     /// `camera.*`.
     fn camera(&mut self, command: CameraCommand) -> ApiResult<()>;
+
+    // --- render (§9.1, §5.6) ---
+
+    /// `render.set_global_uniform(name, value)`: sets a global material uniform (the name is
+    /// non-empty and not an engine uniform). Default: refused.
+    fn set_global_uniform(&mut self, name: &str, value: UniformValue) -> ApiResult<()> {
+        let _ = value;
+        Err(ApiError::new(format!(
+            "cannot set `{name}`: this world has no renderer"
+        )))
+    }
 
     // --- audio (§9.1, §11) ---
 

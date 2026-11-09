@@ -4,7 +4,7 @@
 mod macroquad;
 mod null;
 
-pub use null::{DrawLog, NullRenderer, RecordedDraw};
+pub use null::{DrawLog, NullRenderer, RecordedDraw, RecordedMaterial};
 
 #[cfg(feature = "macroquad")]
 pub use self::macroquad::MacroquadRenderer;
@@ -13,6 +13,7 @@ use crate::Result;
 use crate::color::Color;
 use crate::draw::SpriteDraw;
 use crate::layer::Layer;
+use crate::material::{MaterialBind, MaterialHandle, ShaderProgram};
 use crate::rect::Rect;
 use crate::texture::TextureHandle;
 use crate::viewport::ViewportLayout;
@@ -40,6 +41,14 @@ pub trait RenderBackend {
 
     /// Draws one sprite into the internal target (call in layer order).
     fn draw_sprite(&mut self, draw: &SpriteDraw);
+
+    /// Compiles a material's shader program (§5.6). A backend that cannot run it returns an
+    /// error; the engine then draws without the material.
+    fn create_material(&mut self, program: &ShaderProgram<'_>) -> Result<MaterialHandle>;
+
+    /// Draws one sprite with a material and its resolved uniform values. An unknown handle
+    /// draws the sprite plainly.
+    fn draw_sprite_with_material(&mut self, draw: &SpriteDraw, bind: &MaterialBind);
 
     /// Solid filled rectangle in internal pixel space (UI chrome, placeholders).
     fn draw_filled_rect(&mut self, dst: Rect, color: Color, layer: Layer);

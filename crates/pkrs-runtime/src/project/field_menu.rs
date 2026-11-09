@@ -102,8 +102,9 @@ impl ProjectHost {
         let party = self.party.clone().ok_or_else(|| "no party".to_owned())?;
         let data = self.ensure_game_data()?.clone();
         let view = self.renderer.view_size();
-        let menu = FieldMenu::new(theme, view, self.localizer.clone(), party, bag, data)
+        let mut menu = FieldMenu::new(theme, view, self.localizer.clone(), party, bag, data)
             .map_err(|e| e.to_string())?;
+        menu.set_options(self.user_config.clone(), self.project.display().scale);
         self.field_menu = Some(menu);
         Ok(())
     }
@@ -134,6 +135,9 @@ impl ProjectHost {
                 menu.update(&mut self.input, host, &field_actions)
             }
         };
+        if let Some(config) = menu.take_saved_options() {
+            self.persist_user_config(config);
+        }
         if close {
             let action = menu.take_field_action();
             self.commit_field_menu(&menu);

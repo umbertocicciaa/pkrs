@@ -14,12 +14,16 @@
 //! the assets VFS: game content is read through `pkrs-assets` (`Vfs`: loose folder or
 //! `.pak`, §13).
 //!
-//! No vendor type appears in any public signature. Gamepad support (`GilrsGamepad`)
-//! is planned; keyboard actions are handled by the [`Input`] facade (§10).
+//! No vendor type appears in any public signature. Keyboard and gamepad both feed the
+//! [`Input`] facade (§10). [`GilrsGamepad`] is the `gilrs` adapter; [`NullGamepad`] scripts
+//! a pad for tests and headless runs.
 
 mod action;
 mod backend;
+mod button;
+mod config;
 mod error;
+mod gamepad;
 mod input;
 mod key;
 mod paths;
@@ -29,12 +33,18 @@ mod window;
 pub use action::{Action, BuiltinAction, CustomActionId};
 #[cfg(feature = "directories")]
 pub use backend::DirectoriesPaths;
+#[cfg(feature = "gilrs")]
+pub use backend::GilrsGamepad;
 #[cfg(feature = "macroquad")]
 pub use backend::MacroquadPlatform;
 pub use backend::{FrameFuture, NullFrame, NullPlatform, PlatformBackend, block_on};
-pub use error::{InputError, InputResult, PlatformError, Result};
+pub use button::GamepadButton;
+pub use config::{CONFIG_FILE, UserBinding, UserConfig, VolumeSettings};
+pub use error::{ConfigError, InputError, InputResult, PlatformError, Result};
+pub use gamepad::{GamepadSource, NullGamepad};
 pub use input::{
-    Input, InputFacadeConfig, MenuCursorDirection, MenuRepeatConfig, MovementBufferConfig,
+    ControlSource, Input, InputFacadeConfig, MenuCursorDirection, MenuRepeatConfig,
+    MovementBufferConfig,
 };
 pub use key::Key;
 pub use paths::{FixedPaths, UserPaths};

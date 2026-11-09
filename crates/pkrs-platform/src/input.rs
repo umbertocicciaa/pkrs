@@ -7,9 +7,20 @@ use pkrs_core::InputBuiltinPressed;
 use pkrs_core::manifest::{InputConfig as ManifestInputConfig, is_action_name};
 
 use crate::action::{Action, ActionRegistry, BuiltinAction, CustomActionId, resolve_action};
+use crate::button::GamepadButton;
+use crate::config::{UserBinding, UserConfig};
 use crate::error::{InputError, InputResult};
 use crate::key::Key;
 use crate::platform::Platform;
+
+/// One physical control that became newly held this tick (rebinding capture, §10).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ControlSource {
+    /// A keyboard key.
+    Key(Key),
+    /// A standard gamepad button, including a digital stick direction.
+    Button(GamepadButton),
+}
 
 /// Policy for menu cursor key repeat while a direction is held.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,6 +83,7 @@ struct ActionTickState {
 #[derive(Clone, Debug)]
 struct ActionBinding {
     keys: Vec<Key>,
+    buttons: Vec<GamepadButton>,
     state: ActionTickState,
 }
 
@@ -86,8 +98,14 @@ pub struct Input {
     custom: Vec<ActionBinding>,
     keys_down: BTreeSet<Key>,
     keys_latched: BTreeSet<Key>,
+    buttons_down: BTreeSet<GamepadButton>,
+    buttons_latched: BTreeSet<GamepadButton>,
+    prev_keys: BTreeSet<Key>,
+    prev_buttons: BTreeSet<GamepadButton>,
+    fresh: Vec<ControlSource>,
     press_carry: BTreeMap<Action, u64>,
     pending_overrides: BTreeMap<String, Vec<Key>>,
+    pending_buttons: BTreeMap<String, Vec<GamepadButton>>,
     movement_buffer: Option<Direction>,
     step_ticks_remaining: u32,
     simulation_tick: u64,
@@ -107,13 +125,20 @@ impl Input {
             registry: ActionRegistry::default(),
             builtins: std::array::from_fn(|_| ActionBinding {
                 keys: Vec::new(),
+                buttons: Vec::new(),
                 state: ActionTickState::default(),
             }),
             custom: Vec::new(),
             keys_down: BTreeSet::new(),
             keys_latched: BTreeSet::new(),
+            buttons_down: BTreeSet::new(),
+            buttons_latched: BTreeSet::new(),
+            prev_keys: BTreeSet::new(),
+            prev_buttons: BTreeSet::new(),
+            fresh: Vec::new(),
             press_carry: BTreeMap::new(),
             pending_overrides: BTreeMap::new(),
+            pending_buttons: BTreeMap::new(),
             movement_buffer: None,
             step_ticks_remaining: 0,
             simulation_tick: 0,
@@ -139,9 +164,11 @@ impl Input {
             .pending_overrides
             .remove(name)
             .unwrap_or_else(|| default_keys.to_vec());
+        let buttons = self.pending_buttons.remove(name).unwrap_or_default();
         let id = self.registry.register(name)?;
         self.custom.push(ActionBinding {
             keys,
+            buttons,
             state: ActionTickState::default(),
         });
         Ok(Action::Custom(id))
@@ -157,6 +184,79 @@ impl Input {
         &self.binding(action).keys
     }
 
+    /// Gamepad buttons currently bound to `action`.
+    pub fn bound_buttons(&self, action: Action) -> &[GamepadButton] {
+        &self.binding(action).buttons
+    }
+
+    /// Replaces bindings listed in `config`. Unlisted actions keep their current keys and
+    /// buttons (built-in defaults, then the manifest). A listed action replaces both lists,
+    /// so an empty button list clears the pad binding for that action.
+    pub fn apply_user_config(&mut self, config: &UserConfig) -> InputResult<()> {
+        let mut parsed = Vec::with_capacity(config.bindings.len());
+        for (name, binding) in &config.bindings {
+            if binding.keys.is_empty() && binding.buttons.is_empty() {
+                return Err(InputError::EmptyBinding(name.clone()));
+            }
+            let keys = parse_key_names(name, &binding.keys)?;
+            let buttons = parse_button_names(name, &binding.buttons)?;
+            parsed.push((name.clone(), keys, buttons));
+        }
+        for (name, keys, buttons) in parsed {
+            if let Some(builtin) = BuiltinAction::parse(&name) {
+                let binding = self.builtin_binding_mut(builtin);
+                binding.keys = keys;
+                binding.buttons = buttons;
+            } else if let Some(id) = self.registry.id_by_name(&name) {
+                let binding = &mut self.custom[id.get() as usize];
+                binding.keys = keys;
+                binding.buttons = buttons;
+            } else if name.contains(':') {
+                if !is_action_name(&name) {
+                    return Err(InputError::InvalidActionName(name));
+                }
+                self.pending_overrides.insert(name.clone(), keys);
+                self.pending_buttons.insert(name, buttons);
+            } else {
+                return Err(InputError::InvalidActionName(name));
+            }
+        }
+        Ok(())
+    }
+
+    /// Every current binding, built-ins first then custom actions, in config names.
+    #[must_use]
+    pub fn export_bindings(&self) -> BTreeMap<String, UserBinding> {
+        let mut map = BTreeMap::new();
+        for action in BuiltinAction::ALL {
+            map.insert(
+                action.name().to_owned(),
+                self.user_binding(Action::Builtin(*action)),
+            );
+        }
+        for (index, name) in self.registry.names().iter().enumerate() {
+            let id = CustomActionId::new(index as u32);
+            map.insert(name.clone(), self.user_binding(Action::Custom(id)));
+        }
+        map
+    }
+
+    fn user_binding(&self, action: Action) -> UserBinding {
+        let binding = self.binding(action);
+        UserBinding {
+            keys: binding
+                .keys
+                .iter()
+                .map(|key| key.config_name().to_owned())
+                .collect(),
+            buttons: binding
+                .buttons
+                .iter()
+                .map(|button| button.name().to_owned())
+                .collect(),
+        }
+    }
+
     /// Names of every action: the built-ins, then registered custom actions in order.
     pub fn action_names(&self) -> Vec<String> {
         BuiltinAction::ALL
@@ -166,9 +266,15 @@ impl Input {
             .collect()
     }
 
-    /// Polls keyboard state once per rendered frame (§3.1).
+    /// Polls keyboard state once per rendered frame (§3.1). Gamepad buttons stay empty.
     pub fn poll(&mut self, platform: &Platform) {
+        self.poll_with(platform, &[]);
+    }
+
+    /// Polls the keyboard and the buttons held on the active pad into one action state (§10).
+    pub fn poll_with(&mut self, platform: &Platform, buttons: &[GamepadButton]) {
         self.keys_down.clear();
+        self.buttons_down.clear();
         if platform.is_paused() {
             return;
         }
@@ -176,6 +282,17 @@ impl Input {
             self.keys_down.insert(key);
         }
         self.keys_latched.extend(self.keys_down.iter().copied());
+        for button in buttons {
+            self.buttons_down.insert(*button);
+        }
+        self.buttons_latched
+            .extend(self.buttons_down.iter().copied());
+    }
+
+    /// Keys and buttons that became held since the previous tick (rebinding capture).
+    #[must_use]
+    pub fn fresh_sources(&self) -> &[ControlSource] {
+        &self.fresh
     }
 
     /// Recomputes per-tick edges; call once at the start of each simulation tick.
@@ -184,16 +301,31 @@ impl Input {
         self.expire_press_carry();
 
         let keys_latched = self.keys_latched.clone();
+        let buttons_latched = self.buttons_latched.clone();
+        self.fresh.clear();
+        for key in &keys_latched {
+            if !self.prev_keys.contains(key) {
+                self.fresh.push(ControlSource::Key(*key));
+            }
+        }
+        for button in &buttons_latched {
+            if !self.prev_buttons.contains(button) {
+                self.fresh.push(ControlSource::Button(*button));
+            }
+        }
         for &builtin in BuiltinAction::ALL {
-            self.update_binding(Action::Builtin(builtin), &keys_latched);
+            self.update_binding(Action::Builtin(builtin), &keys_latched, &buttons_latched);
         }
         for index in 0..self.custom.len() {
             let id = CustomActionId::new(index as u32);
-            self.update_binding(Action::Custom(id), &keys_latched);
+            self.update_binding(Action::Custom(id), &keys_latched, &buttons_latched);
         }
 
         self.capture_movement_buffer();
+        self.prev_keys.clone_from(&self.keys_down);
+        self.prev_buttons.clone_from(&self.buttons_down);
         self.keys_latched.clone_from(&self.keys_down);
+        self.buttons_latched.clone_from(&self.buttons_down);
     }
 
     /// Whether `action` is held this tick.
@@ -272,8 +404,10 @@ impl Input {
 
     fn apply_default_bindings(&mut self) {
         for (action, keys) in DEFAULT_BINDINGS {
-            let binding = self.builtin_binding_mut(*action);
-            binding.keys = keys.to_vec();
+            self.builtin_binding_mut(*action).keys = keys.to_vec();
+        }
+        for (action, buttons) in DEFAULT_PAD_BINDINGS {
+            self.builtin_binding_mut(*action).buttons = buttons.to_vec();
         }
     }
 
@@ -299,10 +433,22 @@ impl Input {
         Ok(())
     }
 
-    fn update_binding(&mut self, action: Action, keys_latched: &BTreeSet<Key>) {
+    fn update_binding(
+        &mut self,
+        action: Action,
+        keys_latched: &BTreeSet<Key>,
+        buttons_latched: &BTreeSet<GamepadButton>,
+    ) {
         let binding_keys = self.binding(action).keys.clone();
-        let down = binding_keys.iter().any(|key| self.keys_down.contains(key));
-        let latched = binding_keys.iter().any(|key| keys_latched.contains(key));
+        let binding_buttons = self.binding(action).buttons.clone();
+        let down = binding_keys.iter().any(|key| self.keys_down.contains(key))
+            || binding_buttons
+                .iter()
+                .any(|button| self.buttons_down.contains(button));
+        let latched = binding_keys.iter().any(|key| keys_latched.contains(key))
+            || binding_buttons
+                .iter()
+                .any(|button| buttons_latched.contains(button));
         let binding = self.binding_mut(action);
         let prev = binding.state.prev_down;
         binding.state.down = down;
@@ -381,6 +527,43 @@ const DEFAULT_BINDINGS: &[(BuiltinAction, &[Key])] = &[
     (BuiltinAction::Run, &[Key::LeftShift]),
     (BuiltinAction::Select, &[Key::Space]),
 ];
+
+const DEFAULT_PAD_BINDINGS: &[(BuiltinAction, &[GamepadButton])] = &[
+    (
+        BuiltinAction::Up,
+        &[GamepadButton::DPadUp, GamepadButton::LeftStickUp],
+    ),
+    (
+        BuiltinAction::Down,
+        &[GamepadButton::DPadDown, GamepadButton::LeftStickDown],
+    ),
+    (
+        BuiltinAction::Left,
+        &[GamepadButton::DPadLeft, GamepadButton::LeftStickLeft],
+    ),
+    (
+        BuiltinAction::Right,
+        &[GamepadButton::DPadRight, GamepadButton::LeftStickRight],
+    ),
+    (BuiltinAction::Confirm, &[GamepadButton::South]),
+    (BuiltinAction::Cancel, &[GamepadButton::East]),
+    (BuiltinAction::Menu, &[GamepadButton::Start]),
+    (BuiltinAction::Run, &[GamepadButton::RightShoulder]),
+    (BuiltinAction::Select, &[GamepadButton::Select]),
+];
+
+fn parse_button_names(action: &str, names: &[String]) -> InputResult<Vec<GamepadButton>> {
+    let mut buttons = Vec::with_capacity(names.len());
+    for name in names {
+        let button =
+            GamepadButton::parse_name(name).ok_or_else(|| InputError::UnknownButtonName {
+                action: action.to_owned(),
+                button: name.clone(),
+            })?;
+        buttons.push(button);
+    }
+    Ok(buttons)
+}
 
 fn parse_key_names(action: &str, names: &[String]) -> InputResult<Vec<Key>> {
     let mut keys = Vec::with_capacity(names.len());
@@ -663,5 +846,72 @@ mod tests {
         assert_eq!(names.len(), BuiltinAction::ALL.len() + 1);
         assert!(names.iter().any(|n| n == "confirm"));
         assert_eq!(names.last().map(String::as_str), Some("resonance:toggle"));
+    }
+
+    #[test]
+    fn gamepad_button_merges_into_the_same_action() {
+        let mut input = Input::default();
+        let mut platform = platform_with([NullFrame::idle()]);
+        block_on(platform.next_frame());
+        input.poll_with(&platform, &[GamepadButton::DPadRight, GamepadButton::South]);
+        input.begin_tick();
+        assert!(input.pressed(Action::Builtin(BuiltinAction::Right)));
+        assert!(input.down(Action::Builtin(BuiltinAction::Right)));
+        assert!(input.pressed(Action::Builtin(BuiltinAction::Confirm)));
+        assert!(!input.down(Action::Builtin(BuiltinAction::Left)));
+    }
+
+    #[test]
+    fn user_config_overrides_manifest_and_survives_a_fresh_input() {
+        let mut manifest = ManifestInputConfig::default();
+        manifest
+            .bindings
+            .insert("confirm".to_owned(), vec!["space".to_owned()]);
+        let mut config = UserConfig::default();
+        config.bindings.insert(
+            "confirm".to_owned(),
+            UserBinding {
+                keys: vec!["t".to_owned()],
+                buttons: vec![],
+            },
+        );
+        let mut input =
+            Input::from_manifest(InputFacadeConfig::default(), &manifest).expect("manifest");
+        input.apply_user_config(&config).expect("user");
+        assert_eq!(
+            input.bound_keys(Action::Builtin(BuiltinAction::Confirm)),
+            &[Key::T]
+        );
+        assert!(
+            input
+                .bound_buttons(Action::Builtin(BuiltinAction::Confirm))
+                .is_empty()
+        );
+
+        let saved = config.to_ron().expect("ron");
+        let loaded = UserConfig::parse(&saved).expect("parse");
+        let mut restarted =
+            Input::from_manifest(InputFacadeConfig::default(), &manifest).expect("manifest");
+        restarted.apply_user_config(&loaded).expect("user");
+        assert_eq!(
+            restarted.bound_keys(Action::Builtin(BuiltinAction::Confirm)),
+            &[Key::T]
+        );
+
+        let mut platform = platform_with([NullFrame::with_keys([Key::Space])]);
+        block_on(platform.next_frame());
+        tick(&mut restarted, &platform);
+        assert!(!restarted.pressed(Action::Builtin(BuiltinAction::Confirm)));
+
+        let mut platform = platform_with([NullFrame::with_keys([Key::T])]);
+        block_on(platform.next_frame());
+        tick(&mut restarted, &platform);
+        assert!(restarted.pressed(Action::Builtin(BuiltinAction::Confirm)));
+
+        let mut platform = platform_with([NullFrame::idle()]);
+        block_on(platform.next_frame());
+        restarted.poll_with(&platform, &[GamepadButton::South]);
+        restarted.begin_tick();
+        assert!(!restarted.pressed(Action::Builtin(BuiltinAction::Confirm)));
     }
 }

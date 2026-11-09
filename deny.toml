@@ -86,7 +86,7 @@ deny = [
     { crate = "rand_pcg", wrappers = ["pkrs-core"], reason = "§4.5: rand_pcg is wrapped by pkrs-core (Pcg64Rng)" },
     { crate = "toml", wrappers = ["pkrs-core"], reason = "§4.5: toml is wrapped by pkrs-core (manifest toml_codec)" },
     { crate = "semver", wrappers = ["pkrs-core", "rustc_version"], reason = "§4.5: semver is wrapped by pkrs-core (Version, VersionReq); rustc_version is a build-time dependency of jni (cpal's Android backend, via kira) and never reaches pkrs code" },
-    { crate = "ron", wrappers = ["pkrs-data", "pkrs-save", "pkrs-render", "pkrs-world", "pkrs-audio"], reason = "§4.5: ron is wrapped by pkrs-data, pkrs-save (RonCodec), pkrs-render (sprite animation descriptors, §5.4; material descriptors, §5.6), pkrs-world (world.ron layout, §6.4) and pkrs-audio (audio manifest codec, §11)" },
+    { crate = "ron", wrappers = ["pkrs-data", "pkrs-save", "pkrs-render", "pkrs-world", "pkrs-audio", "pkrs-platform"], reason = "§4.5: ron is wrapped by pkrs-data, pkrs-save (RonCodec), pkrs-render (sprite animation descriptors, §5.4; material descriptors, §5.6), pkrs-world (world.ron layout, §6.4), pkrs-audio (audio manifest codec, §11) and pkrs-platform (user config, §14.3)" },
     { crate = "texture_packer", wrappers = ["pkrs-cli"], reason = "§4.5: texture_packer is wrapped by pkrs-cli (TexturePackerAdapter)" },
     { crate = "miette", wrappers = ["pkrs-cli"], reason = "§4.5, §8.2: miette renders `pkrs check` diagnostics in the pkrs-cli report adapter (report.rs) only" },
 ]

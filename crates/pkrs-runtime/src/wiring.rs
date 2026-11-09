@@ -7,7 +7,8 @@
 use pkrs_assets::Vfs;
 use pkrs_audio::{AudioBackend, KiraAudio, NullAudio};
 use pkrs_platform::{
-    DisplaySettings, FixedPaths, NullPlatform, Platform, PlatformConfig, WindowConfig,
+    DisplaySettings, FixedPaths, GamepadSource, GilrsGamepad, NullGamepad, NullPlatform, Platform,
+    PlatformConfig, WindowConfig,
 };
 use pkrs_render::{DrawLog, NullRenderer, Renderer, RendererConfig};
 
@@ -50,6 +51,15 @@ pub enum RenderAdapter {
     Null,
 }
 
+/// Adapter behind the `GamepadSource` port (§10).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GamepadAdapter {
+    /// `GilrsGamepad`: the first connected pad, standard mapping.
+    Gilrs,
+    /// `NullGamepad`: scripted buttons, no device.
+    Null,
+}
+
 /// Adapter behind the `AudioBackend` port (§11).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AudioAdapter {
@@ -68,6 +78,8 @@ pub struct AdapterSet {
     pub renderer: RenderAdapter,
     /// Sound.
     pub audio: AudioAdapter,
+    /// Gamepad.
+    pub gamepad: GamepadAdapter,
 }
 
 impl AdapterSet {
@@ -79,21 +91,24 @@ impl AdapterSet {
                 platform: PlatformAdapter::Macroquad,
                 renderer: RenderAdapter::Macroquad,
                 audio: AudioAdapter::Kira,
+                gamepad: GamepadAdapter::Gilrs,
             },
             RunMode::Headless => Self {
                 platform: PlatformAdapter::Null,
                 renderer: RenderAdapter::Null,
                 audio: AudioAdapter::Null,
+                gamepad: GamepadAdapter::Null,
             },
         }
     }
 
-    /// `true` when no adapter needs a window or GPU context.
+    /// `true` when no adapter needs a window, a GPU context or a gamepad device.
     #[must_use]
     pub const fn is_headless(&self) -> bool {
         matches!(self.platform, PlatformAdapter::Null)
             && matches!(self.renderer, RenderAdapter::Null)
             && matches!(self.audio, AudioAdapter::Null)
+            && matches!(self.gamepad, GamepadAdapter::Null)
     }
 }
 
@@ -114,6 +129,22 @@ pub fn headless_renderer(display: DisplaySettings) -> (Renderer, DrawLog) {
     let log = null.draw_log();
     let renderer = Renderer::new(Box::new(null), display, RendererConfig::default());
     (renderer, log)
+}
+
+/// The [`GamepadSource`] for `adapter`. `Gilrs` with no device (or a failed open) reports no
+/// buttons; the runtime logs [`GilrsGamepad::error`].
+#[must_use]
+pub fn gamepad_source(adapter: GamepadAdapter) -> Box<dyn GamepadSource> {
+    match adapter {
+        GamepadAdapter::Gilrs => {
+            let pad = GilrsGamepad::open();
+            if let Some(err) = pad.error() {
+                tracing::warn!(%err, "gamepad backend unavailable");
+            }
+            Box::new(pad)
+        }
+        GamepadAdapter::Null => Box::new(NullGamepad::new()),
+    }
 }
 
 /// The [`AudioBackend`] for `adapter`, reading sounds from `vfs`. `Kira` falls back to
@@ -145,6 +176,7 @@ mod tests {
         assert_eq!(set.platform, PlatformAdapter::Null);
         assert_eq!(set.renderer, RenderAdapter::Null);
         assert_eq!(set.audio, AudioAdapter::Null);
+        assert_eq!(set.gamepad, GamepadAdapter::Null);
         assert!(set.is_headless());
     }
 
@@ -154,6 +186,7 @@ mod tests {
         assert_eq!(set.platform, PlatformAdapter::Macroquad);
         assert_eq!(set.renderer, RenderAdapter::Macroquad);
         assert_eq!(set.audio, AudioAdapter::Kira);
+        assert_eq!(set.gamepad, GamepadAdapter::Gilrs);
         assert!(!set.is_headless());
     }
 

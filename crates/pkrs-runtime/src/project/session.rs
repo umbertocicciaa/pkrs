@@ -2,7 +2,7 @@
 
 use pkrs_assets::FileWatcher;
 use pkrs_audio::AudioBackend;
-use pkrs_platform::{Input, InputFacadeConfig, Platform};
+use pkrs_platform::{GamepadSource, Input, InputFacadeConfig, NullGamepad, Platform, UserPaths};
 use pkrs_render::{NullRenderer, Renderer, RendererConfig};
 use pkrs_script::LuaScriptHost;
 
@@ -31,6 +31,8 @@ pub struct ProjectSessionHost {
     overworld: Option<ProjectHost>,
     pending_audio: Option<Box<dyn AudioBackend>>,
     pending_dev: Option<PendingDev>,
+    /// Pad shared by the title screen and the overworld (§10).
+    gamepad: Box<dyn GamepadSource>,
     quit: bool,
 }
 
@@ -42,8 +44,12 @@ impl ProjectSessionHost {
         scripts: LuaScriptHost,
         skip_title: bool,
     ) -> Result<Self, ProjectError> {
-        let input = Input::from_manifest(InputFacadeConfig::default(), &project.manifest.input)
+        let mut input = Input::from_manifest(InputFacadeConfig::default(), &project.manifest.input)
             .unwrap_or_else(|_| Input::new(InputFacadeConfig::default()));
+        let saved = super::load_saved_config(project.paths.config_dir());
+        if let Err(err) = input.apply_user_config(&saved) {
+            tracing::warn!(%err, "user bindings ignored");
+        }
         let ui_theme = load_ui_theme(project, &mut renderer)?;
         let mut session = Self {
             project: project.clone(),
@@ -58,6 +64,7 @@ impl ProjectSessionHost {
             overworld: None,
             pending_audio: None,
             pending_dev: None,
+            gamepad: Box::new(NullGamepad::new()),
             quit: false,
         };
         if skip_title {
@@ -104,6 +111,11 @@ impl ProjectSessionHost {
         } else {
             self.pending_audio = Some(backend);
         }
+    }
+
+    /// Installs the pad read with the keyboard (§10). Windowed runs pass `GilrsGamepad`.
+    pub fn set_gamepad(&mut self, gamepad: Box<dyn GamepadSource>) {
+        self.gamepad = gamepad;
     }
 
     /// Dev overlays and hot reload; deferred until the overworld exists (title screen).
@@ -224,13 +236,15 @@ impl TickHooks for ProjectSessionHost {
 
 impl SimulationHost for ProjectSessionHost {
     fn poll_input(&mut self, platform: &Platform) {
+        self.gamepad.poll();
+        let buttons = self.gamepad.buttons_down();
         if let Some(host) = self.overworld.as_mut() {
-            host.poll_input(platform);
+            host.poll_devices(platform, &buttons);
             if !self.stack.is_empty() {
-                self.ctx.input.poll(platform);
+                self.ctx.input.poll_with(platform, &buttons);
             }
         } else {
-            self.ctx.input.poll(platform);
+            self.ctx.input.poll_with(platform, &buttons);
         }
     }
 

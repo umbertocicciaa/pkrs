@@ -3,7 +3,9 @@
 use std::collections::BTreeMap;
 
 use pkrs_data::{GameData, Localizer, Table, TextArgs};
-use pkrs_platform::{Action, BuiltinAction, Input};
+use pkrs_platform::{
+    Action, BuiltinAction, ControlSource, GamepadButton, Input, Key, UserBinding, UserConfig,
+};
 use pkrs_render::{Color, Layer, Rect, Renderer, TextStyle};
 use pkrs_script::{FieldActionInfo, ItemUseContext, LuaScriptHost};
 use pkrs_ui::{
@@ -36,6 +38,8 @@ pub enum MenuScreen {
     },
     /// On-screen naming keyboard.
     Naming,
+    /// Bindings, volume and window scale.
+    Options,
 }
 
 enum Screen {
@@ -46,6 +50,18 @@ enum Screen {
     BagTarget { item: String },
     Summary { member: usize, page: usize },
     Naming(NamingKeyboard),
+    Options { capturing: bool },
+}
+
+#[derive(Clone, Copy)]
+enum OptionsRow {
+    Action(BuiltinAction),
+    Master,
+    Bgm,
+    Sfx,
+    Jingle,
+    Scale,
+    Back,
 }
 
 #[allow(dead_code)]
@@ -74,6 +90,9 @@ pub struct FieldMenu {
     reorder: PartyReorderSession,
     pending: Pending,
     panel: Rect,
+    options: UserConfig,
+    options_dirty: bool,
+    window_scale_fallback: u32,
 }
 
 impl FieldMenu {
@@ -107,6 +126,9 @@ impl FieldMenu {
             reorder: PartyReorderSession::new(),
             pending: Pending::None,
             panel,
+            options: UserConfig::default(),
+            options_dirty: false,
+            window_scale_fallback: 3,
         };
         menu.open_root();
         Ok(menu)
@@ -123,6 +145,25 @@ impl FieldMenu {
             Screen::BagTarget { .. } => MenuScreen::BagTarget,
             Screen::Summary { member, page } => MenuScreen::Summary { member, page },
             Screen::Naming(_) => MenuScreen::Naming,
+            Screen::Options { .. } => MenuScreen::Options,
+        }
+    }
+
+    /// Installs the saved config the Controls screen edits. `window_scale_fallback` is the
+    /// project's `[display]` scale, used when the config has not overridden it.
+    pub fn set_options(&mut self, options: UserConfig, window_scale_fallback: u32) {
+        self.options = options;
+        self.window_scale_fallback = window_scale_fallback.max(1);
+        self.options_dirty = false;
+    }
+
+    /// Config changed since the last call. The host writes it and applies it.
+    pub fn take_saved_options(&mut self) -> Option<UserConfig> {
+        if self.options_dirty {
+            self.options_dirty = false;
+            Some(self.options.clone())
+        } else {
+            None
         }
     }
 
@@ -189,9 +230,10 @@ impl FieldMenu {
         let labels = vec![
             self.say("menu.party", &[]),
             self.say("menu.bag", &[]),
+            self.say("menu.controls", &[]),
             self.say("menu.close", &[]),
         ];
-        self.set_list(labels, vec![true; 3]);
+        self.set_list(labels, vec![true; 4]);
     }
 
     fn open_party(&mut self, field_actions: &[FieldActionInfo]) {
@@ -417,7 +459,7 @@ impl FieldMenu {
                     self.open_party(field_actions);
                 }
             }
-            Screen::Naming(_) => self.open_root(),
+            Screen::Naming(_) | Screen::Options { .. } => self.open_root(),
         }
         let _ = host;
     }
@@ -447,6 +489,143 @@ impl FieldMenu {
         }
     }
 
+    fn open_options(&mut self) {
+        self.screen = Screen::Options { capturing: false };
+        self.refresh_options();
+    }
+
+    fn options_rows(&self) -> Vec<OptionsRow> {
+        let mut rows: Vec<_> = BuiltinAction::ALL
+            .iter()
+            .copied()
+            .map(OptionsRow::Action)
+            .collect();
+        rows.extend([
+            OptionsRow::Master,
+            OptionsRow::Bgm,
+            OptionsRow::Sfx,
+            OptionsRow::Jingle,
+            OptionsRow::Scale,
+            OptionsRow::Back,
+        ]);
+        rows
+    }
+
+    fn shown_scale(&self) -> u32 {
+        if self.options.window_scale >= 1 {
+            self.options.window_scale
+        } else {
+            self.window_scale_fallback
+        }
+    }
+
+    fn refresh_options(&mut self) {
+        let cursor = self.session.cursor();
+        let rows = self.options_rows();
+        let labels: Vec<String> = rows
+            .iter()
+            .copied()
+            .map(|row| self.option_label(row))
+            .collect();
+        let n = labels.len();
+        self.set_list(labels, vec![true; n]);
+        self.session.set_cursor(cursor);
+    }
+
+    fn option_label(&self, row: OptionsRow) -> String {
+        match row {
+            OptionsRow::Action(action) => {
+                let binding = self
+                    .options
+                    .bindings
+                    .get(action.name())
+                    .map(Self::binding_text)
+                    .unwrap_or_else(|| "—".to_owned());
+                let name = action.name().to_owned();
+                self.say(
+                    "menu.controls.action",
+                    &[("action", name.as_str()), ("binding", binding.as_str())],
+                )
+            }
+            OptionsRow::Master => {
+                self.volume_label("menu.controls.master", self.options.volumes.master)
+            }
+            OptionsRow::Bgm => self.volume_label("menu.controls.bgm", self.options.volumes.bgm),
+            OptionsRow::Sfx => self.volume_label("menu.controls.sfx", self.options.volumes.sfx),
+            OptionsRow::Jingle => {
+                self.volume_label("menu.controls.jingle", self.options.volumes.jingle)
+            }
+            OptionsRow::Scale => {
+                let scale = self.shown_scale().to_string();
+                self.say("menu.controls.scale", &[("value", scale.as_str())])
+            }
+            OptionsRow::Back => self.say("menu.back", &[]),
+        }
+    }
+
+    fn volume_label(&self, key: &str, value: f32) -> String {
+        let percent = format!("{}", (value.clamp(0.0, 1.0) * 100.0).round() as u32);
+        self.say(key, &[("value", percent.as_str())])
+    }
+
+    fn nudge_options(&mut self, dir: i32) {
+        let row = self.options_rows().get(self.session.cursor()).copied();
+        match row {
+            Some(OptionsRow::Master) => {
+                self.options.volumes.master = Self::step_volume(self.options.volumes.master, dir);
+            }
+            Some(OptionsRow::Bgm) => {
+                self.options.volumes.bgm = Self::step_volume(self.options.volumes.bgm, dir);
+            }
+            Some(OptionsRow::Sfx) => {
+                self.options.volumes.sfx = Self::step_volume(self.options.volumes.sfx, dir);
+            }
+            Some(OptionsRow::Jingle) => {
+                self.options.volumes.jingle = Self::step_volume(self.options.volumes.jingle, dir);
+            }
+            Some(OptionsRow::Scale) => {
+                let current = self.shown_scale() as i32;
+                self.options.window_scale = (current + dir).clamp(1, 6) as u32;
+            }
+            _ => return,
+        }
+        self.options_dirty = true;
+        self.refresh_options();
+    }
+
+    fn capture_binding(&mut self, input: &Input) -> bool {
+        if !matches!(self.screen, Screen::Options { capturing: true }) {
+            return false;
+        }
+        let sources = input.fresh_sources();
+        if sources.is_empty() {
+            return true;
+        }
+        if sources.iter().copied().any(Self::is_capture_cancel) {
+            self.screen = Screen::Options { capturing: false };
+            self.refresh_options();
+            return true;
+        }
+        let Some(OptionsRow::Action(action)) =
+            self.options_rows().get(self.session.cursor()).copied()
+        else {
+            self.screen = Screen::Options { capturing: false };
+            return true;
+        };
+        let mut binding = UserBinding::default();
+        match sources[0] {
+            ControlSource::Key(key) => binding.keys.push(key.config_name().to_owned()),
+            ControlSource::Button(button) => binding.buttons.push(button.name().to_owned()),
+        }
+        self.options
+            .bindings
+            .insert(action.name().to_owned(), binding);
+        self.options_dirty = true;
+        self.screen = Screen::Options { capturing: false };
+        self.refresh_options();
+        true
+    }
+
     /// One tick of input; `true` when the menu should close (root cancel).
     pub fn update(
         &mut self,
@@ -454,6 +633,16 @@ impl FieldMenu {
         host: &mut LuaScriptHost,
         field_actions: &[FieldActionInfo],
     ) -> bool {
+        if self.capture_binding(input) {
+            return false;
+        }
+        if matches!(self.screen, Screen::Options { capturing: false }) {
+            if input.pressed(Action::Builtin(BuiltinAction::Left)) {
+                self.nudge_options(-1);
+            } else if input.pressed(Action::Builtin(BuiltinAction::Right)) {
+                self.nudge_options(1);
+            }
+        }
         if let Screen::Naming(ref mut kb) = self.screen {
             if let Some(outcome) = kb.poll(input) {
                 match outcome {
@@ -486,8 +675,23 @@ impl FieldMenu {
                     Screen::Root => match ix {
                         0 => self.open_party(field_actions),
                         1 => self.open_bag_pockets(),
-                        2 => return true,
+                        2 => self.open_options(),
+                        3 => return true,
                         _ => {}
+                    },
+                    Screen::Options { .. } => match self.options_rows().get(ix).cloned() {
+                        Some(OptionsRow::Action(_)) => {
+                            self.screen = Screen::Options { capturing: true };
+                        }
+                        Some(OptionsRow::Back) => self.open_root(),
+                        Some(
+                            OptionsRow::Master
+                            | OptionsRow::Bgm
+                            | OptionsRow::Sfx
+                            | OptionsRow::Jingle
+                            | OptionsRow::Scale,
+                        )
+                        | None => {}
                     },
                     Screen::Party => {
                         let members = self.party.members().len();
@@ -590,6 +794,34 @@ impl FieldMenu {
         }
     }
 
+    fn binding_text(binding: &UserBinding) -> String {
+        let mut parts: Vec<&str> = binding
+            .keys
+            .iter()
+            .map(String::as_str)
+            .chain(binding.buttons.iter().map(String::as_str))
+            .collect();
+        if parts.is_empty() {
+            "—".to_owned()
+        } else {
+            parts.sort_unstable();
+            parts.join(", ")
+        }
+    }
+
+    fn is_capture_cancel(source: ControlSource) -> bool {
+        match source {
+            ControlSource::Key(Key::Escape) => true,
+            ControlSource::Button(GamepadButton::East) => true,
+            ControlSource::Key(_) | ControlSource::Button(_) => false,
+        }
+    }
+
+    fn step_volume(value: f32, dir: i32) -> f32 {
+        let next = value + dir as f32 * 0.1;
+        ((next * 10.0).round() / 10.0).clamp(0.0, 1.0)
+    }
+
     fn scale_f(scale: u32) -> f32 {
         scale.max(1) as f32
     }
@@ -617,6 +849,8 @@ impl FieldMenu {
             }
             Screen::Summary { .. } => self.say("menu.summary.title", &[]),
             Screen::Naming(_) => self.say("menu.naming.title", &[]),
+            Screen::Options { capturing: true } => self.say("menu.controls.press", &[]),
+            Screen::Options { capturing: false } => self.say("menu.controls.title", &[]),
         };
         renderer.draw_text(
             &self.theme.font,

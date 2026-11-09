@@ -30,12 +30,14 @@ use crate::data::load_game_data;
 use crate::default_theme::build_default_ui_theme;
 use crate::encounters::{Encounters, wild_battle_request};
 use crate::main_loop::SimulationHost;
+use crate::menu::FieldMenu;
 use crate::overworld::{EntityKind, OverworldScripts, ScreenFade, ScriptOverlay};
 use crate::party::PlayerParty;
 use crate::scene::{MapScene, NeighborBackdrop, PLAYER_ENTITY, tile_sheet};
 use crate::ui_theme::UiTheme;
 
 mod audio;
+mod field_menu;
 mod save;
 mod session;
 
@@ -361,6 +363,7 @@ pub struct ProjectHost {
     scripts: Option<OverworldScripts>,
     ui_theme: Option<UiTheme>,
     overlay: Option<ScriptOverlay>,
+    field_menu: Option<FieldMenu>,
     fade: ScreenFade,
     /// Tile the player last stood on between steps (trigger zones fire on entry).
     player_tile: GridPos,
@@ -512,6 +515,7 @@ impl ProjectHost {
             scripts: scripts.map(OverworldScripts::new),
             ui_theme,
             overlay: None,
+            field_menu: None,
             fade: ScreenFade::default(),
             player_tile: start,
             crossing: None,
@@ -580,6 +584,9 @@ impl ProjectHost {
     /// `None` before the first battle.
     #[must_use]
     pub fn party(&self) -> Option<&PlayerParty> {
+        if let Some(menu) = &self.field_menu {
+            return Some(menu.party());
+        }
         self.post_battle()
             .map(PostBattle::party)
             .or(self.party.as_ref())
@@ -652,6 +659,16 @@ impl ProjectHost {
     #[must_use]
     pub fn input(&self) -> &Input {
         &self.input
+    }
+
+    /// Headless tests and harnesses that build a [`UiTheme`] after the host exists.
+    pub fn renderer_mut(&mut self) -> &mut Renderer {
+        &mut self.renderer
+    }
+
+    /// Installs a UI theme when project assets did not provide one (headless tests).
+    pub fn set_ui_theme(&mut self, theme: UiTheme) {
+        self.ui_theme = Some(theme);
     }
 
     /// Shared custom-terrain rule registry (§6.3).
@@ -1092,7 +1109,7 @@ impl ProjectHost {
         if let Some(dir) = scripts.take_player_face() {
             self.walker.face(dir);
         }
-        if self.overlay.is_none() && self.battle.is_none() {
+        if self.overlay.is_none() && self.battle.is_none() && self.field_menu.is_none() {
             if let Some(request) = scripts.take_ui_request() {
                 match &self.ui_theme {
                     Some(theme) => {
@@ -1127,7 +1144,11 @@ impl ProjectHost {
     /// once no dialogue or warp is running. A battle that cannot be set up is logged and its
     /// task resumes with `nil`.
     fn start_requested_battle(&mut self) {
-        if self.battle.is_some() || self.overlay.is_some() || self.is_warping() {
+        if self.battle.is_some()
+            || self.overlay.is_some()
+            || self.field_menu.is_some()
+            || self.is_warping()
+        {
             return;
         }
         let Some(scripts) = self.scripts.as_mut() else {
@@ -1270,7 +1291,11 @@ impl ProjectHost {
         let Some(scripts) = self.scripts.as_ref() else {
             return false;
         };
-        if self.battle.is_some() || self.overlay.is_some() || scripts.player_locked() {
+        if self.battle.is_some()
+            || self.overlay.is_some()
+            || self.field_menu.is_some()
+            || scripts.player_locked()
+        {
             return false;
         }
         if self.encounters.needs_tables(self.scene.map(), pos) {
@@ -1418,6 +1443,10 @@ impl ProjectHost {
                     scripts.close_dialogue(answer);
                 }
             }
+            return;
+        }
+        self.try_menu_hotkey();
+        if self.tick_field_menu_if_open() {
             return;
         }
         let held = self.held_direction();
@@ -1701,6 +1730,7 @@ impl SimulationHost for ProjectHost {
         if let (Some(overlay), Some(theme)) = (&self.overlay, &self.ui_theme) {
             overlay.render(&mut self.renderer, theme);
         }
+        self.render_field_menu_overlay();
         self.fade.render(&mut self.renderer);
         self.renderer.end_frame();
     }

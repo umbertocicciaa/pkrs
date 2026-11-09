@@ -104,6 +104,7 @@ fn party_member(saved: &SavedCreature) -> PartyMember {
         level: saved.level,
         exp: saved.exp,
         moves: saved.moves.clone(),
+        hp: None,
     }
 }
 

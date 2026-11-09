@@ -13,13 +13,23 @@ use super::{LuaScriptHost, convert, engine};
 use crate::chain::ChainKey;
 use crate::error::{Result, ScriptError};
 use crate::host::{ScriptOwner, ScriptValue, TaskId, TaskStatus};
-use crate::registry::{FieldActionInfo, FieldActionSource, FieldContext, InputActionRequest};
+use crate::registry::{
+    FieldActionInfo, FieldActionSource, FieldContext, InputActionRequest, ItemUseContext,
+    ItemUseInfo,
+};
 
 /// A field action and its functions.
 pub(super) struct FieldActionEntry {
     pub key: ChainKey,
     pub info: FieldActionInfo,
     pub available: Option<Function>,
+    pub run: Function,
+}
+
+/// Item field-use hook.
+pub(super) struct ItemUseEntry {
+    pub key: ChainKey,
+    pub info: ItemUseInfo,
     pub run: Function,
 }
 
@@ -31,6 +41,7 @@ pub(super) struct Registrations {
     pub terrain_rules: BTreeMap<String, (ScriptOwner, Function)>,
     /// Sorted by chain key (priority, load order, registration).
     pub field_actions: Vec<FieldActionEntry>,
+    pub item_uses: Vec<ItemUseEntry>,
     pub input_actions: Vec<InputActionRequest>,
     pub input_taken: usize,
     pub battle_actions: BTreeSet<String>,
@@ -199,6 +210,34 @@ impl LuaScriptHost {
         };
         let (task, status) = self.start_thread(run, &[ctx.to_value()])?;
         Ok((info, task, status))
+    }
+
+    /// `true` when any `world.register_item_use` hook matches `item_id` (exact id or prefix).
+    #[must_use]
+    pub fn has_item_use_hook(&self, item_id: &str) -> bool {
+        self.lua.app_data_ref::<Registrations>().is_some_and(|r| {
+            r.item_uses
+                .iter()
+                .any(|e| item_use_matches(&e.info.id, item_id))
+        })
+    }
+
+    /// Runs the first matching item-use hook for `ctx`; returns `true` when a hook handled use.
+    pub fn run_item_use(&mut self, ctx: &ItemUseContext) -> bool {
+        let run = self.lua.app_data_ref::<Registrations>().and_then(|r| {
+            r.item_uses
+                .iter()
+                .find(|e| item_use_matches(&e.info.id, &ctx.item_id))
+                .map(|e| e.run.clone())
+        });
+        let Some(run) = run else {
+            return false;
+        };
+        let ctx_value = ctx.to_value();
+        self.protected(&format!("item_use:{}", ctx.item_id), |lua| {
+            run.call::<Value>(convert::to_lua(lua, &ctx_value)?)
+        })
+        .is_ok_and(|v| truthy(&v))
     }
 
     /// Input actions registered since the last call (`input.register_action`), in order.
@@ -392,6 +431,10 @@ impl TerrainRules for LuaScriptHost {
             _ => TerrainStepVerdict::Allow,
         }
     }
+}
+
+fn item_use_matches(registered: &str, item_id: &str) -> bool {
+    registered == item_id || (registered.ends_with(':') && item_id.starts_with(registered))
 }
 
 /// `{ terrain, x, y, from = { x, y }, dir, field = { [state] = true } }`.

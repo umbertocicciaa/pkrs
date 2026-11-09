@@ -158,6 +158,16 @@ impl BattleContent {
         &self.pack
     }
 
+    /// The player's party as a battle side (`data/trainers/player.ron`).
+    pub fn player_party_side(&self) -> Result<BattleSideSetup, BattleContentError> {
+        let def = self
+            .trainers
+            .get(PLAYER_TRAINER)
+            .ok_or(BattleContentError::NoPlayerParty)?;
+        let side_size = def.battle_active_slots();
+        self.side(def, "Player", side_size)
+    }
+
     /// Builds the battle `request` asks for; the AI rolls on `policy`'s opponent stream.
     pub fn prepare(
         &self,

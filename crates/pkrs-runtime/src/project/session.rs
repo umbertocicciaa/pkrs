@@ -1,5 +1,6 @@
 //! Title and save UI before the overworld (§4.1, §12).
 
+use pkrs_assets::FileWatcher;
 use pkrs_audio::AudioBackend;
 use pkrs_platform::{Input, InputFacadeConfig, Platform};
 use pkrs_render::{NullRenderer, Renderer, RendererConfig};
@@ -13,6 +14,12 @@ use crate::state::{StateStack, TitleState};
 use crate::tick::{TickHooks, run_tick};
 use crate::ui_theme::UiTheme;
 
+/// Dev watcher and plugin list, held until the overworld boots.
+struct PendingDev {
+    watcher: Option<Box<dyn FileWatcher>>,
+    plugins: Vec<String>,
+}
+
 /// Runs title / save UI, then the project overworld as one [`SimulationHost`].
 pub struct ProjectSessionHost {
     project: Project,
@@ -23,6 +30,7 @@ pub struct ProjectSessionHost {
     stack: StateStack,
     overworld: Option<ProjectHost>,
     pending_audio: Option<Box<dyn AudioBackend>>,
+    pending_dev: Option<PendingDev>,
     quit: bool,
 }
 
@@ -49,6 +57,7 @@ impl ProjectSessionHost {
             stack: StateStack::new(),
             overworld: None,
             pending_audio: None,
+            pending_dev: None,
             quit: false,
         };
         if skip_title {
@@ -80,6 +89,9 @@ impl ProjectSessionHost {
         if let Some(backend) = self.pending_audio.take() {
             host.set_audio_backend(backend);
         }
+        if let Some(dev) = self.pending_dev.take() {
+            host.enable_dev(dev.watcher, dev.plugins);
+        }
         self.overworld = Some(host);
         self.stack = StateStack::new();
         Ok(())
@@ -91,6 +103,15 @@ impl ProjectSessionHost {
             host.set_audio_backend(backend);
         } else {
             self.pending_audio = Some(backend);
+        }
+    }
+
+    /// Dev overlays and hot reload; deferred until the overworld exists (title screen).
+    pub fn enable_dev(&mut self, watcher: Option<Box<dyn FileWatcher>>, plugins: Vec<String>) {
+        if let Some(host) = self.overworld.as_mut() {
+            host.enable_dev(watcher, plugins);
+        } else {
+            self.pending_dev = Some(PendingDev { watcher, plugins });
         }
     }
 

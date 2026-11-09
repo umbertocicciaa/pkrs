@@ -47,6 +47,7 @@ directories = "6"
 mlua = { version = "0.11.6", features = ["lua54", "vendored"] }
 # `zstd` (default) compiles C code; v1 maps use CSV/base64(+zlib/gzip) layer data only.
 tiled = { version = "0.16", default-features = false }
+notify = "6.1"
 # OGG/Vorbis + WAV (PCM) through symphonia, output through cpal (no realtime/D-Bus extras).
 kira = { version = "0.12", default-features = false, features = ["cpal", "ogg", "vorbis", "wav", "pcm"] }
 

@@ -3,6 +3,7 @@
 pub mod battle;
 mod ctx;
 pub mod data;
+pub mod debug;
 mod default_theme;
 mod demo;
 pub mod encounters;
@@ -27,6 +28,7 @@ pub mod validation;
 pub mod wiring;
 
 pub use ctx::RuntimeCtx;
+pub use debug::{DebugOverlaySnapshot, DevConsole, DevRuntime, HotReload};
 pub use default_theme::build_default_ui_theme;
 pub use demo::AnimationDemoHost;
 pub use fixed_step::{FixedStepClock, InterpolatedPosition, TICK_DT, lerp_f32};

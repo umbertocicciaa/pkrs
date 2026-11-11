@@ -54,6 +54,11 @@ jobs:
       - name: cargo test
         run: cargo test --workspace --locked
 
+      - name: cargo doc
+        run: cargo doc --workspace --no-deps --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+
       - name: cargo build
         run: cargo build --workspace --locked
 

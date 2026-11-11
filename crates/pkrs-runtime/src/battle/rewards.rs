@@ -8,7 +8,7 @@
 //!    *earners*: the player's creatures that were sent out during the battle and have not
 //!    fainted ([`split_exp`]).
 //! 3. **Level ups.** Each earner gains its share along its species' growth curve
-//!    ([`PartyMember::gain_exp`]); its stats follow its level. Every level reached shows a
+//!    ([`crate::party::PartyMember::gain_exp`]); its stats follow its level. Every level reached shows a
 //!    text, then the moves of the learnset at that level.
 //! 4. **Moves.** A move goes into a free slot; with four moves known the player picks the
 //!    move to forget, or "Don't learn" (Cancel too), with the keyboard.

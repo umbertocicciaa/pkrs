@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use super::{FileWatcher, WatchChange, WatchEvent};
 
-/// Shared queue with [`crate::MemoryVfs::with_watch_sink`].
+/// Queue drained by a [`MemoryFileWatcher`]. Tests push [`WatchEvent`]s; [`FileWatcher::poll`] reads them.
 pub type WatchSink = Arc<Mutex<Vec<WatchEvent>>>;
 
 /// Drains `sink`.

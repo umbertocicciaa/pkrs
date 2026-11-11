@@ -85,7 +85,7 @@ impl RuntimeHost {
         &mut self.renderer
     }
 
-    /// Whether [`Transition::Quit`] was applied.
+    /// Whether [`crate::Transition::Quit`] was applied.
     #[must_use]
     pub fn should_quit(&self) -> bool {
         self.stack.quit_requested()

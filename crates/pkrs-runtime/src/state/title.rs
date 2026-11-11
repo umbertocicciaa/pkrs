@@ -71,7 +71,7 @@ impl TitleState {
         })
     }
 
-    /// Minimal title menu for [`RuntimeHost`] stack integration tests (no project).
+    /// Minimal title menu for [`crate::RuntimeHost`] stack integration tests (no project).
     pub fn for_stack_demo(theme: UiTheme, renderer: &Renderer) -> Result<Self, pkrs_ui::UiError> {
         let options = vec![ChoiceOption {
             label: "Quit".into(),

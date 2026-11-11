@@ -309,7 +309,7 @@ pub enum WaitRequest {
         /// NPC id.
         npc: String,
     },
-    /// Until [`WakeSignal::UiClosed`] for this screen (`ui.push_screen`).
+    /// Until [`crate::WakeSignal::UiClosed`] for this screen (`ui.push_screen`).
     PushUiScreen {
         /// Registered screen id.
         screen: String,

@@ -1207,12 +1207,13 @@ All behaviour below lives in the `Audio` facade; the `KiraAudio` adapter impleme
 **Implementation notes (post-battle scenarios, M4).** After a won battle the exp, level-up and move texts are still state `Battle` (`battle()` reports the finished battle with no menu; `dialogue()` is the reward text, `choices()` / `cursor()` the move-forget menu). From the first evolution until play returns to the overworld the state is `Evolution`. `choose(i)` also works in the move-forget menu in both states. `party()` lists the player's party (1-based; `{ species, name, level, exp, moves = { ids }, max_hp, attack, defense, speed }`, the post-battle flow's changes included as they happen; from game start, `player.ron`'s party plus creatures given with `game.give_creature`). `advance_battle()` reads through the reward texts up to the move prompt or the end of the battle. The fixture `training-grounds` (`tests/level_up_and_evolve.lua`) wins a trainer battle whose exp an `on_battle_end` hook in `scripts/main.lua` doubles, levels up, replaces a move through the prompt, evolves, returns to the overworld and fights again with the evolved creature.
 
 ### 15.3 CI gates
-`cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, the multi-OS build + smoke test, and `pkrs check` on both templates.
+`cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `RUSTDOCFLAGS=-D warnings cargo doc --workspace --no-deps`, the multi-OS build + smoke test, and `pkrs check` on both templates. Library crates deny `missing_docs`, so every public item has a rustdoc comment (§15.4).
 
 ### 15.4 Error handling policy
 - Library crates use **`thiserror`** enums per crate (`DataError`, `ScriptError`, `SaveError`, …).
 - Binaries (`pkrs-runtime`, `pkrs-cli`) use **`anyhow`** for top-level context. User-facing diagnostics use `miette` for `pkrs check`.
 - No `unwrap()`/`expect()` in library code paths reachable from content or scripts (enforced in review, with clippy `unwrap_used` in library crates).
+- Public items in library crates have rustdoc comments (`missing_docs` is denied). Intra-doc links and fenced code blocks must build cleanly: CI runs `cargo doc --workspace --no-deps` with warnings denied.
 - Release runtime: fatal errors show a minimal error screen (message + log path) rather than a silent exit.
 
 ---

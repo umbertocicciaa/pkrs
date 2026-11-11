@@ -45,6 +45,7 @@ fn project_dir(tag: &str) -> PathBuf {
 fn host(dir: &Path, at: GridPos) -> ProjectHost {
     let project = Project::open(&ProjectOptions {
         dir: dir.to_path_buf(),
+        pak: None,
         map: Some("lighthouse_1f".into()),
         warp: Some(at),
     })

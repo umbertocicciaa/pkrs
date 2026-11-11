@@ -34,10 +34,10 @@ pub(crate) fn scan(source: &str) -> GlslFacts {
     let mut facts = GlslFacts::default();
     for line in code.lines() {
         let trimmed = line.trim_start();
-        if let Some(rest) = trimmed.strip_prefix("#version") {
-            if facts.version.is_none() {
-                facts.version = rest.split_whitespace().next().map(str::to_owned);
-            }
+        if let Some(rest) = trimmed.strip_prefix("#version")
+            && facts.version.is_none()
+        {
+            facts.version = rest.split_whitespace().next().map(str::to_owned);
         }
     }
     // Statements end with `;`; a uniform declaration starts with the `uniform` keyword.

@@ -19,6 +19,10 @@ const ROWS: &[(&str, &str, &str)] = &[
     ("pkrs-save", "ron", "codec.rs"),
     ("pkrs-script", "mlua", "lua/"),
     ("pkrs-cli", "miette", "report.rs"),
+    ("pkrs-cli", "texture_packer", "backend/texture_packer.rs"),
+    ("pkrs-cli", "image", "backend/texture_packer.rs"),
+    ("pkrs-assets", "zip", "vfs/pak.rs"),
+    ("pkrs-assets", "ron", "pak/codec.rs"),
     ("pkrs-audio", "kira", "backend/kira.rs"),
     ("pkrs-audio", "ron", "codec.rs"),
 ];

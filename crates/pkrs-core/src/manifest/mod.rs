@@ -358,10 +358,10 @@ fn validate(raw: RawManifest) -> Result<ProjectManifest, ManifestError> {
             Direction::Down
         }),
     };
-    if let Some(script) = &raw.start.script {
-        if let Err(message) = check_script_path(script) {
-            v.push("start.script", message);
-        }
+    if let Some(script) = &raw.start.script
+        && let Err(message) = check_script_path(script)
+    {
+        v.push("start.script", message);
     }
 
     // [plugins]

@@ -194,10 +194,10 @@ fn parse_inner(inner: &str) -> ControlToken {
     if let Some(rest) = inner.strip_prefix("color:") {
         return ControlToken::Color(rest.trim().to_string());
     }
-    if let Some(rest) = inner.strip_prefix("pause:") {
-        if let Ok(n) = rest.trim().parse::<u32>() {
-            return ControlToken::Pause(n);
-        }
+    if let Some(rest) = inner.strip_prefix("pause:")
+        && let Ok(n) = rest.trim().parse::<u32>()
+    {
+        return ControlToken::Pause(n);
     }
     if let Some(rest) = inner.strip_prefix("var:") {
         return ControlToken::Var(rest.trim().to_string());

@@ -80,49 +80,44 @@ impl LuaFacts {
                 && at(1).is_some_and(|x| x.is_punct('.'))
                 && at(2).is_some_and(|x| x.is_name("on"))
                 && at(3).is_some_and(|x| x.is_punct('('))
-            {
-                if let Some(Token {
+                && let Some(Token {
                     tok: Tok::Str(name),
                     range,
                 }) = at(4)
-                {
-                    if name == "tick" {
-                        facts.tick_listeners.push(range.clone());
-                    }
-                }
+                && name == "tick"
+            {
+                facts.tick_listeners.push(range.clone());
             }
-            if t.is_name("data") && at(1).is_some_and(|x| x.is_punct('.')) {
-                if let Some(Token {
+            if t.is_name("data")
+                && at(1).is_some_and(|x| x.is_punct('.'))
+                && let Some(Token {
                     tok: Tok::Name(n), ..
                 }) = at(2)
-                {
-                    if n.starts_with("register_") {
-                        facts.registers_content = true;
-                    }
-                }
+                && n.starts_with("register_")
+            {
+                facts.registers_content = true;
             }
             let prev = i.checked_sub(1).and_then(|p| tokens.get(p));
             // function name(
-            if t.is_name("function") && !prev.is_some_and(|p| p.is_name("local")) {
-                if let (
+            if t.is_name("function")
+                && !prev.is_some_and(|p| p.is_name("local"))
+                && let (
                     Some(Token {
                         tok: Tok::Name(name),
                         range,
                     }),
                     Some(open),
                 ) = (at(1), at(2))
-                {
-                    if open.is_punct('(') {
-                        let body = i..block_end(&tokens, i);
-                        facts.functions.insert(
-                            name.clone(),
-                            LuaFunction {
-                                name: range.clone(),
-                                body,
-                            },
-                        );
-                    }
-                }
+                && open.is_punct('(')
+            {
+                let body = i..block_end(&tokens, i);
+                facts.functions.insert(
+                    name.clone(),
+                    LuaFunction {
+                        name: range.clone(),
+                        body,
+                    },
+                );
             }
             // name = function(
             if let Tok::Name(name) = &t.tok {

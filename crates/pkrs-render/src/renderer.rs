@@ -64,6 +64,23 @@ pub struct Renderer {
     time_ticks: u64,
     map_origin: (f32, f32),
     texture_sizes: HashMap<TextureHandle, (u32, u32)>,
+    /// Atlas regions (§5.2): handle → where it sits on its page.
+    regions: HashMap<TextureHandle, TextureRegion>,
+    next_region: u32,
+    /// Textures uploaded once under a name (atlas pages).
+    named: HashMap<String, (TextureHandle, u32, u32)>,
+}
+
+/// Handles at or above this value are atlas regions made by the facade, never backend
+/// textures.
+const REGION_HANDLE_BASE: u32 = 0x8000_0000;
+
+/// A rectangle of a page texture, addressed through its own [`TextureHandle`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct TextureRegion {
+    page: TextureHandle,
+    x: f32,
+    y: f32,
 }
 
 enum Queued {
@@ -102,6 +119,9 @@ impl Renderer {
             time_ticks: 0,
             map_origin: (0.0, 0.0),
             texture_sizes: HashMap::new(),
+            regions: HashMap::new(),
+            next_region: REGION_HANDLE_BASE,
+            named: HashMap::new(),
         }
     }
 
@@ -260,10 +280,12 @@ impl Renderer {
         self.pending.sort_by_key(Queued::layer);
         for queued in &self.pending {
             match queued {
-                Queued::Sprite(draw, None) => self.backend.draw_sprite(draw),
+                Queued::Sprite(draw, None) => self.backend.draw_sprite(&self.resolve(draw)),
                 Queued::Sprite(draw, Some(bind)) => match self.binds.get(*bind) {
-                    Some(bind) => self.backend.draw_sprite_with_material(draw, bind),
-                    None => self.backend.draw_sprite(draw),
+                    Some(bind) => self
+                        .backend
+                        .draw_sprite_with_material(&self.resolve(draw), bind),
+                    None => self.backend.draw_sprite(&self.resolve(draw)),
                 },
                 Queued::Rect { dst, color, layer } => {
                     self.backend.draw_filled_rect(*dst, *color, *layer);
@@ -280,6 +302,92 @@ impl Renderer {
         let (handle, w, h) = self.backend.create_texture_from_image(encoded)?;
         self.texture_sizes.insert(handle, (w, h));
         Ok((handle, w, h))
+    }
+
+    /// The texture uploaded earlier under `name` with
+    /// [`load_named_texture`](Self::load_named_texture), with its size.
+    #[must_use]
+    pub fn named_texture(&self, name: &str) -> Option<(TextureHandle, u32, u32)> {
+        self.named.get(name).copied()
+    }
+
+    /// Like [`load_texture`](Self::load_texture), remembered under `name` so it is uploaded
+    /// once (atlas pages, §5.2). Loading a name again returns the first texture.
+    pub fn load_named_texture(
+        &mut self,
+        name: &str,
+        encoded: &[u8],
+    ) -> crate::Result<(TextureHandle, u32, u32)> {
+        if let Some(found) = self.named_texture(name) {
+            return Ok(found);
+        }
+        let loaded = self.load_texture(encoded)?;
+        self.named.insert(name.to_owned(), loaded);
+        Ok(loaded)
+    }
+
+    /// A handle for the `width`×`height` rectangle at (`x`, `y`) of `page` (an atlas image,
+    /// §5.2). The handle behaves like a texture of that size: draw sources are relative to
+    /// the rectangle, and the renderer moves them onto the page when it submits the frame,
+    /// so callers cannot tell an atlas region from a texture of its own.
+    pub fn create_texture_region(
+        &mut self,
+        page: TextureHandle,
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+    ) -> crate::Result<TextureHandle> {
+        let invalid = |detail: String| crate::RenderError::TextureRegion { detail };
+        if self.regions.contains_key(&page) {
+            return Err(invalid("a region's page cannot itself be a region".into()));
+        }
+        let (pw, ph) = self
+            .texture_sizes
+            .get(&page)
+            .copied()
+            .ok_or_else(|| invalid(format!("unknown page texture {}", page.0)))?;
+        let fits = width > 0
+            && height > 0
+            && x.checked_add(width).is_some_and(|r| r <= pw)
+            && y.checked_add(height).is_some_and(|b| b <= ph);
+        if !fits {
+            return Err(invalid(format!(
+                "{width}x{height} at {x},{y} does not fit on a {pw}x{ph} page"
+            )));
+        }
+        let handle = TextureHandle(self.next_region);
+        self.next_region = self
+            .next_region
+            .checked_add(1)
+            .ok_or_else(|| invalid("too many texture regions".into()))?;
+        self.regions.insert(
+            handle,
+            TextureRegion {
+                page,
+                x: x as f32,
+                y: y as f32,
+            },
+        );
+        self.texture_sizes.insert(handle, (width, height));
+        Ok(handle)
+    }
+
+    /// `draw` with an atlas region's texture and source moved onto its page.
+    fn resolve(&self, draw: &SpriteDraw) -> SpriteDraw {
+        match self.regions.get(&draw.texture) {
+            Some(region) => SpriteDraw {
+                texture: region.page,
+                src: Rect::new(
+                    draw.src.x + region.x,
+                    draw.src.y + region.y,
+                    draw.src.width,
+                    draw.src.height,
+                ),
+                ..*draw
+            },
+            None => *draw,
+        }
     }
 
     /// Uploads an RGBA8 sprite sheet through the backend.
@@ -453,5 +561,97 @@ mod tests {
             vec![(Layer::Ground, true), (Layer::Ui, false), (Layer::Ui, true),],
             "a bar drawn after its panel stays on top of it"
         );
+    }
+
+    fn png_header(width: u32, height: u32) -> Vec<u8> {
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+        png.extend_from_slice(&width.to_be_bytes());
+        png.extend_from_slice(&height.to_be_bytes());
+        png
+    }
+
+    #[test]
+    fn atlas_regions_draw_from_their_page() {
+        let null = NullRenderer::new();
+        let log = null.draw_log();
+        let mut renderer = Renderer::new(
+            Box::new(null),
+            DisplaySettings::default(),
+            RendererConfig::default(),
+        );
+        let (page, _, _) = renderer
+            .load_named_texture("atlases/tilesets_0.png", &png_header(64, 32))
+            .unwrap();
+        let region = renderer.create_texture_region(page, 16, 8, 32, 24).unwrap();
+        assert_ne!(region, page);
+        renderer.begin_frame(240, 160);
+        let draw = SpriteDraw {
+            texture: region,
+            src: Rect::new(8.0, 0.0, 8.0, 8.0),
+            dst: Rect::new(0.0, 0.0, 8.0, 8.0),
+            flip_x: true,
+            tint: Color::WHITE,
+            layer: Layer::Ground,
+        };
+        renderer.draw_sprite(draw);
+        renderer.draw_sprite(SpriteDraw {
+            texture: page,
+            ..draw
+        });
+        renderer.end_frame();
+        let draws = log.draws();
+        assert_eq!(draws[0].texture, page);
+        assert_eq!(draws[0].src, Rect::new(24.0, 8.0, 8.0, 8.0));
+        assert_eq!(draws[0].dst, draw.dst);
+        assert!(draws[0].flip_x);
+        assert_eq!(
+            draws[1].src,
+            Rect::new(8.0, 0.0, 8.0, 8.0),
+            "page draws are untouched"
+        );
+    }
+
+    #[test]
+    fn named_textures_upload_once() {
+        let mut renderer = Renderer::new(
+            Box::new(NullRenderer::new()),
+            DisplaySettings::default(),
+            RendererConfig::default(),
+        );
+        assert!(renderer.named_texture("page").is_none());
+        let first = renderer
+            .load_named_texture("page", &png_header(16, 16))
+            .unwrap();
+        let again = renderer
+            .load_named_texture("page", &png_header(99, 99))
+            .unwrap();
+        assert_eq!(first, again);
+        assert_eq!(renderer.named_texture("page"), Some(first));
+    }
+
+    #[test]
+    fn texture_regions_must_fit_their_page() {
+        let mut renderer = Renderer::new(
+            Box::new(NullRenderer::new()),
+            DisplaySettings::default(),
+            RendererConfig::default(),
+        );
+        let (page, _, _) = renderer.load_texture(&png_header(32, 32)).unwrap();
+        assert!(renderer.create_texture_region(page, 16, 16, 16, 16).is_ok());
+        let err = renderer
+            .create_texture_region(page, 20, 0, 16, 16)
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "invalid texture region: 16x16 at 20,0 does not fit on a 32x32 page"
+        );
+        assert!(renderer.create_texture_region(page, 0, 0, 0, 4).is_err());
+        assert!(
+            renderer
+                .create_texture_region(TextureHandle(777), 0, 0, 1, 1)
+                .is_err()
+        );
+        let region = renderer.create_texture_region(page, 0, 0, 8, 8).unwrap();
+        assert!(renderer.create_texture_region(region, 0, 0, 1, 1).is_err());
     }
 }

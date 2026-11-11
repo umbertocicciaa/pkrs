@@ -54,6 +54,12 @@ pub enum RenderError {
         /// Every error, joined with `; `.
         detail: String,
     },
+    /// An atlas region does not fit its page (§5.2).
+    #[error("invalid texture region: {detail}")]
+    TextureRegion {
+        /// What is wrong.
+        detail: String,
+    },
     /// Unknown material handle.
     #[error("unknown material handle {0}")]
     UnknownMaterial(u32),

@@ -588,7 +588,7 @@ fn menu_repeat_fires(held_ticks: u32, initial_delay: u32, repeat_rate: u32) -> b
         return false;
     }
     let rate = repeat_rate.max(1);
-    (held_ticks - initial_delay - 1) % rate == 0
+    (held_ticks - initial_delay - 1).is_multiple_of(rate)
 }
 
 #[cfg(test)]

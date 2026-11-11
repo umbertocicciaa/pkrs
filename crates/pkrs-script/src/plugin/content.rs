@@ -112,18 +112,18 @@ fn merge_folder(
                 }
             };
             for record in records {
-                if *kind == ContentKind::Terrain {
-                    if let Err(message) = check_custom_terrain(record.def.id()) {
-                        out.errors.push(ContentError {
-                            file: path.clone(),
-                            source: DataError::InvalidField {
-                                field: "id".into(),
-                                context: format!("terrain `{}`", record.def.id()),
-                                message,
-                            },
-                        });
-                        continue;
-                    }
+                if *kind == ContentKind::Terrain
+                    && let Err(message) = check_custom_terrain(record.def.id())
+                {
+                    out.errors.push(ContentError {
+                        file: path.clone(),
+                        source: DataError::InvalidField {
+                            field: "id".into(),
+                            context: format!("terrain `{}`", record.def.id()),
+                            message,
+                        },
+                    });
+                    continue;
                 }
                 match out.db.insert(record, source.clone()) {
                     Ok(Some(ov)) => log_override(&ov, &path),

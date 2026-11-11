@@ -12,6 +12,9 @@ pkrs-core.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 notify.workspace = true
+zip.workspace = true
+serde.workspace = true
+ron.workspace = true
 
 [lints]
 workspace = true

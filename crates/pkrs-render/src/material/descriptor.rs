@@ -469,19 +469,18 @@ fn check_builtin(
             }
         }
     }
-    if builtin == BuiltinShader::Translucency {
-        if let Some(UniformSource::Value(UniformValue::Float(a))) = params.get("alpha") {
-            if !(0.0..=1.0).contains(a) {
-                issues.push(
-                    Issue::error(
-                        "material::invalid-value",
-                        format!("uniform `alpha` must be between 0 and 1 (got {a})"),
-                        key("alpha"),
-                    )
-                    .label("out of range"),
-                );
-            }
-        }
+    if builtin == BuiltinShader::Translucency
+        && let Some(UniformSource::Value(UniformValue::Float(a))) = params.get("alpha")
+        && !(0.0..=1.0).contains(a)
+    {
+        issues.push(
+            Issue::error(
+                "material::invalid-value",
+                format!("uniform `alpha` must be between 0 and 1 (got {a})"),
+                key("alpha"),
+            )
+            .label("out of range"),
+        );
     }
 
     // Defaults: missing parameters, and globals without their own default.
@@ -632,22 +631,22 @@ fn check_project(
             rejected.push(u.name.as_str());
             continue;
         };
-        if let Some((_, expected)) = ENGINE_UNIFORMS.iter().find(|(n, _)| *n == u.name) {
-            if *expected != ty {
-                issues.push(
-                    Issue::error(
-                        "material::uniform-type",
-                        format!(
-                            "shader `{file}`: engine uniform `{}` is a `{}`",
-                            u.name,
-                            expected.glsl_name()
-                        ),
-                        At::Shader(u.range.clone()),
-                    )
-                    .label(format!("declare it as `{}`", expected.glsl_name())),
-                );
-                continue;
-            }
+        if let Some((_, expected)) = ENGINE_UNIFORMS.iter().find(|(n, _)| *n == u.name)
+            && *expected != ty
+        {
+            issues.push(
+                Issue::error(
+                    "material::uniform-type",
+                    format!(
+                        "shader `{file}`: engine uniform `{}` is a `{}`",
+                        u.name,
+                        expected.glsl_name()
+                    ),
+                    At::Shader(u.range.clone()),
+                )
+                .label(format!("declare it as `{}`", expected.glsl_name())),
+            );
+            continue;
         }
         uniforms.push((u.name.clone(), ty, u.range.clone()));
     }

@@ -39,10 +39,10 @@ impl RuntimeHost {
             DisplaySettings::default(),
             RendererConfig::default(),
         ));
-        if let Ok(theme) = build_test_ui_theme(host.renderer_mut()) {
-            if let Ok(title) = TitleState::for_stack_demo(theme, host.renderer_mut()) {
-                host.push_state(Box::new(title));
-            }
+        if let Ok(theme) = build_test_ui_theme(host.renderer_mut())
+            && let Ok(title) = TitleState::for_stack_demo(theme, host.renderer_mut())
+        {
+            host.push_state(Box::new(title));
         }
         host
     }
@@ -61,10 +61,10 @@ impl RuntimeHost {
             DisplaySettings::default(),
             RendererConfig::default(),
         );
-        if let Ok(theme) = build_test_ui_theme(&mut renderer) {
-            if let Ok(title) = TitleState::for_stack_demo(theme, &renderer) {
-                stack.push(&mut ctx, Box::new(title));
-            }
+        if let Ok(theme) = build_test_ui_theme(&mut renderer)
+            && let Ok(title) = TitleState::for_stack_demo(theme, &renderer)
+        {
+            stack.push(&mut ctx, Box::new(title));
         }
 
         Self {

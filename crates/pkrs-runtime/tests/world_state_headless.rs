@@ -40,6 +40,7 @@ fn project_dir(tag: &str) -> PathBuf {
 fn host(dir: &Path, at: GridPos) -> ProjectHost {
     let project = Project::open(&ProjectOptions {
         dir: dir.to_path_buf(),
+        pak: None,
         map: Some("harbor".into()),
         warp: Some(at),
     })

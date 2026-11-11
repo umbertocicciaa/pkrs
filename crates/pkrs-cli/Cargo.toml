@@ -27,6 +27,8 @@ thiserror.workspace = true
 clap.workspace = true
 include_dir.workspace = true
 miette.workspace = true
+texture_packer.workspace = true
+image.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

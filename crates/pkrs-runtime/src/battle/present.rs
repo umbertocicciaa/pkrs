@@ -433,19 +433,18 @@ impl Presenter {
         };
         let previous = self.roster.side(side).active_index(slot);
         if let Some(old) = previous.and_then(|i| self.roster.side(side).members.get(usize::from(i)))
+            && old.hp > 0
         {
-            if old.hp > 0 {
-                let name = old.name.as_str();
-                let cue = match (side, &trainer) {
-                    (SideId::Player, _) => self.say("battle.come_back", &[("name", name)]),
-                    (SideId::Opponent, Some(t)) => {
-                        self.say("battle.trainer_withdrew", &[("trainer", t), ("name", name)])
-                    }
-                    (SideId::Opponent, None) => self.say("battle.withdrew", &[("name", name)]),
-                };
-                cues.push(cue);
-                cues.push(Cue::SwitchOut { side, slot });
-            }
+            let name = old.name.as_str();
+            let cue = match (side, &trainer) {
+                (SideId::Player, _) => self.say("battle.come_back", &[("name", name)]),
+                (SideId::Opponent, Some(t)) => {
+                    self.say("battle.trainer_withdrew", &[("trainer", t), ("name", name)])
+                }
+                (SideId::Opponent, None) => self.say("battle.withdrew", &[("name", name)]),
+            };
+            cues.push(cue);
+            cues.push(Cue::SwitchOut { side, slot });
         }
         let cue = Cue::SwitchIn {
             side,

@@ -64,6 +64,7 @@ fn map_script_reload_picks_up_edits_without_restart() {
     let dir = project_dir();
     let project = Project::open(&ProjectOptions {
         dir: dir.clone(),
+        pak: None,
         map: Some("lighthouse_1f".into()),
         warp: Some(GridPos::new(2, 2)),
     })

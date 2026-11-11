@@ -95,11 +95,11 @@ impl DevRuntime {
         }
         self.pending
             .absorb(ReloadPlan::from_events(&self.watch.poll()));
-        if self.console.poll_keys(&keys, &self.prev_keys) {
-            if let Some(scripts) = host.scripts_mut() {
-                let line = self.console.line().to_owned();
-                self.console.execute(scripts.host_mut(), &line);
-            }
+        if self.console.poll_keys(&keys, &self.prev_keys)
+            && let Some(scripts) = host.scripts_mut()
+        {
+            let line = self.console.line().to_owned();
+            self.console.execute(scripts.host_mut(), &line);
         }
         self.prev_keys = keys;
     }

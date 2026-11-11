@@ -771,10 +771,8 @@ impl BattleScreen {
                 *left == 0
             }
         };
-        if done {
-            if let Some(Playing::Anim { cue, .. }) = self.playing.take() {
-                self.finish_anim(&cue);
-            }
+        if done && let Some(Playing::Anim { cue, .. }) = self.playing.take() {
+            self.finish_anim(&cue);
         }
     }
 

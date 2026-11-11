@@ -154,12 +154,12 @@ impl AiProfile {
         if self.heal_below_percent > 100 {
             return bad("heal_below_percent must be ≤ 100".into());
         }
-        if let Some(script) = &self.script {
-            if !script.ends_with(".lua") || script.contains("..") {
-                return bad(format!(
-                    "script `{script}` must be a project-relative .lua path"
-                ));
-            }
+        if let Some(script) = &self.script
+            && (!script.ends_with(".lua") || script.contains(".."))
+        {
+            return bad(format!(
+                "script `{script}` must be a project-relative .lua path"
+            ));
         }
         Ok(())
     }

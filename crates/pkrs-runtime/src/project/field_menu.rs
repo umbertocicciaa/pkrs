@@ -142,10 +142,10 @@ impl ProjectHost {
             let action = menu.take_field_action();
             self.commit_field_menu(&menu);
             self.field_menu = None;
-            if let Some(id) = action {
-                if let Some(scripts) = self.scripts.as_mut() {
-                    scripts.use_field_action(&id);
-                }
+            if let Some(id) = action
+                && let Some(scripts) = self.scripts.as_mut()
+            {
+                scripts.use_field_action(&id);
             }
             return;
         }

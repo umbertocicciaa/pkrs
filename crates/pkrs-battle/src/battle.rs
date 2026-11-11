@@ -57,13 +57,13 @@ impl SideState {
             )));
         }
         for (slot, idx) in active.iter().enumerate() {
-            if let Some(i) = idx {
-                if usize::from(*i) >= party.len() {
-                    return Err(BattleError::InvalidAction(format!(
-                        "{} slot {slot} references missing party index {i}",
-                        setup.name
-                    )));
-                }
+            if let Some(i) = idx
+                && usize::from(*i) >= party.len()
+            {
+                return Err(BattleError::InvalidAction(format!(
+                    "{} slot {slot} references missing party index {i}",
+                    setup.name
+                )));
             }
         }
         Ok(Self {
@@ -1013,19 +1013,19 @@ impl Battle {
             amount: hit.amount,
             remaining_hp: remaining,
         });
-        if remaining == 0 {
-            if let Some(party_index) = self.side(target.side).party_index(target.slot) {
-                out.push(BattleEvent::Fainted {
-                    side: target.side,
-                    slot: target.slot,
-                    party_index,
-                });
-                let faint = FaintEvent {
-                    slot: target,
-                    party_index,
-                };
-                self.run_hook(out, "on_faint", |ctx| hooks.on_faint(ctx, &faint))?;
-            }
+        if remaining == 0
+            && let Some(party_index) = self.side(target.side).party_index(target.slot)
+        {
+            out.push(BattleEvent::Fainted {
+                side: target.side,
+                slot: target.slot,
+                party_index,
+            });
+            let faint = FaintEvent {
+                slot: target,
+                party_index,
+            };
+            self.run_hook(out, "on_faint", |ctx| hooks.on_faint(ctx, &faint))?;
         }
         Ok(hit.amount)
     }
@@ -1040,12 +1040,11 @@ impl Battle {
         if rules.status(&req.status).is_none() {
             return Ok(());
         }
-        if let Some(creature) = self.side(req.target.side).creature(req.target.slot) {
-            if let Some(def) = rules.status(&req.status) {
-                if pkrs_data::status_blocked_by_types(def, &creature.template.types) {
-                    return Ok(());
-                }
-            }
+        if let Some(creature) = self.side(req.target.side).creature(req.target.slot)
+            && let Some(def) = rules.status(&req.status)
+            && pkrs_data::status_blocked_by_types(def, &creature.template.types)
+        {
+            return Ok(());
         }
         let original = req.status.clone();
         let verdict = self.run_hook(out, "on_status_apply", |ctx| {

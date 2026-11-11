@@ -313,25 +313,25 @@ impl GameState for SaveScreenState {
                 y,
                 style,
             );
-            if self.phase == Phase::PickSlot {
-                if let Some(detail) = self.detail_line(i) {
-                    renderer.draw_text(
-                        &self.theme.font,
-                        self.theme.font_tex,
-                        &detail,
-                        base_x + 8.0,
-                        y + lh * 0.85,
-                        TextStyle {
-                            tint: Color {
-                                r: 200,
-                                g: 200,
-                                b: 200,
-                                a: 255,
-                            },
-                            ..style
+            if self.phase == Phase::PickSlot
+                && let Some(detail) = self.detail_line(i)
+            {
+                renderer.draw_text(
+                    &self.theme.font,
+                    self.theme.font_tex,
+                    &detail,
+                    base_x + 8.0,
+                    y + lh * 0.85,
+                    TextStyle {
+                        tint: Color {
+                            r: 200,
+                            g: 200,
+                            b: 200,
+                            a: 255,
                         },
-                    );
-                }
+                        ..style
+                    },
+                );
             }
         }
     }

@@ -120,16 +120,16 @@ fn v1_to_v2(mut save: Value) -> Result<Value> {
     if let Some(play_time) = header.remove("play_time") {
         header.insert("play_time_ticks", play_time);
     }
-    if let Some(world) = save.get_mut("world") {
-        if let Some(rng) = world.remove("rng") {
-            if rng.get("seed").is_none() {
-                return Err(step_error(1, "`world.rng` is not a v1 RNG state"));
-            }
-            world.insert(
-                "rng",
-                Value::Map(BTreeMap::from([(RNG_BATTLE.to_owned(), rng)])),
-            );
+    if let Some(world) = save.get_mut("world")
+        && let Some(rng) = world.remove("rng")
+    {
+        if rng.get("seed").is_none() {
+            return Err(step_error(1, "`world.rng` is not a v1 RNG state"));
         }
+        world.insert(
+            "rng",
+            Value::Map(BTreeMap::from([(RNG_BATTLE.to_owned(), rng)])),
+        );
     }
     Ok(save)
 }

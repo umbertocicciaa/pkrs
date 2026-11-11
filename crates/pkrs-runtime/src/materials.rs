@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use pkrs_assets::{FolderVfs, Vfs, VfsPath};
+use pkrs_assets::{Vfs, VfsPath};
 use pkrs_render::{Material, MaterialHandle, Renderer, material_path};
 use pkrs_world::Map;
 
@@ -36,7 +36,7 @@ impl MaterialCache {
     pub fn get(
         &mut self,
         id: &str,
-        vfs: &FolderVfs,
+        vfs: &dyn Vfs,
         renderer: &mut Renderer,
     ) -> Option<MaterialHandle> {
         if let Some(found) = self.by_id.get(id) {
@@ -60,7 +60,7 @@ impl MaterialCache {
     }
 
     /// The materials referenced by `map`'s tilesets and layers (`material` properties).
-    pub fn for_map(&mut self, map: &Map, vfs: &FolderVfs, renderer: &mut Renderer) -> MapMaterials {
+    pub fn for_map(&mut self, map: &Map, vfs: &dyn Vfs, renderer: &mut Renderer) -> MapMaterials {
         MapMaterials {
             tilesets: map
                 .tilesets
@@ -84,13 +84,13 @@ impl MaterialCache {
     }
 }
 
-fn read_text(vfs: &FolderVfs, path: &str) -> Option<String> {
+fn read_text(vfs: &dyn Vfs, path: &str) -> Option<String> {
     let path = VfsPath::new(path).ok()?;
     let bytes = vfs.read(&path).ok()?;
     String::from_utf8(bytes).ok()
 }
 
-fn load(id: &str, vfs: &FolderVfs) -> Result<Material, String> {
+fn load(id: &str, vfs: &dyn Vfs) -> Result<Material, String> {
     let path = material_path(id);
     let source = read_text(vfs, &path).ok_or_else(|| format!("cannot read `{path}`"))?;
     let source = source.replace("\r\n", "\n");

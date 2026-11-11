@@ -44,6 +44,7 @@
 //!   snapshot, step and failure types the runtime's harness uses.
 
 pub mod chain;
+pub mod deprecation;
 mod error;
 pub mod events;
 mod host;
@@ -61,6 +62,7 @@ pub use chain::{
     ChainKey, ChainOutcome, HookChain, HookKind, HookTable, HookTableEntry, LoadOrder, Step,
     run_chain,
 };
+pub use deprecation::{DEPRECATED_CALLS, DeprecatedCall, FoundDeprecation, find_deprecations};
 pub use error::{Result, ScriptError, split_location};
 pub use events::{DispatchReport, ENGINE_EVENTS, ListenerId, ListenerInfo, ScriptEvent};
 pub use host::{

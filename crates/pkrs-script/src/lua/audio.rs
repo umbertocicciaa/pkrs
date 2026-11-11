@@ -5,7 +5,7 @@
 //!   keeps playing; another id crossfades (30 ticks by default).
 //! - `audio.stop_bgm(opts?)`: fades out (`{ fade = ticks }` or a tick count).
 //! - `audio.play_sfx(id)`: fire and forget.
-//! - `audio.play_jingle(id)` (alias `audio.jingle(id)`): ducks or pauses the BGM until it ends.
+//! - `audio.play_jingle(id)` (deprecated alias `audio.jingle(id)`, API 1): ducks or pauses the BGM until it ends.
 //! - `audio.set_volume(group, volume)`: `group` is `"master"`, `"bgm"`, `"sfx"` or
 //!   `"jingle"`, `volume` a number in `0..=1`.
 

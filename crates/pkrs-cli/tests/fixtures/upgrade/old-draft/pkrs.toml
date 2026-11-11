@@ -1,0 +1,20 @@
+# Draft manifest: table and key names from before the current schema.
+
+[game]
+name = "Old Tale"
+id = "com.example.old"
+version = "0.1.0"
+
+[engine]
+version = "0.0.0"
+api_level = 1
+
+[window]
+width = 240
+height = 160
+scale = 3
+
+[start]
+map = "start"
+pos = [2, 3]
+facing = "down"

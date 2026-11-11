@@ -1,9 +1,10 @@
 //! The `pkrs` command-line tool (§2.3).
 //!
-//! Implemented: `pkrs new` (one-shot and battle templates), `pkrs run`, `pkrs plugin new` and
+//! Implemented: `pkrs new` (one-shot and battle templates), `pkrs run`, `pkrs plugin new`,
 //! `pkrs check` (§8.2 validation with source snippets; `--plugins` also prints the resolved
-//! load order and hook table, §9.4) and `pkrs pack` (the `game.pak` release archive with
-//! texture atlases, §13). `build` and `upgrade` arrive with their milestones (M7).
+//! load order and hook table, §9.4), `pkrs upgrade` (manifest migrations and the deprecation
+//! changelog, §2.5) and `pkrs pack` (the `game.pak` release archive with texture atlases, §13).
+//! `build` arrives with its milestone (M7).
 //!
 //! `pkrs check` exit codes: `0` no errors (warnings allowed), `1` errors found (or warnings
 //! with `--deny-warnings`), `2` the check could not run (bad arguments, no project).
@@ -21,6 +22,7 @@ use pkrs_cli::plugin::{self, PluginVars};
 use pkrs_cli::report::{self, ReportStyle};
 use pkrs_cli::run::{self, RUNTIME_ENV, RunRequest};
 use pkrs_cli::template::{self, Template, TemplateVars};
+use pkrs_cli::upgrade;
 use tracing_subscriber::EnvFilter;
 
 /// Log filter used when `RUST_LOG` is not set.
@@ -97,6 +99,15 @@ enum Command {
         /// Fail (exit code 1) on warnings too.
         #[arg(long)]
         deny_warnings: bool,
+        /// Project folder (default: the nearest folder with a pkrs.toml).
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// Bump `engine.version`, run manifest migrations and report deprecated scripting calls.
+    Upgrade {
+        /// Pin `engine.version` to this full `major.minor.patch` (default: this CLI's version).
+        #[arg(long)]
+        to: Option<String>,
         /// Project folder (default: the nearest folder with a pkrs.toml).
         #[arg(long)]
         project: Option<PathBuf>,
@@ -219,6 +230,13 @@ fn execute(cli: Cli) -> anyhow::Result<ExitCode> {
                 Some(hint) => println!("Next: enable it in pkrs.toml:\n{hint}"),
                 None => println!("Next: pkrs check --plugins"),
             }
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Upgrade { to, project } => {
+            let project = project_root(project)?;
+            let target = upgrade::resolve_target(to.as_deref())?;
+            let report = upgrade::upgrade_project(&project, &target)?;
+            print!("{report}");
             Ok(ExitCode::SUCCESS)
         }
         Command::Pack { out, project } => {
@@ -400,6 +418,25 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn parses_upgrade_flags() {
+        let cli = Cli::try_parse_from(["pkrs", "upgrade"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Upgrade {
+                to: None,
+                project: None
+            }
+        ));
+        let cli =
+            Cli::try_parse_from(["pkrs", "upgrade", "--to", "0.3.1", "--project", "game"]).unwrap();
+        let Command::Upgrade { to, project } = cli.command else {
+            panic!("expected upgrade")
+        };
+        assert_eq!(to.as_deref(), Some("0.3.1"));
+        assert_eq!(project, Some(PathBuf::from("game")));
     }
 
     #[test]

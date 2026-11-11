@@ -118,6 +118,23 @@ fn manifest_errors_do_not_stop_the_other_checks() {
 }
 
 #[test]
+fn deprecated_script_calls_warn() {
+    let files = MemoryScripts::new().with("pkrs.toml", MANIFEST).with(
+        "scripts/main.lua",
+        "audio.play_jingle('ok')\naudio.jingle('fanfare')\n",
+    );
+    let v = run(&files, vec![]);
+    assert_eq!(codes(&v), ["script::deprecated"]);
+    let warning = &v.diagnostics.items()[0];
+    assert_eq!(warning.span.expect("span").line, 2);
+    assert!(
+        warning.message.contains("audio.play_jingle"),
+        "{}",
+        warning.message
+    );
+}
+
+#[test]
 fn missing_manifest_is_an_error() {
     let v = run(&MemoryScripts::new(), vec![]);
     assert_eq!(codes(&v), ["manifest::read"]);

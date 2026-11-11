@@ -52,10 +52,10 @@ pub(super) fn handle(lua: &Lua, id: &str) -> mlua::Result<Table> {
 
 /// The id behind `self` for method `func`.
 fn self_id(func: &str, this: &Value) -> Result<String, String> {
-    if let Value::Table(t) = this {
-        if let Some(id) = handle_id(t) {
-            return Ok(id);
-        }
+    if let Value::Table(t) = this
+        && let Some(id) = handle_id(t)
+    {
+        return Ok(id);
     }
     Err(format!(
         "{func}: expected an npc object as `self` (got {}); call it with ':'",

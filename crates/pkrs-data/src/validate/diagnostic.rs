@@ -92,10 +92,10 @@ fn locate_inner(source: &str, err: &DataError) -> Option<SourceSpan> {
         return None;
     };
     let from = backticked(context).map_or(0, |id| record_offset(source, id));
-    if field == "id" {
-        if let Some(id) = backticked(context) {
-            return find_quoted_span(source, id, from);
-        }
+    if field == "id"
+        && let Some(id) = backticked(context)
+    {
+        return find_quoted_span(source, id, from);
     }
     find_field_span(source, field, from)
 }

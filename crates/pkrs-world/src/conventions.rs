@@ -322,15 +322,13 @@ pub fn build_map(raw: RawMap) -> Result<Map, Vec<ConventionViolation>> {
                     continue;
                 }
                 apply_logical(&mut grid, raw.width, &tiles, &rules, role);
-                if let TileRole::Visual(kind) = role {
-                    if let Some(mut tile_layer) =
+                if let TileRole::Visual(kind) = role
+                    && let Some(mut tile_layer) =
                         TileLayer::new(name.clone(), kind, raw.width, raw.height, tiles)
-                    {
-                        tile_layer.visible = visible;
-                        tile_layer.material =
-                            material_property(&properties, location(), &mut report);
-                        layers.push(tile_layer);
-                    }
+                {
+                    tile_layer.visible = visible;
+                    tile_layer.material = material_property(&properties, location(), &mut report);
+                    layers.push(tile_layer);
                 }
             }
             RawLayer::Objects {

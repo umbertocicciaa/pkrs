@@ -431,10 +431,10 @@ impl BattleAi for TrainerAi {
         let Some((attack, score)) = self.best_attack(view, me) else {
             return fallback_move(view, slot);
         };
-        if self.tier == AiTier::Smart {
-            if let Some(switch) = self.consider_switch(view, me, score) {
-                return switch;
-            }
+        if self.tier == AiTier::Smart
+            && let Some(switch) = self.consider_switch(view, me, score)
+        {
+            return switch;
         }
         attack
     }

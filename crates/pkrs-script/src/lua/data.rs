@@ -97,10 +97,10 @@ fn register(
     let source = content_source(owner);
     let inserted = with_regs(lua, |r| {
         let result = r.content.insert(record, source);
-        if result.is_ok() {
-            if let Some(f) = handler {
-                r.effects.insert(id.clone(), f);
-            }
+        if result.is_ok()
+            && let Some(f) = handler
+        {
+            r.effects.insert(id.clone(), f);
         }
         result
     })?;

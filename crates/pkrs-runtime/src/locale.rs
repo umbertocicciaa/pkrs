@@ -156,10 +156,10 @@ impl BattleText {
     /// `statuses`): its `name` field, else the `<kind>.<id>` key, else `None`.
     fn lookup_name(&self, kind: &str, id: &str) -> Option<String> {
         let key = format!("{kind}.{id}");
-        if let Some(field) = self.names.get(&key) {
-            if let Some(name) = self.localizer.resolve(field, &TextArgs::new()) {
-                return Some(name);
-            }
+        if let Some(field) = self.names.get(&key)
+            && let Some(name) = self.localizer.resolve(field, &TextArgs::new())
+        {
+            return Some(name);
         }
         self.localizer.lookup(&key).map(str::to_owned)
     }

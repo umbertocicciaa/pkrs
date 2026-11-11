@@ -1296,15 +1296,17 @@ impl ProjectHost {
         if let Some(dir) = scripts.take_player_face() {
             self.walker.face(dir);
         }
-        if self.overlay.is_none() && self.battle.is_none() && self.field_menu.is_none() {
-            if let Some(request) = scripts.take_ui_request() {
-                match &self.ui_theme {
-                    Some(theme) => {
-                        let view = self.renderer.view_size();
-                        self.overlay = Some(ScriptOverlay::open(request, theme, view));
-                    }
-                    None => scripts.close_dialogue(pkrs_script::ScriptValue::Nil),
+        if self.overlay.is_none()
+            && self.battle.is_none()
+            && self.field_menu.is_none()
+            && let Some(request) = scripts.take_ui_request()
+        {
+            match &self.ui_theme {
+                Some(theme) => {
+                    let view = self.renderer.view_size();
+                    self.overlay = Some(ScriptOverlay::open(request, theme, view));
                 }
+                None => scripts.close_dialogue(pkrs_script::ScriptValue::Nil),
             }
         }
         for (name, value) in scripts.take_global_uniforms() {

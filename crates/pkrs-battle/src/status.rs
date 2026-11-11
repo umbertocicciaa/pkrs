@@ -70,28 +70,27 @@ pub fn blocks_move_attempt(
     };
 
     if def.blocks_move {
-        if status_id == "freeze" {
-            if let Some(chance) = def.thaw_chance {
-                if rng.gen_range_u32(100) < u32::from(chance) {
-                    creature.major_status = None;
-                    out.push(BattleEvent::StatusCured {
-                        target_side: side,
-                        target_slot: slot,
-                        status: status_id,
-                    });
-                    return false;
-                }
-            }
+        if status_id == "freeze"
+            && let Some(chance) = def.thaw_chance
+            && rng.gen_range_u32(100) < u32::from(chance)
+        {
+            creature.major_status = None;
+            out.push(BattleEvent::StatusCured {
+                target_side: side,
+                target_slot: slot,
+                status: status_id,
+            });
+            return false;
         }
         out.push(BattleEvent::message("status:cant_move"));
         return true;
     }
 
-    if let Some(chance) = def.full_paralysis_chance {
-        if rng.gen_range_u32(100) < u32::from(chance) {
-            out.push(BattleEvent::message("status:cant_move"));
-            return true;
-        }
+    if let Some(chance) = def.full_paralysis_chance
+        && rng.gen_range_u32(100) < u32::from(chance)
+    {
+        out.push(BattleEvent::message("status:cant_move"));
+        return true;
     }
     false
 }
@@ -100,34 +99,33 @@ pub fn blocks_move_attempt(
 pub fn process_end_of_turn(battle: &mut Battle, out: &mut Vec<BattleEvent>) -> Result<()> {
     let rules = battle.rules().clone();
     let weather = battle.weather_snapshot();
-    if let Some((weather_id, _)) = &weather {
-        if let Some(def) = rules.weather(weather_id) {
-            if let Some(denom) = def.chip_denom {
-                for side in [SideId::Player, SideId::Opponent] {
-                    for slot in 0..battle.config().side_size {
-                        let Some(creature) = battle.creature(side, slot) else {
-                            continue;
-                        };
-                        if creature.fainted() {
-                            continue;
-                        }
-                        if weather_chip_blocked(def, &creature.template.types) {
-                            continue;
-                        }
-                        let amount = residual_amount(
-                            creature.template.stats.max_hp,
-                            ResidualKind::MaxHpFraction { denom },
-                        );
-                        apply_residual_damage(
-                            battle,
-                            side,
-                            slot,
-                            amount,
-                            out,
-                            &format!("weather:{weather_id}"),
-                        )?;
-                    }
+    if let Some((weather_id, _)) = &weather
+        && let Some(def) = rules.weather(weather_id)
+        && let Some(denom) = def.chip_denom
+    {
+        for side in [SideId::Player, SideId::Opponent] {
+            for slot in 0..battle.config().side_size {
+                let Some(creature) = battle.creature(side, slot) else {
+                    continue;
+                };
+                if creature.fainted() {
+                    continue;
                 }
+                if weather_chip_blocked(def, &creature.template.types) {
+                    continue;
+                }
+                let amount = residual_amount(
+                    creature.template.stats.max_hp,
+                    ResidualKind::MaxHpFraction { denom },
+                );
+                apply_residual_damage(
+                    battle,
+                    side,
+                    slot,
+                    amount,
+                    out,
+                    &format!("weather:{weather_id}"),
+                )?;
             }
         }
     }

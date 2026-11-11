@@ -119,10 +119,10 @@ impl OverworldScripts {
         self.world.get_mut().enter_map(map, player, facing);
         let owner = ScriptOwner::Map(map.id.clone());
         let path = map_script_path(&map.id);
-        if self.host.script_exists(&path) {
-            if let Err(err) = self.host.run_file(&owner, &path) {
-                tracing::error!(target: "script", map = %map.id, "map script failed: {err}");
-            }
+        if self.host.script_exists(&path)
+            && let Err(err) = self.host.run_file(&owner, &path)
+        {
+            tracing::error!(target: "script", map = %map.id, "map script failed: {err}");
         }
         self.map_owner = Some(owner);
         self.host.emit_event(ScriptEvent::map_enter(&map.id));
@@ -396,10 +396,10 @@ impl OverworldScripts {
                 self.host.unload_owner(&owner);
             }
             let path = init_path(id);
-            if self.host.script_exists(&path) {
-                if let Err(err) = self.host.run_file(&owner, &path) {
-                    tracing::error!(target: "script", plugin = %id, "plugin reload failed: {err}");
-                }
+            if self.host.script_exists(&path)
+                && let Err(err) = self.host.run_file(&owner, &path)
+            {
+                tracing::error!(target: "script", plugin = %id, "plugin reload failed: {err}");
             }
         }
         tracing::info!(target: "dev", plugins = plugin_ids.len(), "scripts reloaded");

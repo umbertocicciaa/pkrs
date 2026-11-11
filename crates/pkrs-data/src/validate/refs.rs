@@ -303,20 +303,21 @@ impl Checker<'_> {
                 );
             }
             for effect in &mv.effects {
-                if let MoveEffect::ApplyStatus { status, .. } = effect {
-                    if self.rules.status(status).is_none() && !data.statuses().contains(status) {
-                        let at = At {
-                            file,
-                            record: &mv.id,
-                            needle: status,
-                        };
-                        self.unknown(
+                if let MoveEffect::ApplyStatus { status, .. } = effect
+                    && self.rules.status(status).is_none()
+                    && !data.statuses().contains(status)
+                {
+                    let at = At {
+                        file,
+                        record: &mv.id,
+                        needle: status,
+                    };
+                    self.unknown(
                             &at,
                             "status",
                             owner.clone(),
                             "built-in statuses are sleep, poison, burn, paralysis and freeze; define others in data/statuses/".into(),
                         );
-                    }
                 }
             }
         }

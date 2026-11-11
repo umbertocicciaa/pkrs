@@ -191,7 +191,7 @@ mod tests {
             self.size
         }
         fn tile_at(&self, x: u32, y: u32) -> Option<TileInstance> {
-            ((x + y) % 2 == 0).then_some(TileInstance {
+            (x + y).is_multiple_of(2).then_some(TileInstance {
                 sheet: 0,
                 id: (x + y) % 4,
                 flip_x: false,

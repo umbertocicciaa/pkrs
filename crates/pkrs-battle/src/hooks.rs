@@ -212,10 +212,10 @@ impl BattleView {
         let mut out = Vec::new();
         for side in [SideId::Player, SideId::Opponent] {
             for slot in 0..self.side_size {
-                if let Some(c) = self.side(side).active_creature(slot) {
-                    if !c.fainted() {
-                        out.push((SlotRef::new(side, slot), c));
-                    }
+                if let Some(c) = self.side(side).active_creature(slot)
+                    && !c.fainted()
+                {
+                    out.push((SlotRef::new(side, slot), c));
                 }
             }
         }
@@ -291,10 +291,11 @@ impl<'a> BattleHookCtx<'a> {
     #[must_use]
     pub fn volatile(&self, slot: SlotRef, key: &str) -> Option<BattleValue> {
         for cmd in self.commands.iter().rev() {
-            if let HookCommand::SetVolatile(s, k, v) = cmd {
-                if *s == slot && k == key {
-                    return v.clone();
-                }
+            if let HookCommand::SetVolatile(s, k, v) = cmd
+                && *s == slot
+                && k == key
+            {
+                return v.clone();
             }
         }
         self.view.creature(slot)?.volatiles.get(key).cloned()
@@ -316,10 +317,11 @@ impl<'a> BattleHookCtx<'a> {
     #[must_use]
     pub fn side_state(&self, side: SideId, key: &str) -> Option<BattleValue> {
         for cmd in self.commands.iter().rev() {
-            if let HookCommand::SetSideState(s, k, v) = cmd {
-                if *s == side && k == key {
-                    return v.clone();
-                }
+            if let HookCommand::SetSideState(s, k, v) = cmd
+                && *s == side
+                && k == key
+            {
+                return v.clone();
             }
         }
         self.view.side(side).state.get(key).cloned()

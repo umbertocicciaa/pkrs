@@ -76,10 +76,10 @@ impl BitmapFont {
             return 0.0;
         };
         let mut adv = i32::try_from(metrics.xadvance).unwrap_or(i32::MAX);
-        if let Some(prev) = previous {
-            if let Some(delta) = self.kerning.get(&(u32::from(prev), u32::from(ch))) {
-                adv = adv.saturating_add(*delta);
-            }
+        if let Some(prev) = previous
+            && let Some(delta) = self.kerning.get(&(u32::from(prev), u32::from(ch)))
+        {
+            adv = adv.saturating_add(*delta);
         }
         adv.max(0) as f32
     }

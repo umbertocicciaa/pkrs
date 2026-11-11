@@ -82,11 +82,11 @@ impl<T> AssetStore<T> {
         path: &AssetPath,
         load: impl FnOnce(&AssetPath) -> Result<T>,
     ) -> Result<Handle<T>> {
-        if let Some(&inner) = self.by_path.get(path) {
-            if let Some(entry) = self.entries.get_mut(inner) {
-                entry.refs = entry.refs.saturating_add(1);
-                return Ok(inner.cast());
-            }
+        if let Some(&inner) = self.by_path.get(path)
+            && let Some(entry) = self.entries.get_mut(inner)
+        {
+            entry.refs = entry.refs.saturating_add(1);
+            return Ok(inner.cast());
         }
         let value = load(path)?;
         let inner = self

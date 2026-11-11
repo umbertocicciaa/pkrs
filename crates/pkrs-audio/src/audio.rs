@@ -566,14 +566,14 @@ impl Audio {
             });
             // A paused track stays paused for the battle; a ducked one gets its volume back
             // so it resumes at full volume afterwards.
-            if self.hold == Hold::Ducked {
-                if let Some((voice, volume)) = self.current.as_ref().map(|b| (b.voice, b.volume)) {
-                    self.send(BackendCommand::SetVolume {
-                        voice,
-                        volume,
-                        fade: 0,
-                    });
-                }
+            if self.hold == Hold::Ducked
+                && let Some((voice, volume)) = self.current.as_ref().map(|b| (b.voice, b.volume))
+            {
+                self.send(BackendCommand::SetVolume {
+                    voice,
+                    volume,
+                    fade: 0,
+                });
             }
             self.hold = Hold::None;
         }

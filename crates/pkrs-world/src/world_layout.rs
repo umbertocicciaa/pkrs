@@ -127,16 +127,16 @@ impl WorldLayout {
                         ),
                     });
                 }
-                if let Some(to_size) = map_sizes.get(&link.map) {
-                    if !sample_entry_in_map(dir, link.offset, *to_size) {
-                        return Err(WorldError::LayoutInvalid {
-                            file: file.into(),
-                            message: format!(
-                                "map `{map_id}` {:?} → `{}`: offset {:?} puts no seam tile in bounds",
-                                dir, link.map, link.offset
-                            ),
-                        });
-                    }
+                if let Some(to_size) = map_sizes.get(&link.map)
+                    && !sample_entry_in_map(dir, link.offset, *to_size)
+                {
+                    return Err(WorldError::LayoutInvalid {
+                        file: file.into(),
+                        message: format!(
+                            "map `{map_id}` {:?} → `{}`: offset {:?} puts no seam tile in bounds",
+                            dir, link.map, link.offset
+                        ),
+                    });
                 }
                 if let (Some(from_size), Some(to_size)) =
                     (map_sizes.get(map_id), map_sizes.get(&link.map))

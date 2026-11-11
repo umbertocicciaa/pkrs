@@ -70,14 +70,14 @@ impl StatusDef {
                 message: "must be 0..=100".into(),
             });
         }
-        if let Some((min, max)) = self.sleep_turns {
-            if min == 0 || max < min {
-                return Err(DataError::InvalidField {
-                    field: "sleep_turns".into(),
-                    context: self.id.clone(),
-                    message: "invalid range".into(),
-                });
-            }
+        if let Some((min, max)) = self.sleep_turns
+            && (min == 0 || max < min)
+        {
+            return Err(DataError::InvalidField {
+                field: "sleep_turns".into(),
+                context: self.id.clone(),
+                message: "invalid range".into(),
+            });
         }
         Ok(())
     }

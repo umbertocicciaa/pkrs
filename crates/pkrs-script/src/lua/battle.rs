@@ -469,10 +469,10 @@ fn cancel_of(v: &Value) -> mlua::Result<Option<HookResult>> {
 /// Strips a leading `ctx` table so both `ctx.f(x)` and `ctx:f(x)` work.
 fn args_without_self(ctx_tbl: &Table, args: MultiValue) -> Vec<Value> {
     let mut v: Vec<Value> = args.into_iter().collect();
-    if let Some(Value::Table(first)) = v.first() {
-        if first == ctx_tbl {
-            v.remove(0);
-        }
+    if let Some(Value::Table(first)) = v.first()
+        && first == ctx_tbl
+    {
+        v.remove(0);
     }
     v
 }
@@ -887,10 +887,10 @@ impl BattleHooks for LuaBattleHooks<'_> {
             a.raw_set("hits", acc.hits)?;
             a.raw_set("accuracy", acc.move_accuracy)?;
             let ret: Value = f.call((tbl, user, mv, target, a))?;
-            if let Value::Table(t) = ret {
-                if let Some(hits) = t.raw_get::<Option<bool>>("hits")? {
-                    acc.hits = hits;
-                }
+            if let Value::Table(t) = ret
+                && let Some(hits) = t.raw_get::<Option<bool>>("hits")?
+            {
+                acc.hits = hits;
             }
             Ok(Flow::Continue)
         });

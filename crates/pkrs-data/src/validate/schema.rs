@@ -87,17 +87,19 @@ pub fn move_def(mv: &MoveDef) -> Vec<(String, Diagnostic)> {
         ));
     }
     for effect in &mv.effects {
-        if let MoveEffect::StatStage { stages, .. } = effect {
-            if *stages == 0 || stages.unsigned_abs() > 6 {
-                out.push((
-                    field("stages"),
-                    Diagnostic::error(
-                        "data::schema",
-                        format!("{owner} changes a stat by {stages} stages; it must be 1 to 6 up or down"),
-                    )
-                    .with_label("out of range"),
-                ));
-            }
+        if let MoveEffect::StatStage { stages, .. } = effect
+            && (*stages == 0 || stages.unsigned_abs() > 6)
+        {
+            out.push((
+                field("stages"),
+                Diagnostic::error(
+                    "data::schema",
+                    format!(
+                        "{owner} changes a stat by {stages} stages; it must be 1 to 6 up or down"
+                    ),
+                )
+                .with_label("out of range"),
+            ));
         }
     }
     out

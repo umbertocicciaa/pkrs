@@ -188,16 +188,16 @@ impl PostBattle {
                     });
                 }
             }
-            if !levels.is_empty() {
-                if let Some(into) = species.evolution_at(m.level) {
-                    if pack.species.contains_key(into) {
-                        evolutions.push(Step::Evolve {
-                            member,
-                            into: into.to_owned(),
-                        });
-                    } else {
-                        tracing::warn!(target: "battle", species = %m.species, into, "evolution into an unknown species skipped");
-                    }
+            if !levels.is_empty()
+                && let Some(into) = species.evolution_at(m.level)
+            {
+                if pack.species.contains_key(into) {
+                    evolutions.push(Step::Evolve {
+                        member,
+                        into: into.to_owned(),
+                    });
+                } else {
+                    tracing::warn!(target: "battle", species = %m.species, into, "evolution into an unknown species skipped");
                 }
             }
         }

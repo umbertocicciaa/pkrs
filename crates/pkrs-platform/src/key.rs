@@ -6,88 +6,166 @@
 /// A physical keyboard key known to the engine.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
-#[allow(missing_docs)] // variant names are self-describing
 pub enum Key {
+    /// The A key.
     A,
+    /// The B key.
     B,
+    /// The C key.
     C,
+    /// The D key.
     D,
+    /// The E key.
     E,
+    /// The F key.
     F,
+    /// The G key.
     G,
+    /// The H key.
     H,
+    /// The I key.
     I,
+    /// The J key.
     J,
+    /// The K key.
     K,
+    /// The L key.
     L,
+    /// The M key.
     M,
+    /// The N key.
     N,
+    /// The O key.
     O,
+    /// The P key.
     P,
+    /// The Q key.
     Q,
+    /// The R key.
     R,
+    /// The S key.
     S,
+    /// The T key.
     T,
+    /// The U key.
     U,
+    /// The V key.
     V,
+    /// The W key.
     W,
+    /// The X key.
     X,
+    /// The Y key.
     Y,
+    /// The Z key.
     Z,
+    /// The 0 key.
     Digit0,
+    /// The 1 key.
     Digit1,
+    /// The 2 key.
     Digit2,
+    /// The 3 key.
     Digit3,
+    /// The 4 key.
     Digit4,
+    /// The 5 key.
     Digit5,
+    /// The 6 key.
     Digit6,
+    /// The 7 key.
     Digit7,
+    /// The 8 key.
     Digit8,
+    /// The 9 key.
     Digit9,
+    /// The up arrow key.
     Up,
+    /// The down arrow key.
     Down,
+    /// The left arrow key.
     Left,
+    /// The right arrow key.
     Right,
+    /// The space bar.
     Space,
+    /// The Enter key.
     Enter,
+    /// The Escape key.
     Escape,
+    /// The Backspace key.
     Backspace,
+    /// The Tab key.
     Tab,
+    /// The Insert key.
     Insert,
+    /// The Delete key.
     Delete,
+    /// The Home key.
     Home,
+    /// The End key.
     End,
+    /// The Page Up key.
     PageUp,
+    /// The Page Down key.
     PageDown,
+    /// The left Shift key.
     LeftShift,
+    /// The right Shift key.
     RightShift,
+    /// The left Control key.
     LeftControl,
+    /// The right Control key.
     RightControl,
+    /// The left Alt key.
     LeftAlt,
+    /// The right Alt key.
     RightAlt,
     /// The `` ` `` / `~` key (opens the dev console, §15.1).
     Backquote,
+    /// The `-` key.
     Minus,
+    /// The `=` key.
     Equal,
+    /// The `,` key.
     Comma,
+    /// The `.` key.
     Period,
+    /// The `/` key.
     Slash,
+    /// The `;` key.
     Semicolon,
+    /// The `'` key.
     Apostrophe,
+    /// The `[` key.
     LeftBracket,
+    /// The `]` key.
     RightBracket,
+    /// The `\` key.
     Backslash,
+    /// The F1 key.
     F1,
+    /// The F2 key.
     F2,
+    /// The F3 key.
     F3,
+    /// The F4 key.
     F4,
+    /// The F5 key.
     F5,
+    /// The F6 key.
     F6,
+    /// The F7 key.
     F7,
+    /// The F8 key.
     F8,
+    /// The F9 key.
     F9,
+    /// The F10 key.
     F10,
+    /// The F11 key.
     F11,
+    /// The F12 key.
     F12,
 }
 

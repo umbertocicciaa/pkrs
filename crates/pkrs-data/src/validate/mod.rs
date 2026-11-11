@@ -1,6 +1,6 @@
-//! Content validation (§8.2) as vendor-free [`Diagnostic`]s.
+//! Content validation (§8.2) as vendor-free [`pkrs_core::Diagnostic`]s.
 //!
-//! - **Stage 1 (parse)** and the load-time **stage 2** checks are the [`DataError`]s of
+//! - **Stage 1 (parse)** and the load-time **stage 2** checks are the [`crate::DataError`]s of
 //!   loading ([`GameDataBuilder::finish`](crate::GameDataBuilder::finish));
 //!   [`data_error_diagnostic`] turns each into a diagnostic with the file and, when the
 //!   source is at hand, its line and column (RON's position for parse errors, the record or

@@ -4,7 +4,7 @@ use pkrs_core::GameRng;
 
 use crate::stat_stage::StatStages;
 
-/// Context for [`BattleHooks::on_accuracy`].
+/// Context for [`crate::BattleHooks::on_accuracy`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AccuracyCalc {
     /// Move accuracy 0–100 (`0` = always hits).

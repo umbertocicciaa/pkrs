@@ -13,7 +13,7 @@ mod window_skin;
 
 pub use bag::{BagEntry, BagList};
 pub use choice::{ChoiceOption, ChoicePollOutcome, ChoiceSession};
-pub use codes::{DialogueSegment, expand_dialogue, pause_schedule};
+pub use codes::{DialogueSegment, expand_dialogue, expand_dialogue_with_pauses, pause_schedule};
 pub use dialogue::{DialogueAdvance, DialoguePage, DialogueSession};
 pub use error::{Result, UiError};
 pub use item_rules::{BuiltinItemEffect, ItemUseVerdict, builtin_effect, field_use_verdict};

@@ -10,7 +10,8 @@
 //! 3. **Content** — the game's `data/` folder: parse (stage 1), schema (stage 2) and
 //!    cross-references (stage 3) through [`pkrs_data::validate`].
 //! 4. **Lua** — every `.lua` file below `scripts/` and `plugins/` is compiled (never run);
-//!    `events.on("tick", …)` is a performance warning, `"text:…"` literals must be defined.
+//!    `events.on("tick", …)` is a performance warning, deprecated calls (§9.7) are warnings,
+//!    and `"text:…"` literals must be defined.
 //! 5. **Materials** — every `assets/materials/**/*.ron` descriptor: schema, shader
 //!    reference, built-in shader parameters, and project shaders against their capability
 //!    profile and the engine's (§5.6, [`pkrs_render::check_material`]).
@@ -37,7 +38,7 @@ use pkrs_data::validate::{
 use pkrs_data::{ContentDb, DATA_ROOT, DataFiles, GameDataBuilder, LoadOptions, TextDb};
 use pkrs_world::{Map, MapError, WORLD_RON, WorldLayout};
 
-pub use lua_scan::{LuaFacts, LuaFunction, STATE_SETTERS};
+pub use lua_scan::{LuaFacts, LuaFunction, MemberCall, STATE_SETTERS};
 pub use plugins::{plugin_error_diagnostics, plugin_init_diagnostic};
 
 use crate::check_lua_syntax;
@@ -144,6 +145,7 @@ pub fn validate_project(
             db
         })
         .collect();
+    let api = manifest.as_ref().map(|m| m.engine.api).unwrap_or(1);
     let mut lua = BTreeMap::new();
     for path in lua_files(files) {
         let Ok(source) = files.read_script(&path) else {
@@ -155,7 +157,7 @@ pub fn validate_project(
             plugins: &plugin_texts,
             locale: &locale,
         };
-        check_lua_file(&path, &source, &facts, &texts, &mut out.diagnostics);
+        check_lua_file(&path, &source, &facts, &texts, api, &mut out.diagnostics);
         lua.insert(path, facts);
     }
     let registered: BTreeSet<String> = if options.plugin_content.is_some() {
@@ -257,12 +259,14 @@ impl LuaTexts<'_> {
     }
 }
 
-/// Compiles one Lua file and reports tick listeners and undefined `"text:…"` literals.
+/// Compiles one Lua file and reports tick listeners, deprecated calls and undefined
+/// `"text:…"` literals.
 fn check_lua_file(
     path: &str,
     source: &str,
     facts: &LuaFacts,
     texts: &LuaTexts<'_>,
+    api: u32,
     out: &mut Diagnostics,
 ) {
     if let Err(err) = check_lua_syntax(path, source) {
@@ -284,6 +288,15 @@ fn check_lua_file(
                 .at(Some(SourceSpan::from_byte_range(source, range.clone())))
                 .with_label("runs 60 times per second")
                 .with_help("prefer `step`, `map_enter` or `time.wait` in a task; tick listeners cost frame time (§9.8)"),
+        );
+    }
+    for hit in crate::deprecation::deprecations_in(facts, source, api) {
+        out.push(
+            Diagnostic::warning("script::deprecated", hit.message())
+                .in_file(path)
+                .at(Some(hit.span))
+                .with_label("deprecated")
+                .with_help(format!("use `{}`", hit.replacement)),
         );
     }
     for (value, range) in facts.strings_with_prefix(pkrs_data::TEXT_PREFIX) {

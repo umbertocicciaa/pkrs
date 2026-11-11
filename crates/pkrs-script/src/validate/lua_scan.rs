@@ -50,6 +50,17 @@ pub struct LuaFunction {
     body: Range<usize>,
 }
 
+/// A `table.name(` call (not a method call `obj:name`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MemberCall {
+    /// Table or module name (`audio` in `audio.jingle(`).
+    pub table: String,
+    /// Field name (`jingle`).
+    pub name: String,
+    /// Byte range of [`name`](Self::name).
+    pub name_range: Range<usize>,
+}
+
 /// What [`LuaFacts::scan`] found in one file.
 #[derive(Clone, Debug, Default)]
 pub struct LuaFacts {
@@ -189,6 +200,45 @@ impl LuaFacts {
             }
         }
         false
+    }
+
+    /// `table.name(` calls, in source order. Definitions (`function table.name(`) are skipped.
+    #[must_use]
+    pub fn member_calls(&self) -> Vec<MemberCall> {
+        let mut out = Vec::new();
+        for (i, token) in self.tokens.iter().enumerate() {
+            let Tok::Name(table) = &token.tok else {
+                continue;
+            };
+            let prev = i.checked_sub(1).and_then(|p| self.tokens.get(p));
+            if prev.is_some_and(|p| p.is_name("function")) {
+                continue;
+            }
+            let Some(dot) = self.tokens.get(i + 1) else {
+                continue;
+            };
+            if !dot.is_punct('.') {
+                continue;
+            }
+            let Some(Token {
+                tok: Tok::Name(name),
+                range,
+            }) = self.tokens.get(i + 2)
+            else {
+                continue;
+            };
+            let Some(open) = self.tokens.get(i + 3) else {
+                continue;
+            };
+            if open.is_punct('(') {
+                out.push(MemberCall {
+                    table: table.clone(),
+                    name: name.clone(),
+                    name_range: range.clone(),
+                });
+            }
+        }
+        out
     }
 
     /// String literals starting with `prefix`, with their byte ranges.
@@ -416,6 +466,19 @@ data.register_move({ id = "zap" })
         );
         assert!(facts.registers_content);
         assert!(facts.strings.iter().any(|(s, _)| s == "zap"));
+    }
+
+    #[test]
+    fn member_calls_skip_comments_strings_and_definitions() {
+        let src = "audio.jingle('a')\n-- audio.jingle('no')\nlocal s = 'audio.jingle'\n\
+                   function audio.play()\nend\naudio.play_jingle('b')\nobj:jingle()\n";
+        let calls = LuaFacts::scan(src).member_calls();
+        let names: Vec<(&str, &str)> = calls
+            .iter()
+            .map(|c| (c.table.as_str(), c.name.as_str()))
+            .collect();
+        assert_eq!(names, [("audio", "jingle"), ("audio", "play_jingle")]);
+        assert_eq!(&src[calls[0].name_range.clone()], "jingle");
     }
 
     #[test]

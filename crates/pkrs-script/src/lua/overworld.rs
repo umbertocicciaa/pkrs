@@ -1,6 +1,6 @@
 //! The `world` module (§6.3, §9.4): custom terrain rules and field actions.
 //!
-//! - `world.register_terrain(name, rule, opts?)` (also `map.register_terrain`): `rule(ctx)`
+//! - `world.register_terrain(name, rule, opts?)` (deprecated alias `map.register_terrain`, API 1): `rule(ctx)`
 //!   runs when the player steps onto a tile whose `terrain=` is `name`, with
 //!   `ctx = { terrain, x, y, from = { x, y }, dir, field = { [state] = true } }`; returning
 //!   `false` or `"block"` blocks the step. Built-in terrains cannot be ruled. A second rule for

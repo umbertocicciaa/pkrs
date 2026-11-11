@@ -1,0 +1,11 @@
+// Wild creatures in the route's tall grass (the `encounters` layer of maps/route.tmx names
+// this table).
+EncounterTable(
+    id: "route_grass",
+    terrains: ["tall_grass"],
+    slots: [
+        (species: "leafkit", min_level: 2, max_level: 4, weight: 40),
+        (species: "puddlefin", min_level: 2, max_level: 4, weight: 40),
+        (species: "emberkit", min_level: 3, max_level: 4, weight: 20),
+    ],
+)

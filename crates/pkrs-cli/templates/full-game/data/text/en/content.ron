@@ -1,0 +1,11 @@
+// Names and descriptions of the content in data/ (docs/design.md §5.5). Add a folder such as
+// data/text/it/ and list it in `[locale] available` to translate the game.
+{
+    "species.leafkit": "Leafkit",
+    "species.emberkit": "Emberkit",
+    "species.puddlefin": "Puddlefin",
+    "items.potion": "Potion",
+    "items.potion_desc": "Restores 20 HP of one creature.",
+    "items.super_potion": "Super Potion",
+    "items.super_potion_desc": "Restores 50 HP of one creature.",
+}

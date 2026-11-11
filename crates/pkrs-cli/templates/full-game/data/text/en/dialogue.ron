@@ -1,0 +1,35 @@
+// Dialogue, signs and choices. Scripts and maps use them as `text:<key>`; `{name}` is filled
+// from the arguments a script passes (`ui.say("text:lab.got_starter", { name = … })`).
+{
+    "intro.welcome": "Today is the day! The professor is waiting for you in the lab.",
+
+    "town.sign": "Fernwick. Tall grass grows north of town; never go without a partner.",
+    "town.lab_sign": "Fernwick Creature Lab.",
+    "town.mom_go_to_lab": "Mom: The professor asked for you. The lab is the building with the red roof!",
+    "town.mom_potions": "Mom: Your very own partner! Take these Potions, just in case.",
+    "town.mom_take_care": "Mom: Take care out there, and come home for dinner.",
+    "town.fisher": "Fisher: The fish aren't biting. Have you met the creatures in the tall grass?",
+    "town.fisher_gift": "Fisher: You beat your rival? Here, take this Super Potion!",
+    "town.gate": "A voice calls: \"Wait! Wild creatures live in the tall grass. Get a partner from the lab first!\"",
+
+    "lab.professor_intro": "Professor: There you are! Pick a partner. Choose carefully!",
+    "lab.pick_leafkit": "Leafkit (grass)",
+    "lab.pick_emberkit": "Emberkit (fire)",
+    "lab.pick_puddlefin": "Puddlefin (water)",
+    "lab.confirm": "Professor: So you want {name}?",
+    "lab.professor_later": "Professor: Take your time and come back when you have decided.",
+    "lab.got_starter": "{name} joined your party!",
+    "lab.rival_pick": "Rival: Then I'll take {name}! See you on the route!",
+    "lab.professor_route": "Professor: Go north of town to the route and see how your partner fights!",
+    "lab.professor_after": "Professor: Your partner looks happy. Battle in the tall grass to grow stronger!",
+    "lab.rival_waiting": "Rival: Hurry up and choose! I want my partner too.",
+    "lab.aide": "Aide: Open the menu to see your party and bag, or to save your game.",
+
+    "route.sign": "Fernwick Route. Tall grass on both sides: wild creatures!",
+    "route.end_sign": "The road goes on beyond the trees... in the game you make next!",
+    "route.rival_challenge": "Rival: There you are! Let's see whose partner is stronger!",
+    "route.rival_lost": "Rival: You won? I'll train harder. See you around!",
+    "route.rival_won": "Rival: Ha! Come back when your partner is stronger.",
+    "route.rival_ready": "Rival: Ready for a rematch? Step forward!",
+    "route.rival_after": "Rival: Next time I'll win, you'll see.",
+}

@@ -2,7 +2,8 @@
 //!
 //! `game.flag(name)`, `game.set_flag(name, value = true)`, `game.var(name)`,
 //! `game.set_var(name, value)`, `game.give_item(id, count = 1)`, `game.bag()`, `game.money()`,
-//! and the text language: `game.language()`, `game.languages()`, `game.set_language(lang)`,
+//! the party: `game.give_creature(species, level = 5)` and `game.party()` (a list of
+//! `{ species, level }`), and the text language: `game.language()`, `game.languages()`, `game.set_language(lang)`,
 //! `game.text(value, args?)` (§5.5).
 
 use mlua::{Lua, Table, Value};
@@ -78,6 +79,35 @@ pub(super) fn install(lua: &Lua, env: &Table) -> mlua::Result<()> {
                 t.raw_set(item, count)?;
             }
             Ok(t)
+        })?,
+    )?;
+    game.raw_set(
+        "give_creature",
+        lua.create_function(|lua, (species, level): (Value, Value)| {
+            let species = check(lua, name("game.give_creature", "species id", &species))?;
+            let level = check(
+                lua,
+                opt_int("game.give_creature", "level", &level, 5, 1, 100),
+            )?;
+            let level = u8::try_from(level).unwrap_or(100);
+            let result = with_world(lua, "game.give_creature", |w| {
+                w.give_creature(&species, level)
+            })?;
+            check(lua, result.map_err(|e| format!("game.give_creature: {e}")))
+        })?,
+    )?;
+    game.raw_set(
+        "party",
+        lua.create_function(|lua, ()| {
+            let party = with_world(lua, "game.party", |w| w.party())?;
+            let list = lua.create_table()?;
+            for (i, creature) in party.into_iter().enumerate() {
+                let entry = lua.create_table()?;
+                entry.raw_set("species", creature.species)?;
+                entry.raw_set("level", creature.level)?;
+                list.raw_set(i + 1, entry)?;
+            }
+            Ok(list)
         })?,
     )?;
     game.raw_set(

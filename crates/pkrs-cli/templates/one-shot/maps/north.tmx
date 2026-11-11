@@ -1,22 +1,22 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<map version="1.10" tiledversion="1.10.2" orientation="orthogonal" renderorder="right-down" width="20" height="6" tilewidth="16" tileheight="16" infinite="0" nextlayerid="4" nextobjectid="2">
+<map version="1.10" tiledversion="1.10.2" orientation="orthogonal" renderorder="right-down" width="20" height="6" tilewidth="16" tileheight="16" infinite="0" nextlayerid="6" nextobjectid="4">
  <tileset firstgid="1" source="../tilesets/overworld.tsx"/>
  <layer id="1" name="ground" width="20" height="6">
   <data encoding="csv">
-3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,
-3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,
-3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,
-3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,
-3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,
-3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3
+4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
+4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
+1,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,1,
+1,1,1,1,1,1,1,1,1,3,3,3,3,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,3,3,3,3,3,3,1,1,1,1,1,1,
+1,1,1,1,1,3,3,3,3,1,1,1,1,1,1,1,1,1,1,1
 </data>
  </layer>
  <layer id="2" name="ground2" width="20" height="6">
   <data encoding="csv">
-5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,
-5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,
-5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,
+5,0,7,0,0,0,0,0,0,0,0,0,0,0,0,0,7,0,0,5,
 5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,
 5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5
 </data>
@@ -32,11 +32,23 @@
 </data>
  </layer>
  <objectgroup id="4" name="objects">
-  <object id="1" name="default" type="spawn" x="88" y="24">
+  <object id="1" name="default" type="spawn" x="88" y="72">
    <properties>
-    <property name="facing" value="down"/>
+    <property name="facing" value="up"/>
    </properties>
    <point/>
+  </object>
+  <object id="2" name="keeper" type="npc" x="192" y="48" width="16" height="16">
+   <properties>
+    <property name="facing" value="down"/>
+    <property name="sprite" value="keeper"/>
+    <property name="script" value="maps/north.lua:keeper"/>
+   </properties>
+  </object>
+  <object id="3" name="cliff_sign" type="sign" x="32" y="32" width="16" height="16">
+   <properties>
+    <property name="text" value="The northern cliff. The keeper watches the sea from here every evening."/>
+   </properties>
   </object>
  </objectgroup>
 </map>

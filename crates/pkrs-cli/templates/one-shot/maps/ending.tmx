@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<map version="1.10" tiledversion="1.10.2" orientation="orthogonal" renderorder="right-down" width="15" height="10" tilewidth="16" tileheight="16" infinite="0" nextlayerid="6" nextobjectid="3">
+ <tileset firstgid="1" source="../tilesets/overworld.tsx"/>
+ <layer id="1" name="ground" width="15" height="10">
+  <data encoding="csv">
+16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,
+16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,
+16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,
+16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,
+4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
+4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+</data>
+ </layer>
+ <layer id="2" name="ground2" width="15" height="10">
+  <data encoding="csv">
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+5,0,0,0,0,0,0,0,0,0,0,0,0,0,5,
+5,0,0,7,0,0,0,0,0,0,0,7,0,0,5,
+5,0,0,0,0,0,0,0,0,0,0,0,0,0,5,
+5,5,5,5,5,5,5,5,5,5,5,5,5,5,5
+</data>
+ </layer>
+ <layer id="3" name="overhead" width="15" height="10">
+  <data encoding="csv">
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+</data>
+ </layer>
+ <objectgroup id="4" name="objects">
+  <object id="1" name="default" type="spawn" x="120" y="104">
+   <properties>
+    <property name="facing" value="up"/>
+   </properties>
+   <point/>
+  </object>
+  <object id="2" name="keeper" type="npc" x="128" y="96" width="16" height="16">
+   <properties>
+    <property name="facing" value="up"/>
+    <property name="sprite" value="keeper"/>
+    <property name="script" value="maps/ending.lua:keeper"/>
+   </properties>
+  </object>
+ </objectgroup>
+</map>

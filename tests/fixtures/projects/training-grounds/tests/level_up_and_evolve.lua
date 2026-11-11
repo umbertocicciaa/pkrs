@@ -36,7 +36,8 @@ local function confirm_until(pred, what)
 end
 
 expect_state("Overworld")
-expect_eq(#party(), 0, "the party loads with the first battle")
+expect_eq(#party(), 1, "the party is player.ron's from the start")
+expect_eq(party()[1].level, 5)
 
 -- First battle: Sproutling (level 5, 125 exp) against the coach's level 5 Pebblit.
 walk("up", 2)

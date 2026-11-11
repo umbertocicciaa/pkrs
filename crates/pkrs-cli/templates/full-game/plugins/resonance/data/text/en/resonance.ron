@@ -1,0 +1,7 @@
+// The plugin's own texts (docs/design.md §5.5): a plugin's data/text/<lang>/ tables are
+// looked up after the game's, so the game can override any of them.
+{
+    "resonance.menu": "RESONATE",
+    "resonance.start": "{name} is resonating!",
+    "resonance.end": "{name} stopped resonating.",
+}

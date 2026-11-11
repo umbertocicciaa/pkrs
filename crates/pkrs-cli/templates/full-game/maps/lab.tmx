@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<map version="1.10" tiledversion="1.10.2" orientation="orthogonal" renderorder="right-down" width="10" height="8" tilewidth="16" tileheight="16" infinite="0" nextlayerid="6" nextobjectid="6">
+ <tileset firstgid="1" source="../tilesets/overworld.tsx"/>
+ <layer id="1" name="ground" width="10" height="8">
+  <data encoding="csv">
+13,13,13,13,13,13,13,13,13,13,
+13,14,14,12,12,12,12,14,14,13,
+13,12,12,12,12,12,12,12,12,13,
+13,12,12,12,12,12,12,12,12,13,
+13,12,12,15,15,15,15,12,12,13,
+13,12,12,15,15,15,15,12,12,13,
+13,12,12,12,12,12,12,12,12,13,
+13,13,13,13,12,12,13,13,13,13
+</data>
+ </layer>
+ <layer id="2" name="ground2" width="10" height="8">
+  <data encoding="csv">
+0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0
+</data>
+ </layer>
+ <layer id="3" name="overhead" width="10" height="8">
+  <data encoding="csv">
+0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0
+</data>
+ </layer>
+ <objectgroup id="4" name="objects">
+  <object id="1" name="default" type="spawn" x="72" y="104">
+   <properties>
+    <property name="facing" value="up"/>
+   </properties>
+   <point/>
+  </object>
+  <object id="2" name="to_town" type="warp" x="64" y="112" width="32" height="16">
+   <properties>
+    <property name="to_map" value="town"/>
+    <property name="to_x" type="int" value="4"/>
+    <property name="to_y" type="int" value="5"/>
+    <property name="facing" value="down"/>
+    <property name="transition" value="door"/>
+   </properties>
+  </object>
+  <object id="3" name="professor" type="npc" x="64" y="32" width="16" height="16">
+   <properties>
+    <property name="facing" value="down"/>
+    <property name="sprite" value="professor"/>
+    <property name="script" value="maps/lab.lua:professor"/>
+   </properties>
+  </object>
+  <object id="4" name="rival" type="npc" x="96" y="48" width="16" height="16">
+   <properties>
+    <property name="facing" value="left"/>
+    <property name="sprite" value="rival"/>
+    <property name="script" value="maps/lab.lua:rival"/>
+   </properties>
+  </object>
+  <object id="5" name="aide" type="npc" x="16" y="64" width="16" height="16">
+   <properties>
+    <property name="facing" value="right"/>
+    <property name="sprite" value="aide"/>
+    <property name="script" value="maps/lab.lua:aide"/>
+   </properties>
+  </object>
+ </objectgroup>
+</map>

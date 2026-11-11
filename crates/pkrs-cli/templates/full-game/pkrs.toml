@@ -1,0 +1,34 @@
+# Project manifest (docs/design.md §2.2). `engine.version` is pinned to the pkrs CLI that
+# created this project; `pkrs upgrade` is the only command that changes it.
+
+[game]
+name    = "{{name}}"
+id      = "{{id}}"
+version = "0.1.0"
+authors = []
+
+[engine]
+version = "{{engine_version}}"
+api     = 1
+
+[display]
+width  = 240
+height = 160
+scale  = 3
+
+[start]
+map      = "town"
+position = [16, 5]
+facing   = "down"
+script   = "scripts/main.lua"
+
+[features]
+battles = true
+party   = true
+
+[plugins]
+enabled = ["resonance"]   # plugins/resonance: an extra battle action (docs/design.md §9.5)
+
+[locale]
+default   = "en"
+available = ["en"]

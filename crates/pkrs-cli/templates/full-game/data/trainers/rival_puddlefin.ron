@@ -1,0 +1,7 @@
+// The rival after picking puddlefin in the lab (scripts/maps/lab.lua); fought on the route.
+Trainer(
+    id: "rival_puddlefin",
+    name: "Rival",
+    party: [(species: "puddlefin", level: 5)],
+    ai_profile: "basic",
+)

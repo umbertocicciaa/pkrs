@@ -1,0 +1,6 @@
+// Items (docs/design.md §8.1). `potion` and `super_potion` heal in the field and in battle
+// (built-in effects); `name` and `description` are text keys.
+[
+    Item(id: "potion", name: "text:items.potion", description: "text:items.potion_desc", price: 300),
+    Item(id: "super_potion", name: "text:items.super_potion", description: "text:items.super_potion_desc", price: 700),
+]

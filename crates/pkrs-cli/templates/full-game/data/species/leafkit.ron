@@ -1,0 +1,17 @@
+// A starter (docs/design.md §8.1). `name` is a text key (data/text/en/content.ron).
+Species(
+    id: "leafkit",
+    name: "text:species.leafkit",
+    types: ["grass"],
+    base_stats: (hp: 50, atk: 46, def: 52, spa: 55, spd: 54, spe: 40),
+    abilities: [],
+    learnset: [
+        (level: 1, move: "tackle"),
+        (level: 1, move: "glare"),
+        (level: 5, move: "vine_whip"),
+        (level: 9, move: "sap"),
+    ],
+    exp_yield: 64,
+    growth: MediumFast,
+    catch_rate: 45,
+)

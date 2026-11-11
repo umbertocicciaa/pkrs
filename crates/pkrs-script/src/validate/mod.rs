@@ -34,7 +34,7 @@ use pkrs_core::{Diagnostic, Diagnostics, ProjectManifest, Severity, SourceSpan, 
 use pkrs_data::validate::{
     RefContext, TextLocale, check_game_data, check_text_ref, data_error_diagnostic, data_error_file,
 };
-use pkrs_data::{ContentDb, DATA_ROOT, DataFiles, GameData, GameDataBuilder, LoadOptions};
+use pkrs_data::{ContentDb, DATA_ROOT, DataFiles, GameDataBuilder, LoadOptions, TextDb};
 use pkrs_world::{Map, MapError, WORLD_RON, WorldLayout};
 
 pub use lua_scan::{LuaFacts, LuaFunction, STATE_SETTERS};
@@ -130,14 +130,32 @@ pub fn validate_project(
             .push(data_error_diagnostic(err, source.as_deref()));
     }
 
-    // 4. Lua.
+    // 4. Lua. Text keys may also come from the enabled plugins' own tables, which the
+    // runtime layers after the game's (§5.5).
+    let plugin_texts: Vec<TextDb> = plugin_ids
+        .iter()
+        .map(|id| {
+            let mut db = TextDb::new();
+            for err in db.load_dir(&data_files, &format!("{PLUGINS_DIR}/{id}/data/text")) {
+                let source = data_error_file(&err).and_then(|f| files.read_script(f).ok());
+                out.diagnostics
+                    .push(data_error_diagnostic(&err, source.as_deref()));
+            }
+            db
+        })
+        .collect();
     let mut lua = BTreeMap::new();
     for path in lua_files(files) {
         let Ok(source) = files.read_script(&path) else {
             continue;
         };
         let facts = LuaFacts::scan(&source);
-        check_lua_file(&path, &source, &facts, &data, &locale, &mut out.diagnostics);
+        let texts = LuaTexts {
+            game: data.text(),
+            plugins: &plugin_texts,
+            locale: &locale,
+        };
+        check_lua_file(&path, &source, &facts, &texts, &mut out.diagnostics);
         lua.insert(path, facts);
     }
     let registered: BTreeSet<String> = if options.plugin_content.is_some() {
@@ -219,13 +237,32 @@ fn content_error_diagnostic(err: &ContentError, files: &dyn ScriptFiles) -> Diag
     d
 }
 
+/// The text tables a Lua `"text:…"` literal may use: the game's, then each enabled plugin's.
+struct LuaTexts<'a> {
+    game: &'a TextDb,
+    plugins: &'a [TextDb],
+    locale: &'a TextLocale<'a>,
+}
+
+impl LuaTexts<'_> {
+    /// `true` when a plugin table defines `value`'s key in the default language.
+    fn plugin_defines(&self, value: &str) -> bool {
+        value
+            .strip_prefix(pkrs_data::TEXT_PREFIX)
+            .is_some_and(|key| {
+                self.plugins
+                    .iter()
+                    .any(|db| db.contains(self.locale.default, key))
+            })
+    }
+}
+
 /// Compiles one Lua file and reports tick listeners and undefined `"text:…"` literals.
 fn check_lua_file(
     path: &str,
     source: &str,
     facts: &LuaFacts,
-    data: &GameData,
-    locale: &TextLocale<'_>,
+    texts: &LuaTexts<'_>,
     out: &mut Diagnostics,
 ) {
     if let Err(err) = check_lua_syntax(path, source) {
@@ -250,7 +287,10 @@ fn check_lua_file(
         );
     }
     for (value, range) in facts.strings_with_prefix(pkrs_data::TEXT_PREFIX) {
-        for d in check_text_ref(data.text(), locale, value) {
+        for d in check_text_ref(texts.game, texts.locale, value) {
+            if d.code == "text::missing-key" && texts.plugin_defines(value) {
+                continue;
+            }
             // A literal may not be shown as text, so a Lua literal is only a warning.
             let d = if d.code == "text::missing-key" {
                 Diagnostic {

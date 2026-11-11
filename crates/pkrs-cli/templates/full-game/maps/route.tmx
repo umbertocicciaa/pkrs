@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<map version="1.10" tiledversion="1.10.2" orientation="orthogonal" renderorder="right-down" width="20" height="16" tilewidth="16" tileheight="16" infinite="0" nextlayerid="6" nextobjectid="11">
+ <tileset firstgid="1" source="../tilesets/overworld.tsx"/>
+ <layer id="1" name="ground" width="20" height="16">
+  <data encoding="csv">
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,3,3,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,3,3,1,1,1,1,1,1,1,1,1,
+1,1,2,2,2,2,1,1,1,3,3,1,1,1,2,2,2,2,1,1,
+1,1,2,2,2,2,1,1,1,3,3,1,1,1,2,2,2,2,1,1,
+1,1,2,2,2,2,1,1,1,3,3,1,1,1,2,2,2,2,1,1,
+1,1,1,1,1,1,1,1,1,3,3,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,3,3,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,3,3,1,1,1,1,1,1,1,1,1,
+1,2,2,2,2,2,2,1,1,3,3,1,1,2,2,2,2,2,2,1,
+1,2,2,2,2,2,2,1,1,3,3,1,1,2,2,2,2,2,2,1,
+1,2,2,2,2,2,2,1,1,3,3,1,1,2,2,2,2,2,2,1,
+1,1,1,1,1,1,1,1,1,3,3,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,3,3,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,3,3,1,1,1,1,1,1,1,1,1,
+1,1,1,1,1,1,1,1,1,3,3,1,1,1,1,1,1,1,1,1
+</data>
+ </layer>
+ <layer id="2" name="ground2" width="20" height="16">
+  <data encoding="csv">
+5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,
+5,7,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,7,0,5,
+5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,
+5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,
+5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,
+5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,
+5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,
+5,0,0,6,0,0,0,0,0,0,0,0,0,0,0,0,6,0,0,5,
+5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,
+5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,
+5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,
+5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,
+5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,
+5,0,0,7,0,0,0,0,0,0,0,0,0,0,0,0,7,0,0,5,
+5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,
+5,5,5,5,5,5,5,5,5,0,0,5,5,5,5,5,5,5,5,5
+</data>
+ </layer>
+ <layer id="3" name="overhead" width="20" height="16">
+  <data encoding="csv">
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+</data>
+ </layer>
+ <objectgroup id="4" name="objects">
+  <object id="1" name="default" type="spawn" x="152" y="232">
+   <properties>
+    <property name="facing" value="up"/>
+   </properties>
+   <point/>
+  </object>
+  <object id="2" name="rival" type="npc" x="160" y="32" width="16" height="16">
+   <properties>
+    <property name="facing" value="down"/>
+    <property name="sprite" value="rival"/>
+    <property name="script" value="maps/route.lua:rival"/>
+   </properties>
+  </object>
+  <object id="3" name="rival_challenge" type="trigger" x="144" y="64" width="32" height="16">
+   <properties>
+    <property name="on_enter" value="maps/route.lua:rival_challenge"/>
+   </properties>
+  </object>
+  <object id="4" name="route_sign" type="sign" x="176" y="224" width="16" height="16">
+   <properties>
+    <property name="text" value="text:route.sign"/>
+   </properties>
+  </object>
+  <object id="5" name="end_sign" type="sign" x="128" y="16" width="16" height="16">
+   <properties>
+    <property name="text" value="text:route.end_sign"/>
+   </properties>
+  </object>
+  <object id="6" name="route_potion" type="item" x="288" y="112" width="16" height="16">
+   <properties>
+    <property name="item" value="potion"/>
+    <property name="count" type="int" value="1"/>
+   </properties>
+  </object>
+ </objectgroup>
+ <objectgroup id="5" name="encounters">
+  <object id="7" name="west_grass_north" x="32" y="48" width="64" height="48">
+   <properties>
+    <property name="table" value="route_grass"/>
+    <property name="rate" type="int" value="20"/>
+   </properties>
+  </object>
+  <object id="8" name="east_grass_north" x="224" y="48" width="64" height="48">
+   <properties>
+    <property name="table" value="route_grass"/>
+    <property name="rate" type="int" value="20"/>
+   </properties>
+  </object>
+  <object id="9" name="west_grass_south" x="16" y="144" width="96" height="48">
+   <properties>
+    <property name="table" value="route_grass"/>
+    <property name="rate" type="int" value="20"/>
+   </properties>
+  </object>
+  <object id="10" name="east_grass_south" x="208" y="144" width="96" height="48">
+   <properties>
+    <property name="table" value="route_grass"/>
+    <property name="rate" type="int" value="20"/>
+   </properties>
+  </object>
+ </objectgroup>
+</map>

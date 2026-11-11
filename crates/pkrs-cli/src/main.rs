@@ -35,11 +35,12 @@ struct Cli {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 enum TemplateArg {
-    /// One small map and the player; no battles.
+    /// A short story with two NPCs, choices and an ending; no battles.
     OneShot,
     /// Starts straight in a trainer battle; edit `data/` to try creatures and moves.
     Battle,
-    /// Two maps, battles and a plugin (not available yet).
+    /// A town, a lab and a route: starter selection, wild creatures, a rival battle, the
+    /// field menu and an example plugin.
     FullGame,
 }
 

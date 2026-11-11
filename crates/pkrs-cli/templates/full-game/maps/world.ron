@@ -1,0 +1,10 @@
+// Map connections (docs/design.md §6.4): walking off the north edge of the town
+// continues on the south edge of the route, and back.
+{
+    town: (
+        north: (map: "route", offset: (0, 0)),
+    ),
+    route: (
+        south: (map: "town", offset: (0, 0)),
+    ),
+}

@@ -124,7 +124,7 @@ fn new_scaffolds_the_battle_template() {
 }
 
 #[test]
-fn new_rejects_bad_names_and_unavailable_templates() {
+fn new_rejects_bad_names() {
     let root = temp_dir("new-bad");
     let bad = pkrs()
         .args(["new", "../escape", "--path"])
@@ -132,13 +132,48 @@ fn new_rejects_bad_names_and_unavailable_templates() {
         .output()
         .unwrap();
     assert!(!bad.status.success());
-    let full = pkrs()
-        .args(["new", "big", "--template", "full-game", "--path"])
-        .arg(root.join("big"))
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn new_scaffolds_the_full_game_template() {
+    let root = temp_dir("new-full");
+    let dest = root.join("big");
+    let out = pkrs()
+        .args(["new", "Big Adventure", "--template", "full-game", "--path"])
+        .arg(&dest)
         .output()
         .unwrap();
-    assert!(!full.status.success());
-    assert!(String::from_utf8_lossy(&full.stderr).contains("not available yet"));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    for file in [
+        "pkrs.toml",
+        ".gitignore",
+        "maps/town.tmx",
+        "maps/lab.tmx",
+        "maps/route.tmx",
+        "scripts/maps/lab.lua",
+        "data/trainers/player.ron",
+        "plugins/resonance/plugin.toml",
+        "tests/rival_battle.lua",
+    ] {
+        assert!(dest.join(file).is_file(), "missing {file}");
+    }
+    let manifest = std::fs::read_to_string(dest.join("pkrs.toml")).unwrap();
+    assert!(!manifest.contains("{{"), "every placeholder is rendered");
+    assert_check_passes(&dest);
+    // `--plugins` also runs the example plugin and prints its hooks.
+    let plugins = pkrs()
+        .args(["check", "--plugins", "--project"])
+        .arg(&dest)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&plugins.stdout);
+    assert!(plugins.status.success(), "{stdout}");
+    assert!(stdout.contains("resonance"), "{stdout}");
     std::fs::remove_dir_all(&root).unwrap();
 }
 

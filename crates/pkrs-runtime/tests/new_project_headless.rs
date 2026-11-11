@@ -239,6 +239,53 @@ fn battle_template_opens_in_a_battle_and_its_scenario_passes() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// Scaffolds `template` and runs every `tests/*.lua` scenario it ships; returns the names.
+fn template_scenarios_pass(template: Template, tag: &str) -> Vec<String> {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("pkrs-{tag}-{}-{nanos}", std::process::id()));
+    scaffold(template, &dir, &TemplateVars::for_project(tag).unwrap()).unwrap();
+    let project = Project::open(&ProjectOptions {
+        dir: dir.clone(),
+        ..ProjectOptions::default()
+    })
+    .unwrap();
+    let reports = run_project_scenarios(&project, &dir, &ScenarioOptions::default()).unwrap();
+    let failures: Vec<String> = reports
+        .iter()
+        .filter(|r| !r.passed())
+        .map(ToString::to_string)
+        .collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    std::fs::remove_dir_all(&dir).unwrap();
+    reports.iter().map(|r| r.name.clone()).collect()
+}
+
+#[test]
+fn one_shot_template_story_plays_to_the_ending() {
+    let ran = template_scenarios_pass(Template::OneShot, "one-shot");
+    assert_eq!(ran, ["tests/story.lua"]);
+}
+
+/// Acceptance (#68): `pkrs new --template full-game` plays end to end: starter selection,
+/// the gate, the field menu, a wild encounter and the rival battle.
+#[test]
+fn full_game_template_plays_end_to_end() {
+    let ran = template_scenarios_pass(Template::FullGame, "full-game");
+    assert_eq!(
+        ran,
+        [
+            "tests/gate.lua",
+            "tests/menu.lua",
+            "tests/rival_battle.lua",
+            "tests/starter.lua",
+            "tests/wild_encounter.lua",
+        ]
+    );
+}
+
 #[test]
 fn npcs_use_their_sprite_property_and_fall_back_to_the_marker() {
     let nanos = std::time::SystemTime::now()

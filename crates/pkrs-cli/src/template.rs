@@ -16,15 +16,18 @@ use include_dir::{Dir, DirEntry, include_dir};
 
 static ONE_SHOT: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/templates/one-shot");
 static BATTLE: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/templates/battle");
+static FULL_GAME: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/templates/full-game");
 
 /// Available templates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Template {
-    /// One small map and the player; no battle data (§2.4).
+    /// A short story: village, two NPCs, a cutscene with choices and an ending; no battle
+    /// data (§2.4).
     OneShot,
     /// One arena whose game starts straight in a trainer battle, with editable battle data.
     Battle,
-    /// Two maps, battles and a plugin (§2.4; ships with M8).
+    /// Two connected maps and a lab interior, starter selection, three species, eight moves,
+    /// items, wild encounters, a rival battle, the field menu and an example plugin (§2.4).
     FullGame,
 }
 
@@ -39,11 +42,11 @@ impl Template {
         }
     }
 
-    fn dir(self) -> Option<&'static Dir<'static>> {
+    fn dir(self) -> &'static Dir<'static> {
         match self {
-            Self::OneShot => Some(&ONE_SHOT),
-            Self::Battle => Some(&BATTLE),
-            Self::FullGame => None,
+            Self::OneShot => &ONE_SHOT,
+            Self::Battle => &BATTLE,
+            Self::FullGame => &FULL_GAME,
         }
     }
 }
@@ -64,9 +67,6 @@ pub enum TemplateError {
         "invalid plugin name `{0}`: use 1-64 ASCII letters, digits, spaces, `_` or `-`, starting with a letter"
     )]
     InvalidPluginName(String),
-    /// The template is not shipped yet.
-    #[error("the `{0}` template is not available yet (it ships with the sample projects, M8)")]
-    Unavailable(&'static str),
     /// Writing a file failed.
     #[error("cannot write `{path}`: {source}")]
     Io {
@@ -169,10 +169,7 @@ pub fn scaffold(
     dest: &Path,
     vars: &TemplateVars,
 ) -> Result<Vec<PathBuf>, TemplateError> {
-    let dir = template
-        .dir()
-        .ok_or(TemplateError::Unavailable(template.name()))?;
-    write_tree(dir, dest, |text| render(text, vars))
+    write_tree(template.dir(), dest, |text| render(text, vars))
 }
 
 /// Writes every file of `dir` into `dest` (created if missing; must be empty if it exists),
@@ -291,27 +288,186 @@ mod tests {
         assert!(manifest.engine.accepts(&engine));
     }
 
+    /// Every file each template must ship (§2.4): the file manifest the templates are
+    /// checked against.
+    const ONE_SHOT_FILES: &[&str] = &[
+        "pkrs.toml",
+        "_gitignore",
+        "README.md",
+        "LICENSES.md",
+        "maps/LICENSES.md",
+        "maps/start.tmx",
+        "maps/north.tmx",
+        "maps/dest.tmx",
+        "maps/ending.tmx",
+        "maps/world.ron",
+        "tilesets/LICENSES.md",
+        "tilesets/overworld.tsx",
+        "tilesets/overworld.png",
+        "sprites/LICENSES.md",
+        "sprites/player.png",
+        "sprites/guide.png",
+        "sprites/keeper.png",
+        "scripts/maps/start.lua",
+        "scripts/maps/north.lua",
+        "scripts/maps/ending.lua",
+        "tests/story.lua",
+    ];
+
+    const BATTLE_FILES: &[&str] = &[
+        "pkrs.toml",
+        "_gitignore",
+        "README.md",
+        "LICENSES.md",
+        "maps/LICENSES.md",
+        "maps/arena.tmx",
+        "tilesets/LICENSES.md",
+        "tilesets/overworld.tsx",
+        "tilesets/overworld.png",
+        "sprites/LICENSES.md",
+        "sprites/player.png",
+        "sprites/rival.png",
+        "scripts/main.lua",
+        "scripts/arena_battle.lua",
+        "scripts/maps/arena.lua",
+        "data/types.ron",
+        "data/moves/moves.ron",
+        "data/species/emberkit.ron",
+        "data/species/leafkit.ron",
+        "data/species/puddlefin.ron",
+        "data/trainers/player.ron",
+        "data/trainers/rival.ron",
+        "tests/battle.lua",
+    ];
+
+    const FULL_GAME_FILES: &[&str] = &[
+        "pkrs.toml",
+        "_gitignore",
+        "README.md",
+        "LICENSES.md",
+        "maps/LICENSES.md",
+        "maps/town.tmx",
+        "maps/lab.tmx",
+        "maps/route.tmx",
+        "maps/world.ron",
+        "tilesets/LICENSES.md",
+        "tilesets/overworld.tsx",
+        "tilesets/overworld.png",
+        "sprites/LICENSES.md",
+        "sprites/player.png",
+        "sprites/rival.png",
+        "sprites/professor.png",
+        "sprites/mom.png",
+        "sprites/fisher.png",
+        "sprites/aide.png",
+        "scripts/main.lua",
+        "scripts/maps/town.lua",
+        "scripts/maps/lab.lua",
+        "scripts/maps/route.lua",
+        "data/types.ron",
+        "data/moves/moves.ron",
+        "data/species/leafkit.ron",
+        "data/species/emberkit.ron",
+        "data/species/puddlefin.ron",
+        "data/items/items.ron",
+        "data/encounters/route.ron",
+        "data/trainers/player.ron",
+        "data/trainers/rival_leafkit.ron",
+        "data/trainers/rival_emberkit.ron",
+        "data/trainers/rival_puddlefin.ron",
+        "data/text/en/content.ron",
+        "data/text/en/dialogue.ron",
+        "plugins/resonance/plugin.toml",
+        "plugins/resonance/init.lua",
+        "plugins/resonance/README.md",
+        "plugins/resonance/data/text/en/resonance.ron",
+        "plugins/resonance/assets/aura/LICENSES.md",
+        "plugins/resonance/assets/aura/glow.png",
+        "tests/starter.lua",
+        "tests/rival_battle.lua",
+        "tests/wild_encounter.lua",
+        "tests/menu.lua",
+        "tests/gate.lua",
+    ];
+
+    fn all_files(dir: &'static Dir<'static>) -> Vec<String> {
+        let mut files = Vec::new();
+        collect(dir, &mut files);
+        let mut paths: Vec<String> = files
+            .iter()
+            .map(|f| f.path().to_string_lossy().replace('\\', "/"))
+            .collect();
+        paths.sort();
+        paths
+    }
+
     #[test]
-    fn template_has_map_tileset_player_and_licenses() {
-        for path in [
-            "pkrs.toml",
-            "_gitignore",
-            "LICENSES.md",
-            "maps/start.tmx",
-            "maps/dest.tmx",
-            "maps/north.tmx",
-            "maps/world.ron",
-            "tilesets/overworld.tsx",
-            "tilesets/overworld.png",
-            "sprites/player.png",
-        ] {
-            assert!(ONE_SHOT.get_file(path).is_some(), "{path}");
+    fn templates_ship_exactly_their_file_manifest() {
+        for template in [Template::OneShot, Template::Battle, Template::FullGame] {
+            let expected: &[&str] = match template {
+                Template::OneShot => ONE_SHOT_FILES,
+                Template::Battle => BATTLE_FILES,
+                Template::FullGame => FULL_GAME_FILES,
+            };
+            let mut expected: Vec<String> = expected.iter().map(|s| (*s).to_owned()).collect();
+            expected.sort();
+            assert_eq!(
+                all_files(template.dir()),
+                expected,
+                "{}: the file manifest is out of date",
+                template.name()
+            );
+            let gitignore = template
+                .dir()
+                .get_file("_gitignore")
+                .and_then(|f| f.contents_utf8())
+                .unwrap();
+            assert!(gitignore.lines().any(|l| l == "saves/"));
         }
-        let gitignore = ONE_SHOT
-            .get_file("_gitignore")
+    }
+
+    /// §1.3: every asset folder records the license of each of its files.
+    #[test]
+    fn every_asset_is_listed_in_its_folders_licenses() {
+        for template in [Template::OneShot, Template::Battle, Template::FullGame] {
+            let files = all_files(template.dir());
+            let assets = files.iter().filter(|f| {
+                f.starts_with("sprites/")
+                    || f.starts_with("tilesets/")
+                    || f.starts_with("maps/")
+                    || (f.starts_with("plugins/") && f.contains("/assets/"))
+            });
+            for asset in assets {
+                let (folder, name) = asset.rsplit_once('/').unwrap();
+                if name == "LICENSES.md" {
+                    continue;
+                }
+                let licenses = template
+                    .dir()
+                    .get_file(format!("{folder}/LICENSES.md"))
+                    .and_then(|f| f.contents_utf8())
+                    .unwrap_or_else(|| panic!("{}: {folder}/LICENSES.md", template.name()));
+                assert!(
+                    licenses.contains(&format!("`{name}`")),
+                    "{}: {asset} is not listed in {folder}/LICENSES.md",
+                    template.name()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn full_game_manifest_enables_battles_party_and_the_plugin() {
+        let vars = TemplateVars::for_project("Big Adventure").unwrap();
+        let src = FULL_GAME
+            .get_file("pkrs.toml")
             .and_then(|f| f.contents_utf8())
             .unwrap();
-        assert!(gitignore.lines().any(|l| l == "saves/"));
+        let manifest = pkrs_core::ProjectManifest::from_toml_str(&render(src, &vars)).unwrap();
+        assert_eq!(manifest.start.map, "town");
+        assert!(manifest.features.battles && manifest.features.party);
+        assert_eq!(manifest.plugins.enabled, ["resonance"]);
+        assert_eq!(manifest.start.script.as_deref(), Some("scripts/main.lua"));
     }
 
     #[test]
@@ -324,35 +480,5 @@ mod tests {
         let manifest = pkrs_core::ProjectManifest::from_toml_str(&render(src, &vars)).unwrap();
         assert_eq!(manifest.start.map, "arena");
         assert!(manifest.features.battles);
-        for path in [
-            "_gitignore",
-            "LICENSES.md",
-            "README.md",
-            "maps/arena.tmx",
-            "tilesets/overworld.tsx",
-            "tilesets/overworld.png",
-            "sprites/player.png",
-            "sprites/rival.png",
-            "scripts/main.lua",
-            "scripts/arena_battle.lua",
-            "scripts/maps/arena.lua",
-            "data/types.ron",
-            "data/moves/moves.ron",
-            "data/trainers/player.ron",
-            "data/trainers/rival.ron",
-            "tests/battle.lua",
-        ] {
-            assert!(BATTLE.get_file(path).is_some(), "{path}");
-        }
-    }
-
-    #[test]
-    fn full_game_is_not_available_yet() {
-        let vars = TemplateVars::for_project("x").unwrap();
-        let dest = std::env::temp_dir().join("pkrs-template-unavailable");
-        assert!(matches!(
-            scaffold(Template::FullGame, &dest, &vars),
-            Err(TemplateError::Unavailable("full-game"))
-        ));
     }
 }

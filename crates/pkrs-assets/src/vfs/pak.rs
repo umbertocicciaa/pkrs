@@ -141,10 +141,14 @@ fn archive_table(
         let entry = archive
             .by_index_raw(i)
             .map_err(|e| PakError::Archive(e.to_string()))?;
-        if entry.is_dir() || entry.name() == PAK_INDEX {
+        let name = entry
+            .name()
+            .map_err(|e| PakError::Archive(e.to_string()))?
+            .into_owned();
+        if entry.is_dir() || name == PAK_INDEX {
             continue;
         }
-        table.insert(entry.name().to_owned(), (entry.size(), entry.crc32()));
+        table.insert(name, (entry.size(), entry.crc32()));
     }
     Ok(table)
 }
@@ -553,7 +557,7 @@ mod tests {
         let mut out = ZipWriter::new(Cursor::new(Vec::new()));
         for i in 0..archive.len() {
             let mut entry = archive.by_index(i).unwrap();
-            let name = entry.name().to_owned();
+            let name = entry.name().unwrap().into_owned();
             let mut data = Vec::new();
             entry.read_to_end(&mut data).unwrap();
             if let Some(data) = edit(&name, data) {

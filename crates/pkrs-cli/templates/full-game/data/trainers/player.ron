@@ -1,0 +1,8 @@
+// The player. The party starts empty: the professor's starter joins it with
+// `game.give_creature` (scripts/maps/lab.lua).
+Trainer(
+    id: "player",
+    name: "Player",
+    party: [],
+    ai_profile: "basic",
+)

@@ -20,8 +20,8 @@ use pkrs_platform::{
 };
 use pkrs_render::{CameraTarget, Rect, Renderer, TextureHandle};
 use pkrs_script::{
-    BattleRequest, CameraCommand, CameraTarget as ScriptCameraTarget, LuaScriptHost, ScriptValue,
-    TaskId, battle_result_value,
+    BattleRequest, CameraCommand, CameraTarget as ScriptCameraTarget, LuaScriptHost, PartyCreature,
+    ScriptValue, TaskId, battle_result_value,
 };
 use pkrs_world::{
     GridStepper, LinkCrossing, Map, MapImporter, MovementConfig, StepEvent, TerrainQuery,
@@ -609,6 +609,7 @@ impl ProjectHost {
             scripts.world().get_mut().localizer = host.localizer.clone();
         }
         host.bootstrap_world_layout()?;
+        host.init_script_party();
         if let Some(scripts) = host.scripts.as_mut() {
             match boot {
                 ProjectBoot::Immediate => {
@@ -1329,7 +1330,85 @@ impl ProjectHost {
                 tracing::warn!(target: "script", map = %warp.map, "map.warp ignored: a warp is already running");
             }
         }
+        self.sync_script_party();
         self.start_requested_battle();
+    }
+
+    /// Gives scripts the party and the species they may hand out (`game.party()`,
+    /// `game.give_creature`) before `scripts/main.lua` and `game_start` run. With
+    /// `features.battles` off there is no species data and no party.
+    fn init_script_party(&mut self) {
+        if self.scripts.is_none() || !self.project.manifest.features.battles {
+            return;
+        }
+        let species = match self.ensure_game_data() {
+            Ok(data) => data
+                .species()
+                .records()
+                .iter()
+                .map(|s| s.id.clone())
+                .collect(),
+            Err(err) => {
+                tracing::error!(target: "script", "game.party is unavailable: {err}");
+                return;
+            }
+        };
+        if let Err(err) = self.ensure_session_party() {
+            tracing::error!(target: "script", "game.party is unavailable: {err}");
+        }
+        if let Some(scripts) = self.scripts.as_ref() {
+            scripts.world().get_mut().species = Some(species);
+        }
+        self.sync_script_party();
+    }
+
+    /// Adds the creatures `game.give_creature` asked for to the session party (§7.3), then
+    /// refreshes the party scripts see. While a battle, its aftermath or the field menu owns
+    /// the party, given creatures wait until it is done.
+    fn sync_script_party(&mut self) {
+        let Some(scripts) = self.scripts.as_ref() else {
+            return;
+        };
+        let party_busy =
+            self.battle.is_some() || self.post_battle.is_some() || self.field_menu.is_some();
+        let given = if party_busy {
+            Vec::new()
+        } else {
+            std::mem::take(&mut scripts.world().get_mut().given_creatures)
+        };
+        if !given.is_empty() {
+            if let Err(err) = self.ensure_session_party() {
+                tracing::error!(target: "script", "game.give_creature: {err}");
+            }
+            for creature in given {
+                let member = self
+                    .battle_content
+                    .as_ref()
+                    .and_then(|c| c.new_member(&creature.species, creature.level));
+                let added = match (member, self.party.as_mut()) {
+                    (Some(member), Some(party)) => party.push(member),
+                    _ => false,
+                };
+                if !added {
+                    tracing::error!(target: "script", species = %creature.species, "game.give_creature: the creature could not join the party");
+                }
+            }
+        }
+        let view = self
+            .party()
+            .map(|p| {
+                p.members()
+                    .iter()
+                    .map(|m| PartyCreature {
+                        species: m.species.clone(),
+                        level: m.level,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if let Some(scripts) = self.scripts.as_ref() {
+            scripts.world().get_mut().party = view;
+        }
     }
 
     /// Starts the battle a script task asked for (`battle.start_wild` / `start_trainer`),
@@ -1478,7 +1557,8 @@ impl ProjectHost {
     /// Rolls for a wild encounter after the player completed a step onto `pos` (§6.3) and
     /// starts the wild battle on a hit, through the same path as `battle.start_wild`.
     /// Returns `true` when a battle started. Needs scripting (the battle UI and hooks live in
-    /// the script host); no roll while a script holds the player or a dialogue is open.
+    /// the script host); no roll while a script holds the player or a dialogue is open, nor
+    /// while the party is empty (before a starter was given).
     fn roll_wild_encounter(&mut self, pos: GridPos) -> bool {
         let Some(scripts) = self.scripts.as_ref() else {
             return false;
@@ -1487,6 +1567,7 @@ impl ProjectHost {
             || self.overlay.is_some()
             || self.field_menu.is_some()
             || scripts.player_locked()
+            || self.party.as_ref().is_some_and(|p| p.members().is_empty())
         {
             return false;
         }

@@ -1,0 +1,7 @@
+// The rival after picking leafkit in the lab (scripts/maps/lab.lua); fought on the route.
+Trainer(
+    id: "rival_leafkit",
+    name: "Rival",
+    party: [(species: "leafkit", level: 5)],
+    ai_profile: "basic",
+)

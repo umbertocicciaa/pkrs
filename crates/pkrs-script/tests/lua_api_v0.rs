@@ -12,9 +12,10 @@ use pkrs_core::{Direction, GridPos, Pcg64Rng};
 use pkrs_data::{TextArgs, format_text};
 use pkrs_render::UniformValue;
 use pkrs_script::{
-    ApiError, ApiResult, CameraCommand, CameraTarget, LuaScriptHost, MemoryScripts, Scheduler,
-    ScriptEvent, ScriptHost, ScriptLimits, ScriptOwner, ScriptValue, ScriptWorld, TaskKind,
-    TaskOutcome, TaskStatus, TileInfo, WaitCondition, WaitRequest, WakeSignal,
+    ApiError, ApiResult, CameraCommand, CameraTarget, LuaScriptHost, MAX_PARTY, MemoryScripts,
+    PartyCreature, Scheduler, ScriptEvent, ScriptHost, ScriptLimits, ScriptOwner, ScriptValue,
+    ScriptWorld, TaskKind, TaskOutcome, TaskStatus, TileInfo, WaitCondition, WaitRequest,
+    WakeSignal,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -27,6 +28,7 @@ struct State {
     vars: BTreeMap<String, ScriptValue>,
     map_vars: BTreeMap<String, ScriptValue>,
     bag: BTreeMap<String, u32>,
+    party: Vec<PartyCreature>,
     npcs: BTreeMap<String, (GridPos, Direction)>,
     player: (GridPos, Direction),
     locked: bool,
@@ -46,6 +48,7 @@ impl Fake {
             vars: BTreeMap::new(),
             map_vars: BTreeMap::new(),
             bag: BTreeMap::new(),
+            party: Vec::new(),
             npcs: BTreeMap::from([("keeper".to_owned(), (GridPos::new(5, 3), Direction::Down))]),
             player: (GridPos::new(5, 6), Direction::Up),
             locked: false,
@@ -110,6 +113,23 @@ impl ScriptWorld for Fake {
     }
     fn money(&self) -> i64 {
         1500
+    }
+    fn give_creature(&mut self, species: &str, level: u8) -> ApiResult<()> {
+        if species == "missingno" {
+            return Err(ApiError::new("unknown species `missingno`"));
+        }
+        let mut state = self.0.borrow_mut();
+        if state.party.len() >= MAX_PARTY {
+            return Err(ApiError::new("the party is full"));
+        }
+        state.party.push(PartyCreature {
+            species: species.into(),
+            level,
+        });
+        Ok(())
+    }
+    fn party(&self) -> Vec<PartyCreature> {
+        self.0.borrow().party.clone()
     }
     fn current_map(&self) -> Option<String> {
         Some("lighthouse_1f".into())
@@ -393,6 +413,40 @@ fn game_items_and_money() {
     assert_eq!(
         err(&mut h, "game.give_item('missingno')"),
         "scripts/test.lua:1: game.give_item: unknown item `missingno`"
+    );
+}
+
+#[test]
+fn game_party_gives_and_lists_creatures() {
+    let fake = Fake::new();
+    let mut h = host(&fake);
+    assert_eq!(eval(&mut h, "return #game.party()"), ScriptValue::Int(0));
+    eval(
+        &mut h,
+        "game.give_creature('leafkit'); game.give_creature('emberkit', 12)",
+    );
+    assert_eq!(
+        eval(
+            &mut h,
+            "local p = game.party(); return p[1].species .. p[1].level .. p[2].species .. p[2].level"
+        ),
+        s("leafkit5emberkit12")
+    );
+    assert_eq!(
+        err(&mut h, "game.give_creature('leafkit', 101)"),
+        "scripts/test.lua:1: game.give_creature: level must be between 1 and 100 (got 101)"
+    );
+    assert_eq!(
+        err(&mut h, "game.give_creature('missingno')"),
+        "scripts/test.lua:1: game.give_creature: unknown species `missingno`"
+    );
+    eval(
+        &mut h,
+        "for _ = 1, 4 do game.give_creature('puddlefin', 3) end",
+    );
+    assert_eq!(
+        err(&mut h, "game.give_creature('leafkit')"),
+        "scripts/test.lua:1: game.give_creature: the party is full"
     );
 }
 

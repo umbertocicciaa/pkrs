@@ -30,7 +30,7 @@ use pkrs_data::{
 use pkrs_script::BattleRequest;
 
 /// Trainer id whose party the player fields (`data/trainers/player.ron`).
-pub const PLAYER_TRAINER: &str = "player";
+pub const PLAYER_TRAINER: &str = pkrs_data::PLAYER_TRAINER_ID;
 
 /// PP of a move slot whose move data has no `pp` field.
 pub const DEFAULT_PP: u8 = 20;
@@ -308,6 +308,15 @@ impl BattleContent {
     #[must_use]
     pub fn check_species(&self) -> Vec<DataError> {
         pkrs_data::check_species_refs(&self.pack.species, &self.pack.moves)
+    }
+
+    /// A new party member of `species` at `level` with its default moves (its learnset up to
+    /// `level`), as `game.give_creature` adds it; `None` for an unknown species.
+    #[must_use]
+    pub fn new_member(&self, species: &str, level: u8) -> Option<crate::party::PartyMember> {
+        let def = self.pack.species.get(species)?;
+        let moves = self.default_moves(def, level);
+        Some(crate::party::PartyMember::new(def, level, moves))
     }
 
     /// Moves of a creature without explicit moves: its learnset up to `level`, else the

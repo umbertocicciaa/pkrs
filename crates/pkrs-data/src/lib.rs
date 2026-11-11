@@ -60,8 +60,8 @@ pub use species::{
 };
 pub use text::{TEXT_PREFIX, TextArgs, TextDb, TextLookup, format_text, is_text_key, text_key};
 pub use trainer::{
-    AiProfile, AiTier, AiVisibility, AiWeights, BUILTIN_PROFILES, TrainerDef, TrainerMember,
-    check_ai_profiles, resolve_ai_profile,
+    AiProfile, AiTier, AiVisibility, AiWeights, BUILTIN_PROFILES, PLAYER_TRAINER_ID, TrainerDef,
+    TrainerMember, check_ai_profiles, resolve_ai_profile,
 };
 pub use type_chart::TypeChart;
 

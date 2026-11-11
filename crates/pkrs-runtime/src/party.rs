@@ -196,6 +196,16 @@ impl PlayerParty {
         self.members.get_mut(index)
     }
 
+    /// Adds `member` at the end; `false` (and nothing added) when the party already holds
+    /// [`MAX_PARTY`](pkrs_script::MAX_PARTY) creatures.
+    pub fn push(&mut self, member: PartyMember) -> bool {
+        if self.members.len() >= pkrs_script::MAX_PARTY {
+            return false;
+        }
+        self.members.push(member);
+        true
+    }
+
     /// Swaps members at `a` and `b` when both indices are valid and distinct.
     pub fn swap_members(&mut self, a: usize, b: usize) -> bool {
         if a == b {

@@ -1,0 +1,17 @@
+// A starter (docs/design.md §8.1). `name` is a text key (data/text/en/content.ron).
+Species(
+    id: "puddlefin",
+    name: "text:species.puddlefin",
+    types: ["water"],
+    base_stats: (hp: 52, atk: 44, def: 58, spa: 50, spd: 56, spe: 38),
+    abilities: [],
+    learnset: [
+        (level: 1, move: "tackle"),
+        (level: 1, move: "glare"),
+        (level: 5, move: "water_gun"),
+        (level: 9, move: "brace"),
+    ],
+    exp_yield: 64,
+    growth: MediumFast,
+    catch_rate: 45,
+)

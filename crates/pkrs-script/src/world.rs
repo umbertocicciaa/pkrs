@@ -97,6 +97,18 @@ pub enum CameraCommand {
     },
 }
 
+/// One member of the player's party as scripts see it (`game.party()`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PartyCreature {
+    /// Species id.
+    pub species: String,
+    /// Level (`1..=100`).
+    pub level: u8,
+}
+
+/// Most creatures a party holds (§7.3).
+pub const MAX_PARTY: usize = 6;
+
 /// The engine services reachable from the Lua API v0 (`game`, `map`, `npc`, `player`, `ui`,
 /// `camera`), installed with [`LuaScriptHost::set_world`](crate::LuaScriptHost::set_world).
 ///
@@ -120,6 +132,16 @@ pub trait ScriptWorld {
     fn bag(&self) -> Vec<(String, u32)>;
     /// `game.money()`.
     fn money(&self) -> i64;
+    /// `game.give_creature(species, level)`: adds a creature to the end of the player's party
+    /// (`level` is `1..=100`). Fails for an unknown species or a full party ([`MAX_PARTY`]).
+    fn give_creature(&mut self, species: &str, level: u8) -> ApiResult<()> {
+        let _ = (species, level);
+        Err(ApiError::new("this game world has no party"))
+    }
+    /// `game.party()`: the player's party in order, creatures given this tick included.
+    fn party(&self) -> Vec<PartyCreature> {
+        Vec::new()
+    }
 
     // --- map (§9.1, §6.4, §6.5) ---
 

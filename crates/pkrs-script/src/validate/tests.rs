@@ -166,6 +166,43 @@ fn lua_text_literals_must_be_defined() {
 }
 
 #[test]
+fn lua_text_literals_may_come_from_enabled_plugins() {
+    let plugin = "[plugin]\nid = \"p\"\nname = \"p\"\nversion = \"1.0.0\"\napi = 1\n";
+    let files = MemoryScripts::new()
+        .with(
+            "pkrs.toml",
+            format!("{MANIFEST}[plugins]\nenabled = [\"p\"]\n"),
+        )
+        .with("plugins/p/plugin.toml", plugin)
+        .with("plugins/p/data/text/en/p.ron", "{ \"p.hello\": \"Hi\" }")
+        .with(
+            "plugins/p/init.lua",
+            "log.info(\"text:p.hello\")\nlog.info(\"text:p.missing\")\n",
+        )
+        .with("plugins/q/plugin.toml", plugin.replace("\"p\"", "\"q\""))
+        .with("plugins/q/data/text/en/q.ron", "{ \"q.only\": \"Q\" }")
+        .with(
+            "scripts/main.lua",
+            "ui.say(\"text:p.hello\")\nui.say(\"text:q.only\")\n",
+        );
+    let v = run(&files, vec![]);
+    let unknown: Vec<_> = v
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "script::unknown-text-key")
+        .map(|d| d.message.clone())
+        .collect();
+    assert_eq!(
+        unknown,
+        [
+            "text key `p.missing` is not defined for the default language `en`",
+            "text key `q.only` is not defined for the default language `en`",
+        ],
+        "only enabled plugins' tables count"
+    );
+}
+
+#[test]
 fn map_cross_references() {
     let files = MemoryScripts::new()
         .with("pkrs.toml", MANIFEST)

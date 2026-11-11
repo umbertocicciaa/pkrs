@@ -1,0 +1,7 @@
+// The rival after picking emberkit in the lab (scripts/maps/lab.lua); fought on the route.
+Trainer(
+    id: "rival_emberkit",
+    name: "Rival",
+    party: [(species: "emberkit", level: 5)],
+    ai_profile: "basic",
+)

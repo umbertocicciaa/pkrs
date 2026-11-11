@@ -1,0 +1,12 @@
+// The eight moves of the game. `effects` are built-in primitives (docs/design.md §7.3):
+// damage, stat stages, drain, …; a file holds one record or a list.
+[
+    (id: "tackle", type: "normal", category: physical, power: 35, accuracy: 100, priority: 0, effects: [(effect: "damage")]),
+    (id: "quick_strike", type: "normal", category: physical, power: 30, accuracy: 100, priority: 1, effects: [(effect: "damage")]),
+    (id: "glare", type: "normal", category: status, power: 0, accuracy: 100, priority: 0, effects: [(effect: "stat_stage", stat: "attack", stages: -1, target: "target")]),
+    (id: "brace", type: "normal", category: status, power: 0, accuracy: 100, priority: 0, effects: [(effect: "stat_stage", stat: "defense", stages: 1)]),
+    (id: "ember", type: "fire", category: special, power: 40, accuracy: 100, priority: 0, effects: [(effect: "damage")]),
+    (id: "vine_whip", type: "grass", category: physical, power: 45, accuracy: 100, priority: 0, effects: [(effect: "damage")]),
+    (id: "water_gun", type: "water", category: special, power: 40, accuracy: 100, priority: 0, effects: [(effect: "damage")]),
+    (id: "sap", type: "grass", category: special, power: 25, accuracy: 100, priority: 0, effects: [(effect: "damage"), (effect: "drain", percent: 50)]),
+]

@@ -12,7 +12,7 @@
 //! written back by [`WorldModel::sync_map_state`], which runs when the player leaves the map.
 
 use std::cell::{Ref, RefCell, RefMut};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::rc::Rc;
 
 use pkrs_audio::AudioRequest;
@@ -21,7 +21,10 @@ use pkrs_core::{Direction, GridPos};
 use pkrs_data::{Localizer, TextArgs};
 use pkrs_render::UniformValue;
 use pkrs_save::WorldState;
-use pkrs_script::{ApiError, ApiResult, CameraCommand, ScriptValue, ScriptWorld, TileInfo};
+use pkrs_script::{
+    ApiError, ApiResult, CameraCommand, MAX_PARTY, PartyCreature, ScriptValue, ScriptWorld,
+    TileInfo,
+};
 use pkrs_world::{
     FieldState, GridStepper, LogicalGrid, Map, MapObject, MovementConfig, ObjectKind, PathProgress,
     ScriptedPath, TerrainRules, TileRect,
@@ -188,6 +191,12 @@ pub struct WorldModel {
     /// Active language and text tables (§5.5): dialogue, choices and notifications are
     /// localized with it when they are queued.
     pub localizer: Localizer,
+    /// The player's party as `game.party()` reports it, refreshed by the host every tick.
+    pub party: Vec<PartyCreature>,
+    /// `game.give_creature` requests the host has not added to the party yet.
+    pub given_creatures: Vec<PartyCreature>,
+    /// Species `game.give_creature` accepts (`None` while the game has no species data).
+    pub species: Option<BTreeSet<String>>,
 }
 
 impl Default for WorldModel {
@@ -211,6 +220,9 @@ impl Default for WorldModel {
             global_uniforms: Vec::new(),
             audio: Vec::new(),
             localizer: crate::locale::engine_localizer(),
+            party: Vec::new(),
+            given_creatures: Vec::new(),
+            species: None,
         }
     }
 }
@@ -573,6 +585,37 @@ impl ScriptWorld for SharedWorld {
         self.get().state.money
     }
 
+    fn give_creature(&mut self, species: &str, level: u8) -> ApiResult<()> {
+        let mut w = self.get_mut();
+        match &w.species {
+            None => {
+                return Err(ApiError::new(
+                    "this game has no species data (is `features.battles` off?)",
+                ));
+            }
+            Some(known) if !known.contains(species) => {
+                return Err(ApiError::new(format!("unknown species `{species}`")));
+            }
+            Some(_) => {}
+        }
+        if w.party.len() + w.given_creatures.len() >= MAX_PARTY {
+            return Err(ApiError::new(format!(
+                "the party is full ({MAX_PARTY} creatures)"
+            )));
+        }
+        w.given_creatures.push(PartyCreature {
+            species: species.to_owned(),
+            level,
+        });
+        tracing::info!(target: "script", species, level, "give_creature");
+        Ok(())
+    }
+
+    fn party(&self) -> Vec<PartyCreature> {
+        let w = self.get();
+        w.party.iter().chain(&w.given_creatures).cloned().collect()
+    }
+
     fn current_map(&self) -> Option<String> {
         self.get().map_id.clone()
     }
@@ -921,6 +964,39 @@ mod tests {
             "prompts take arguments, engine keys are localized"
         );
         assert_eq!(w.warp_request.as_ref().unwrap().map, "house");
+    }
+
+    #[test]
+    fn given_creatures_are_queued_and_checked() {
+        let mut world = SharedWorld::new();
+        assert_eq!(
+            world.give_creature("leafkit", 5).unwrap_err().message(),
+            "this game has no species data (is `features.battles` off?)"
+        );
+        {
+            let mut w = world.get_mut();
+            w.species = Some(["leafkit".to_owned(), "emberkit".to_owned()].into());
+            w.party = vec![PartyCreature {
+                species: "emberkit".into(),
+                level: 7,
+            }];
+        }
+        assert_eq!(
+            world.give_creature("ghost", 5).unwrap_err().message(),
+            "unknown species `ghost`"
+        );
+        world.give_creature("leafkit", 5).unwrap();
+        let party = world.party();
+        assert_eq!(party.len(), 2, "given creatures show up right away");
+        assert_eq!((party[1].species.as_str(), party[1].level), ("leafkit", 5));
+        for _ in 0..4 {
+            world.give_creature("leafkit", 2).unwrap();
+        }
+        assert_eq!(
+            world.give_creature("leafkit", 2).unwrap_err().message(),
+            "the party is full (6 creatures)"
+        );
+        assert_eq!(world.get().given_creatures.len(), 5);
     }
 
     #[test]

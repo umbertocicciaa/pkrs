@@ -332,6 +332,13 @@ fn engine_events_triggers_and_map_script_unload() {
     let scripts = host.scripts_mut().unwrap();
     assert_eq!(scripts.map_owner(), Some(&ScriptOwner::Map("start".into())));
     assert!(!scripts.host_mut().has_function(&map, "old_keeper"));
-    assert!(scripts.world().get().npcs.is_empty());
+    let npcs: Vec<String> = scripts
+        .world()
+        .get()
+        .npcs
+        .iter()
+        .map(|n| n.id.clone())
+        .collect();
+    assert_eq!(npcs, ["guide"], "only the start map's own NPCs remain");
     std::fs::remove_dir_all(&dir).unwrap();
 }

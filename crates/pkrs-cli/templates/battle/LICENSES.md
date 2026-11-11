@@ -4,12 +4,11 @@ Every asset in this template was created for pkrs and is dedicated to the public
 [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/). You may use, modify and
 redistribute them without attribution.
 
-| File | Author | License |
-|---|---|---|
-| `tilesets/overworld.png` | pkrs contributors | CC0-1.0 |
-| `tilesets/overworld.tsx` | pkrs contributors | CC0-1.0 |
-| `sprites/player.png` | pkrs contributors | CC0-1.0 |
-| `sprites/rival.png` | pkrs contributors | CC0-1.0 |
-| `maps/arena.tmx` | pkrs contributors | CC0-1.0 |
+Each asset folder lists its files and their licenses:
 
-When you add third-party assets, list them here with their author and license.
+- [`sprites/LICENSES.md`](sprites/LICENSES.md)
+- [`tilesets/LICENSES.md`](tilesets/LICENSES.md)
+- [`maps/LICENSES.md`](maps/LICENSES.md)
+
+When you add third-party assets, list them in their folder's `LICENSES.md` with their author
+and license.

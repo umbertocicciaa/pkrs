@@ -85,7 +85,8 @@ pub use scheduler::{
     PendingUiPush, Scheduler, StepReport, TaskKind, TaskOutcome, WaitCondition, WakeSignal,
 };
 pub use world::{
-    ApiError, ApiResult, CameraCommand, CameraTarget, ScriptWorld, TileInfo, direction_toward,
+    ApiError, ApiResult, CameraCommand, CameraTarget, MAX_PARTY, PartyCreature, ScriptWorld,
+    TileInfo, direction_toward,
 };
 
 #[cfg(test)]

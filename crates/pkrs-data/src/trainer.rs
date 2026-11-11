@@ -22,6 +22,11 @@ use serde::Deserialize;
 
 use crate::error::{DataError, Result};
 
+/// Id of the player's own trainer file (`data/trainers/player.ron`): its party is the
+/// player's starting party, and it is the only trainer whose party may be empty (a game that
+/// hands out a starter with `game.give_creature` starts with no creatures).
+pub const PLAYER_TRAINER_ID: &str = "player";
+
 /// Built-in AI tier (implemented in Rust for speed and determinism).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Deserialize)]
 pub enum AiTier {
@@ -206,7 +211,8 @@ impl TrainerDef {
         Ok(trainer)
     }
 
-    /// Schema checks: 1–6 members, levels 1–100, at most 4 moves each.
+    /// Schema checks: 1–6 members (0–6 for [`PLAYER_TRAINER_ID`]), levels 1–100, at most 4
+    /// moves each.
     pub fn validate(&self, file: &str) -> Result<()> {
         let bad = |message: String| {
             Err(DataError::Parse {
@@ -214,9 +220,11 @@ impl TrainerDef {
                 message,
             })
         };
-        if !(1..=6).contains(&self.party.len()) {
+        let is_player = self.id == PLAYER_TRAINER_ID;
+        let min = usize::from(!is_player);
+        if !(min..=6).contains(&self.party.len()) {
             return bad(format!(
-                "party must have 1–6 members (got {})",
+                "party must have {min}–6 members (got {})",
                 self.party.len()
             ));
         }
@@ -235,7 +243,8 @@ impl TrainerDef {
             if !(1..=6).contains(&n) {
                 return bad(format!("active_slots must be 1..=6 (got {n})"));
             }
-            if usize::from(n) > self.party.len() {
+            // The player's party grows during play (`game.give_creature`).
+            if !is_player && usize::from(n) > self.party.len() {
                 return bad(format!(
                     "active_slots ({n}) cannot exceed party size ({})",
                     self.party.len()
@@ -366,6 +375,12 @@ Trainer(
             )
             .is_err()
         );
+        let player = TrainerDef::parse_ron(
+            r#"Trainer(id: "player", party: [], ai_profile: "basic")"#,
+            "player.ron",
+        )
+        .expect("the player may start without creatures");
+        assert!(player.party.is_empty());
         assert!(
             TrainerDef::parse_ron(
                 r#"Trainer(id: "t", party: [(species: "a", level: 0)], ai_profile: "basic")"#,

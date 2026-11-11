@@ -49,8 +49,14 @@ mlua = { version = "0.11.6", features = ["lua54", "vendored"] }
 # `zstd` (default) compiles C code; v1 maps use CSV/base64(+zlib/gzip) layer data only.
 tiled = { version = "0.16", default-features = false }
 notify = "6.1"
+# `.pak` archives (PakVfs, §13): store/deflate only, pure Rust (zlib-rs), no C toolchain.
+zip = { version = "7", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 # OGG/Vorbis + WAV (PCM) through symphonia, output through cpal (no realtime/D-Bus extras).
 kira = { version = "0.12", default-features = false, features = ["cpal", "ogg", "vorbis", "wav", "pcm"] }
+
+# Release atlas packing (`pkrs pack`, §5.2): pkrs-cli's TexturePackerAdapter only.
+texture_packer = { version = "0.30", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 # Binaries only (not wrapped, §4.5): CLI parsing and embedded templates.
 clap = { version = "4", features = ["derive"] }

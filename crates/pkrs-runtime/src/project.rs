@@ -1,14 +1,15 @@
-//! Running a game project from loose files (`--project <dir>`, used by `pkrs run`, §2.3, §14.1).
+//! Running a game project from loose files (`--project <dir>`, used by `pkrs run`, §2.3) or
+//! from a `game.pak` release archive (`--pak <file>`, §13, §14.1).
 //!
-//! Loads `pkrs.toml`, mounts the project folder through the assets VFS, imports the start map
-//! with the Tiled adapter and draws it with the player at the start position. Dev saves go to
-//! `<project>/saves/` (§12).
+//! Loads `pkrs.toml`, mounts the project folder or archive through the assets VFS, imports
+//! the start map with the Tiled adapter and draws it with the player at the start position.
+//! Dev saves go to `<project>/saves/` (§12).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use pkrs_assets::watcher::{FileWatcher, ReloadAction};
-use pkrs_assets::{FolderVfs, Vfs, VfsPath};
+use pkrs_assets::{FolderVfs, PakVfs, Vfs, VfsPath};
 use pkrs_audio::VolumeGroup;
 use pkrs_battle::{BattleResult, NullBattleHooks, RngPolicy};
 use pkrs_core::{Direction, GridPos, Pcg64Rng, ProjectManifest, Version};
@@ -45,9 +46,11 @@ mod audio;
 mod field_menu;
 mod save;
 mod session;
+mod source;
 
 pub use save::{GameSaveError, game_migration, save_store};
 pub use session::ProjectSessionHost;
+pub use source::{ProjectVfs, load_image};
 
 /// Scripting API levels this runtime supports (§9.7).
 pub const SUPPORTED_API: std::ops::RangeInclusive<u32> = 1..=1;
@@ -67,6 +70,17 @@ pub enum ProjectError {
     /// The project folder could not be mounted, or a file could not be read.
     #[error(transparent)]
     Assets(#[from] pkrs_assets::AssetsError),
+    /// The `.pak` archive is invalid or was packed for another engine.
+    #[error(transparent)]
+    Pak(#[from] pkrs_assets::PakError),
+    /// The archive's index and its `pkrs.toml` name different games.
+    #[error("the archive index is for game `{index}` but its pkrs.toml is for `{manifest}`")]
+    PakGameMismatch {
+        /// `game_id` in `pak.ron`.
+        index: String,
+        /// `game.id` in the packed `pkrs.toml`.
+        manifest: String,
+    },
     /// The start map failed to load.
     #[error(transparent)]
     Map(#[from] pkrs_world::MapError),
@@ -108,8 +122,11 @@ pub enum ProjectBoot {
 /// Overrides from `pkrs run --map <id> --warp x,y`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ProjectOptions {
-    /// Project folder (contains `pkrs.toml`).
+    /// Project folder (contains `pkrs.toml`). With [`pak`](Self::pak), the folder that holds
+    /// dev saves (`saves/`) and scenario files instead.
     pub dir: PathBuf,
+    /// Run from this `.pak` archive instead of the folder's loose files.
+    pub pak: Option<PathBuf>,
     /// Start on this map instead of `start.map`.
     pub map: Option<String>,
     /// Start on this tile instead of `start.position` (or the map's `default` spawn).
@@ -156,8 +173,8 @@ impl UserPaths for DevPaths {
 pub struct Project {
     /// The manifest.
     pub manifest: ProjectManifest,
-    /// The project folder, mounted read-only.
-    pub vfs: FolderVfs,
+    /// The project folder or `.pak` archive, mounted read-only.
+    pub vfs: ProjectVfs,
     /// Start map id.
     pub map_id: String,
     /// Explicit start tile (`None`: decided once the map is loaded).
@@ -167,12 +184,31 @@ pub struct Project {
 }
 
 impl Project {
-    /// Loads and validates `<dir>/pkrs.toml` against this runtime and mounts the folder.
+    /// Loads and validates `<dir>/pkrs.toml` against this runtime and mounts the folder, or,
+    /// with [`ProjectOptions::pak`], opens the archive: its index is checked (content hash,
+    /// file table, engine version and API level) before the packed `pkrs.toml` is read.
     pub fn open(options: &ProjectOptions) -> Result<Self, ProjectError> {
-        let manifest = ProjectManifest::load(&options.dir)?;
         let engine = Version::parse(env!("CARGO_PKG_VERSION"))?;
+        let (manifest, vfs) = match &options.pak {
+            None => (
+                ProjectManifest::load(&options.dir)?,
+                ProjectVfs::Folder(FolderVfs::new(&options.dir)?),
+            ),
+            Some(path) => {
+                let pak = PakVfs::open(path)?;
+                pak.index().check_runtime(&engine, SUPPORTED_API)?;
+                let bytes = pak.read(&VfsPath::new(ProjectManifest::FILE_NAME)?)?;
+                let manifest = ProjectManifest::from_toml_str(&String::from_utf8_lossy(&bytes))?;
+                if manifest.game.id != pak.index().game_id {
+                    return Err(ProjectError::PakGameMismatch {
+                        index: pak.index().game_id.clone(),
+                        manifest: manifest.game.id,
+                    });
+                }
+                (manifest, ProjectVfs::Pak(pak))
+            }
+        };
         manifest.check_engine(&engine, SUPPORTED_API)?;
-        let vfs = FolderVfs::new(&options.dir)?;
         Ok(Self {
             map_id: options
                 .map
@@ -1768,8 +1804,8 @@ fn upload_map_textures(
             .image
             .as_ref()
             .ok_or_else(|| ProjectError::TilesetImage(ts.name.clone()))?;
-        let bytes = project.vfs.read(&VfsPath::new(&image.path)?)?;
-        textures.push(renderer.load_texture(&bytes)?.0);
+        let path = VfsPath::new(&image.path)?;
+        textures.push(load_image(&project.vfs, renderer, &path)?.0);
     }
     Ok(textures)
 }
@@ -1797,11 +1833,10 @@ fn load_sprite(
     th: u32,
 ) -> Result<Option<(TextureHandle, Rect)>, ProjectError> {
     let path = VfsPath::new(path)?;
-    if !project.vfs.exists(&path) {
+    if !project.vfs.image_exists(&path) {
         return Ok(None);
     }
-    let bytes = project.vfs.read(&path)?;
-    let (tex, w, h) = renderer.load_texture(&bytes)?;
+    let (tex, w, h) = load_image(&project.vfs, renderer, &path)?;
     let fw = w.min(tw.max(1));
     Ok(Some((
         tex,

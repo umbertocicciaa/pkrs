@@ -49,6 +49,7 @@ fn project_dir(tag: &str) -> PathBuf {
 fn session(dir: &Path, skip_title: bool, warp: Option<GridPos>) -> ProjectSessionHost {
     let project = Project::open(&ProjectOptions {
         dir: dir.to_path_buf(),
+        pak: None,
         map: Some("harbor".into()),
         warp,
     })
@@ -108,6 +109,7 @@ fn save_slot_one_then_continue_from_title() {
     assert!(dir.join("saves").join("slot1.sav").is_file());
     let project = Project::open(&ProjectOptions {
         dir: dir.clone(),
+        pak: None,
         map: Some("harbor".into()),
         warp: None,
     })

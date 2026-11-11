@@ -6,10 +6,12 @@
 
 mod folder;
 mod memory;
+mod pak;
 mod sub;
 
 pub use folder::FolderVfs;
 pub use memory::MemoryVfs;
+pub use pak::{PakBuilder, PakVfs};
 pub use sub::SubVfs;
 
 use crate::error::Result;

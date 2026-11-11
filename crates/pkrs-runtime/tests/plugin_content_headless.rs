@@ -59,6 +59,7 @@ fn project_dir(tag: &str) -> PathBuf {
 fn open(dir: &Path) -> Project {
     Project::open(&ProjectOptions {
         dir: dir.to_path_buf(),
+        pak: None,
         map: Some("mudflat".into()),
         warp: Some(GridPos::new(1, 1)),
     })

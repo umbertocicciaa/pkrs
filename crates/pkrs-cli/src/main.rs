@@ -2,7 +2,8 @@
 //!
 //! Implemented: `pkrs new` (one-shot and battle templates), `pkrs run`, `pkrs plugin new` and
 //! `pkrs check` (§8.2 validation with source snippets; `--plugins` also prints the resolved
-//! load order and hook table, §9.4). `build` and `upgrade` arrive with their milestones (M7).
+//! load order and hook table, §9.4) and `pkrs pack` (the `game.pak` release archive with
+//! texture atlases, §13). `build` and `upgrade` arrive with their milestones (M7).
 //!
 //! `pkrs check` exit codes: `0` no errors (warnings allowed), `1` errors found (or warnings
 //! with `--deny-warnings`), `2` the check could not run (bad arguments, no project).
@@ -13,7 +14,9 @@ use std::process::ExitCode;
 
 use anyhow::Context as _;
 use clap::{Parser, Subcommand, ValueEnum};
+use pkrs_cli::backend::TexturePackerAdapter;
 use pkrs_cli::check;
+use pkrs_cli::pack;
 use pkrs_cli::plugin::{self, PluginVars};
 use pkrs_cli::report::{self, ReportStyle};
 use pkrs_cli::run::{self, RUNTIME_ENV, RunRequest};
@@ -93,6 +96,15 @@ enum Command {
         /// Fail (exit code 1) on warnings too.
         #[arg(long)]
         deny_warnings: bool,
+        /// Project folder (default: the nearest folder with a pkrs.toml).
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// Pack the project into a `game.pak` release archive (texture atlases included).
+    Pack {
+        /// Where to write the archive (default: `<project>/dist/game.pak`).
+        #[arg(long)]
+        out: Option<PathBuf>,
         /// Project folder (default: the nearest folder with a pkrs.toml).
         #[arg(long)]
         project: Option<PathBuf>,
@@ -206,6 +218,14 @@ fn execute(cli: Cli) -> anyhow::Result<ExitCode> {
                 Some(hint) => println!("Next: enable it in pkrs.toml:\n{hint}"),
                 None => println!("Next: pkrs check --plugins"),
             }
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Pack { out, project } => {
+            let project = project_root(project)?;
+            let out = out.unwrap_or_else(|| pack::default_out(&project));
+            let report = pack::pack_project(&project, &out, &TexturePackerAdapter)
+                .with_context(|| format!("cannot pack {}", project.display()))?;
+            println!("{report}");
             Ok(ExitCode::SUCCESS)
         }
         Command::Run {

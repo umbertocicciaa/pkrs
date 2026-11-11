@@ -48,7 +48,7 @@ impl<T: 'static> ErasedStore for AssetStore<T> {
 ///
 /// The project is the root mount; plugins are mounted under `plugin_id:` prefixes (§13).
 /// The same calls work whether the mounts are a [`FolderVfs`](crate::FolderVfs),
-/// a [`MemoryVfs`](crate::MemoryVfs) or (later) a `.pak` archive.
+/// a [`MemoryVfs`](crate::MemoryVfs) or a [`PakVfs`](crate::PakVfs) archive.
 pub struct Assets {
     root: Box<dyn Vfs>,
     mounts: BTreeMap<String, Box<dyn Vfs>>,

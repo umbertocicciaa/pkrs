@@ -74,10 +74,15 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
+/// What `opts` runs, for error messages: the archive or the project folder.
+fn project_source(opts: &ProjectOptions) -> std::path::Display<'_> {
+    opts.pak.as_deref().unwrap_or(&opts.dir).display()
+}
+
 /// `--project` with Null adapters (CI, `pkrs run --headless`).
 fn run_project_headless(opts: &ProjectOptions, config: RuntimeLoopConfig) -> anyhow::Result<()> {
     let project = Project::open(opts)
-        .with_context(|| format!("cannot open project `{}`", opts.dir.display()))?;
+        .with_context(|| format!("cannot open project `{}`", project_source(opts)))?;
     startup_check(&project)?;
     let (scripts, plugins) =
         start_project_scripts(&project, script_rng()).context("cannot load plugins")?;
@@ -104,7 +109,7 @@ fn run_script(
     ticks: Option<u64>,
 ) -> anyhow::Result<()> {
     let project = Project::open(opts)
-        .with_context(|| format!("cannot open project `{}`", opts.dir.display()))?;
+        .with_context(|| format!("cannot open project `{}`", project_source(opts)))?;
     let file = resolve_script(&opts.dir, script);
     let options = ScenarioOptions {
         max_ticks: ticks.unwrap_or(DEFAULT_SCENARIO_TICKS),
@@ -121,13 +126,13 @@ fn run_script(
 /// `--project` in a window (`pkrs run`).
 fn run_project_windowed(opts: &ProjectOptions, config: RuntimeLoopConfig) -> anyhow::Result<()> {
     let project = Project::open(opts)
-        .with_context(|| format!("cannot open project `{}`", opts.dir.display()))?;
+        .with_context(|| format!("cannot open project `{}`", project_source(opts)))?;
     startup_check(&project)?;
     let mut display = project.display();
     apply_saved_window_scale(&mut display, project.paths.config_dir());
     let window = window_config(&project.manifest.game.name, &display, config.vsync);
     let skip_title = opts.map.is_some() || opts.warp.is_some();
-    let project_dir = opts.dir.clone();
+    let project_dir = opts.pak.is_none().then(|| opts.dir.clone());
     MacroquadPlatform::run(&window, move |backend| async move {
         let mut platform = Platform::new(
             Box::new(backend),
@@ -159,8 +164,9 @@ fn run_project_windowed(opts: &ProjectOptions, config: RuntimeLoopConfig) -> any
             Box::new(project.vfs.clone()),
         ));
         host.set_gamepad(gamepad_source(GamepadAdapter::Gilrs));
-        let watcher = NotifyWatcher::new(&project_dir)
-            .ok()
+        // A packed game has no loose files to watch.
+        let watcher = project_dir
+            .and_then(|dir| NotifyWatcher::new(&dir).ok())
             .map(|w| Box::new(w) as Box<dyn FileWatcher>);
         host.enable_dev(watcher, plugin_report.loaded);
         let exit = run_loop(&mut platform, &mut host, &config).await;
@@ -244,6 +250,7 @@ struct RuntimeCliOptions {
     ticks: Option<u64>,
     vsync: bool,
     project: Option<PathBuf>,
+    pak: Option<PathBuf>,
     map: Option<String>,
     warp: Option<GridPos>,
     script: Option<PathBuf>,
@@ -266,9 +273,20 @@ fn parse_warp(raw: &str) -> anyhow::Result<GridPos> {
 }
 
 impl RuntimeCliOptions {
+    /// `--project` and/or `--pak`. With only `--pak`, dev saves and scenario files live in
+    /// the archive's folder.
     fn project_options(&self) -> Option<ProjectOptions> {
-        self.project.as_ref().map(|dir| ProjectOptions {
-            dir: dir.clone(),
+        let dir = match (&self.project, &self.pak) {
+            (Some(dir), _) => dir.clone(),
+            (None, Some(pak)) => pak
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .map_or_else(|| PathBuf::from("."), PathBuf::from),
+            (None, None) => return None,
+        };
+        Some(ProjectOptions {
+            dir,
+            pak: self.pak.clone(),
             map: self.map.clone(),
             warp: self.warp,
         })
@@ -285,6 +303,7 @@ impl RuntimeCliOptions {
         let mut ticks = None;
         let mut vsync = true;
         let mut project = None;
+        let mut pak = None;
         let mut map = None;
         let mut warp = None;
         let mut script = None;
@@ -295,6 +314,10 @@ impl RuntimeCliOptions {
                 "--project" => {
                     let dir = args.next().context("--project requires a directory")?;
                     project = Some(PathBuf::from(dir.as_ref()));
+                }
+                "--pak" => {
+                    let file = args.next().context("--pak requires a .pak file")?;
+                    pak = Some(PathBuf::from(file.as_ref()));
                 }
                 "--map" => {
                     let id = args.next().context("--map requires a map id")?;
@@ -329,13 +352,14 @@ impl RuntimeCliOptions {
                 }
             }
         }
+        let has_game = project.is_some() || pak.is_some();
         anyhow::ensure!(
-            project.is_some() || (map.is_none() && warp.is_none()),
-            "--map and --warp need --project <dir>"
+            has_game || (map.is_none() && warp.is_none()),
+            "--map and --warp need --project <dir> or --pak <file>"
         );
         anyhow::ensure!(
-            project.is_some() || script.is_none(),
-            "--script needs --project <dir>"
+            has_game || script.is_none(),
+            "--script needs --project <dir> or --pak <file>"
         );
         // A scenario always runs on the Null adapters.
         let headless = headless || script.is_some();
@@ -344,6 +368,7 @@ impl RuntimeCliOptions {
             ticks,
             vsync,
             project,
+            pak,
             map,
             warp,
             script,
@@ -361,11 +386,13 @@ USAGE:
 
 OPTIONS:
     --project DIR    Run the game project in DIR (loose files, dev saves in DIR/saves)
-    --map ID         Start on map ID instead of [start].map (needs --project)
-    --warp X,Y       Start on tile X,Y (needs --project)
+    --pak FILE       Run the packed game in FILE (a game.pak from `pkrs pack`); dev saves
+                     go to --project DIR if given, else next to FILE
+    --map ID         Start on map ID instead of [start].map (needs --project or --pak)
+    --warp X,Y       Start on tile X,Y (needs --project or --pak)
     --script FILE    Run a scripted-input test scenario (tests/*.lua) headless and exit
-                     non-zero if it fails (needs --project; FILE is looked up in the
-                     project first; --ticks caps the scenario, default 36000)
+                     non-zero if it fails (needs --project or --pak; FILE is looked up in
+                     the project folder first; --ticks caps the scenario, default 36000)
     --headless       Use NullPlatform (no window, for CI)
     --ticks N        Stop after N simulation ticks (60 Hz); default 600 with --headless
     --no-vsync       Debug: request uncapped frame rate (§3.2)
@@ -445,6 +472,37 @@ mod tests {
         assert_eq!(project.dir, PathBuf::from("games/demo"));
         assert_eq!(project.map.as_deref(), Some("house"));
         assert_eq!(project.warp, Some(GridPos::new(3, 4)));
+    }
+
+    #[test]
+    fn cli_parses_pak_with_and_without_a_project_folder() {
+        let opts =
+            RuntimeCliOptions::parse_from(["--pak", "dist/game.pak", "--map", "house"]).unwrap();
+        let project = opts.project_options().expect("project");
+        assert_eq!(project.pak, Some(PathBuf::from("dist/game.pak")));
+        assert_eq!(
+            project.dir,
+            PathBuf::from("dist"),
+            "saves next to the archive"
+        );
+        assert_eq!(project.map.as_deref(), Some("house"));
+
+        let opts = RuntimeCliOptions::parse_from(["--pak", "game.pak"]).unwrap();
+        assert_eq!(opts.project_options().unwrap().dir, PathBuf::from("."));
+
+        let opts = RuntimeCliOptions::parse_from([
+            "--project",
+            "games/demo",
+            "--pak",
+            "game.pak",
+            "--script",
+            "tests/smoke.lua",
+        ])
+        .unwrap();
+        let project = opts.project_options().unwrap();
+        assert_eq!(project.dir, PathBuf::from("games/demo"));
+        assert_eq!(project.pak, Some(PathBuf::from("game.pak")));
+        assert!(RuntimeCliOptions::parse_from(["--pak"]).is_err());
     }
 
     #[test]
